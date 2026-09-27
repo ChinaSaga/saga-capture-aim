@@ -1,0 +1,60 @@
+# ============ 构建产物 ============
+x64/
+[Ss]aga[Aa]pp/x64/
+[Bb]in/
+[Oo]bj/
+build*/
+*.obj
+*.iobj
+*.ipdb
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.tlog
+*.recipe
+*.lastbuildstate
+*.aps
+*.opendb
+*.VC.db
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# ============ IDE / 工具 ============
+.vs/
+.vscode/
+.idea/
+*.swp
+
+# ============ 私有辅助目录（会话记忆 / 备份 / 原版易语言源码）============
+.workbuddy/
+
+# ============ 第三方运行时 DLL（构建时自动复制，不要入库）============
+*.dll
+*.exe
+licenses/DirectML/
+
+# ============ 模型与人手数据（体积大 / 属于个人数据）============
+# 注意：不是 *.bin 全忽略 —— 只忽略人手轨迹 mouse.bin
+mouse.bin
+*.onnx
+*.param
+*.engine
+*.plan
+*.pt
+*.onnx.*_data
+模型*/
+YoloServer/
+
+# ============ 运行期生成的文件 ============
+圣人自用.js
+主机IP.ini
+主机端口.ini
+监控双机.ini
+配置保存.ini
+配置保存/
+SagaApp_startup.log
+*.log
+自动截图/

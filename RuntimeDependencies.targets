@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <!-- Ensure Build runs even when only a deployed DLL was removed. -->
+    <DisableFastUpToDateCheck>true</DisableFastUpToDateCheck>
+    <SagaVCRedistX64 Condition="'$(SagaVCRedistX64)' == ''">C:\Program Files\Microsoft Visual Studio\18\Community\VC\Redist\MSVC\14.51.36231\x64</SagaVCRedistX64>
+  </PropertyGroup>
+  <Target Name="CopySagaRuntimeDependencies" AfterTargets="Build"
+          Condition="'$(Platform)' == 'x64' and '$(DesignTimeBuild)' != 'true'">
+    <ItemGroup>
+      <SagaRuntimeDll Include="D:\NCNN\x64\bin\ncnn.dll" />
+      <SagaRuntimeDll Include="D:\openCV\build\x64\vc16\bin\opencv_world4120.dll" />
+      <SagaRuntimeDll Include="D:\DirectMLx64onnx\ort-dml-x64-1.24.4\lib\onnxruntime.dll" />
+      <SagaRuntimeDll Include="D:\DirectMLx64onnx\ort-dml-x64-1.24.4\lib\onnxruntime_providers_shared.dll" />
+      <SagaRuntimeDll Include="D:\DirectMLx64onnx\directml-1.15.4-x64\DirectML.dll" />
+      <!-- Both application configurations use /MD and release third-party libraries. -->
+      <SagaRuntimeDll Include="$(SagaVCRedistX64)\Microsoft.VC145.CRT\concrt140.dll" />
+      <SagaRuntimeDll Include="$(SagaVCRedistX64)\Microsoft.VC145.CRT\msvcp140.dll" />
+      <SagaRuntimeDll Include="$(SagaVCRedistX64)\Microsoft.VC145.CRT\msvcp140_1.dll" />
+      <SagaRuntimeDll Include="$(SagaVCRedistX64)\Microsoft.VC145.CRT\msvcp140_2.dll" />
+      <SagaRuntimeDll Include="$(SagaVCRedistX64)\Microsoft.VC145.CRT\msvcp140_atomic_wait.dll" />
+      <SagaRuntimeDll Include="$(SagaVCRedistX64)\Microsoft.VC145.CRT\msvcp140_codecvt_ids.dll" />
+      <SagaRuntimeDll Include="$(SagaVCRedistX64)\Microsoft.VC145.CRT\vcruntime140.dll" />
+      <SagaRuntimeDll Include="$(SagaVCRedistX64)\Microsoft.VC145.CRT\vcruntime140_1.dll" />
+      <SagaRuntimeDll Include="$(SagaVCRedistX64)\Microsoft.VC145.OpenMP\vcomp140.dll" />
+      <SagaDirectMLLicense Include="D:\DirectMLx64onnx\directml-1.15.4-x64\LICENSE.txt;D:\DirectMLx64onnx\directml-1.15.4-x64\ThirdPartyNotices.txt" />
+    </ItemGroup>
+    <Error Condition="!Exists('%(SagaRuntimeDll.Identity)')"
+           Text="Required x64 runtime DLL is missing: %(SagaRuntimeDll.Identity)" />
+    <MakeDir Directories="$(TargetDir);$(TargetDir)licenses\DirectML" />
+    <Copy SourceFiles="@(SagaRuntimeDll)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(SagaDirectMLLicense)" DestinationFolder="$(TargetDir)licenses\DirectML" SkipUnchangedFiles="true" />
+    <Message Importance="high" Text="x64 runtime DLLs copied to: $(TargetDir)" />
+  </Target>
+</Project>

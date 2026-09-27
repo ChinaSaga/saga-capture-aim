@@ -1,0 +1,366 @@
+#pragma once
+// ============================================================================
+//  显卡名称简化（面子工程）
+//     NVIDIA GeForce RTX 4090 Laptop GPU   ->  4090 Laptop
+//     Intel(R) Arc(TM) B580 Graphics       ->  B580 Graphics
+//     AMD Radeon RX 6950 XT                ->  6950 XT
+//
+//  三步走：
+//    1) 去掉 (R) / (TM) / (C) 商标标记，再归一化（大写 + 非字母数字当分隔 + 压空格）
+//    2) 用下面的表做「整词最长命中」，命中就用表里的短名
+//       —— key 是归一化后的特征串（全大写、单空格），short 是显示用的短名；
+//          "RTX 4090 LAPTOP" 这类不用单独列，命中 RTX 4090 后会按 LAPTOP 规则补上
+//    3) 表里没有的走通用规则（去厂商前缀、去结尾 GPU / Generation）；
+//       实在简化不出来（或结果不合法）就原样保留全名
+//
+//  要加新卡：在 kTable 里加一行 { "特征串", "短名" } 即可，长的 key 会自动优先。
+// ============================================================================
+#include <algorithm>
+#include <cctype>
+#include <cstring>
+#include <string>
+
+namespace gpuname
+{
+
+struct Entry { const char* key; const char* shortName; };
+
+static const Entry kTable[] = {
+    { "RTX 5050", "5050" },
+    { "RTX 5060", "5060" },
+    { "RTX 5060 TI", "5060 Ti" },
+    { "RTX 5070", "5070" },
+    { "RTX 5070 TI", "5070 Ti" },
+    { "RTX 5080", "5080" },
+    { "RTX 5090", "5090" },
+    { "RTX 5060 SUPER", "5060 Super" },
+    { "RTX 5070 SUPER", "5070 Super" },
+    { "RTX 5070 TI SUPER", "5070 Ti Super" },
+    { "RTX 5080 SUPER", "5080 Super" },
+    { "RTX 5090 D", "5090 D" },
+    { "RTX 5090 D V2", "5090 D v2" },
+    { "RTX 4050", "4050" },
+    { "RTX 4060", "4060" },
+    { "RTX 4060 TI", "4060 Ti" },
+    { "RTX 4070", "4070" },
+    { "RTX 4070 SUPER", "4070 Super" },
+    { "RTX 4070 TI", "4070 Ti" },
+    { "RTX 4070 TI SUPER", "4070 Ti Super" },
+    { "RTX 4080", "4080" },
+    { "RTX 4080 SUPER", "4080 Super" },
+    { "RTX 4090", "4090" },
+    { "RTX 4090 D", "4090 D" },
+    { "RTX 3050", "3050" },
+    { "RTX 3050 TI", "3050 Ti" },
+    { "RTX 3060", "3060" },
+    { "RTX 3060 TI", "3060 Ti" },
+    { "RTX 3070", "3070" },
+    { "RTX 3070 TI", "3070 Ti" },
+    { "RTX 3080", "3080" },
+    { "RTX 3080 TI", "3080 Ti" },
+    { "RTX 3090", "3090" },
+    { "RTX 3090 TI", "3090 Ti" },
+    { "RTX 2060", "2060" },
+    { "RTX 2060 SUPER", "2060 Super" },
+    { "RTX 2070", "2070" },
+    { "RTX 2070 SUPER", "2070 Super" },
+    { "RTX 2080", "2080" },
+    { "RTX 2080 SUPER", "2080 Super" },
+    { "RTX 2080 TI", "2080 Ti" },
+    { "TITAN RTX", "Titan RTX" },
+    { "TITAN V", "Titan V" },
+    { "TITAN XP", "Titan Xp" },
+    { "TITAN X", "Titan X" },
+    { "TITAN", "Titan" },
+    { "GTX 1630", "1630" },
+    { "GTX 1650", "1650" },
+    { "GTX 1650 SUPER", "1650 Super" },
+    { "GTX 1660", "1660" },
+    { "GTX 1660 SUPER", "1660 Super" },
+    { "GTX 1660 TI", "1660 Ti" },
+    { "GTX 1030", "1030" },
+    { "GTX 1050", "1050" },
+    { "GTX 1050 TI", "1050 Ti" },
+    { "GTX 1060", "1060" },
+    { "GTX 1070", "1070" },
+    { "GTX 1070 TI", "1070 Ti" },
+    { "GTX 1080", "1080" },
+    { "GTX 1080 TI", "1080 Ti" },
+    { "GTX 950", "950" },
+    { "GTX 960", "960" },
+    { "GTX 970", "970" },
+    { "GTX 980", "980" },
+    { "GTX 980 TI", "980 Ti" },
+    { "GTX 730", "730" },
+    { "GTX 740", "740" },
+    { "GTX 750", "750" },
+    { "GTX 750 TI", "750 Ti" },
+    { "GTX 760", "760" },
+    { "GTX 770", "770" },
+    { "GTX 780", "780" },
+    { "GTX 780 TI", "780 Ti" },
+    { "GTX 660", "660" },
+    { "GTX 670", "670" },
+    { "GTX 680", "680" },
+    { "GTX 690", "690" },
+    { "MX110", "MX110" },
+    { "MX130", "MX130" },
+    { "MX150", "MX150" },
+    { "MX230", "MX230" },
+    { "MX250", "MX250" },
+    { "MX330", "MX330" },
+    { "MX350", "MX350" },
+    { "MX450", "MX450" },
+    { "MX550", "MX550" },
+    { "MX570", "MX570" },
+    { "RTX A400", "A400" },
+    { "RTX A1000", "A1000" },
+    { "RTX A2000", "A2000" },
+    { "RTX A4000", "A4000" },
+    { "RTX A4500", "A4500" },
+    { "RTX A5000", "A5000" },
+    { "RTX A5500", "A5500" },
+    { "RTX A6000", "A6000" },
+    { "RTX 5000 ADA", "5000 Ada" },
+    { "RTX 6000 ADA", "6000 Ada" },
+    { "RTX PRO 6000", "RTX PRO 6000" },
+    { "RTX PRO 5000", "RTX PRO 5000" },
+    { "RTX PRO 4000", "RTX PRO 4000" },
+    { "QUADRO T400", "T400" },
+    { "QUADRO T600", "T600" },
+    { "QUADRO T1000", "T1000" },
+    { "QUADRO P400", "P400" },
+    { "QUADRO P600", "P600" },
+    { "QUADRO P1000", "P1000" },
+    { "QUADRO P2000", "P2000" },
+    { "QUADRO P2200", "P2200" },
+    { "QUADRO P4000", "P4000" },
+    { "QUADRO P5000", "P5000" },
+    { "QUADRO P6000", "P6000" },
+    { "QUADRO RTX 8000", "RTX 8000" },
+    { "QUADRO RTX 6000", "RTX 6000" },
+    { "QUADRO RTX 5000", "RTX 5000" },
+    { "QUADRO RTX 4000", "RTX 4000" },
+    { "QUADRO RTX 3000", "RTX 3000" },
+    { "RX 9050", "9050" },
+    { "RX 9060", "9060" },
+    { "RX 9060 XT", "9060 XT" },
+    { "RX 9060 XT LP", "9060 XT LP" },
+    { "RX 9070", "9070" },
+    { "RX 9070 GRE", "9070 GRE" },
+    { "RX 9070 XT", "9070 XT" },
+    { "RX 7600", "7600" },
+    { "RX 7600 XT", "7600 XT" },
+    { "RX 7700", "7700" },
+    { "RX 7700 XT", "7700 XT" },
+    { "RX 7800 XT", "7800 XT" },
+    { "RX 7900 GRE", "7900 GRE" },
+    { "RX 7900 XT", "7900 XT" },
+    { "RX 7900 XTX", "7900 XTX" },
+    { "RX 6400", "6400" },
+    { "RX 6500 XT", "6500 XT" },
+    { "RX 6600", "6600" },
+    { "RX 6600 XT", "6600 XT" },
+    { "RX 6650 XT", "6650 XT" },
+    { "RX 6700", "6700" },
+    { "RX 6700 XT", "6700 XT" },
+    { "RX 6750 GRE", "6750 GRE" },
+    { "RX 6750 XT", "6750 XT" },
+    { "RX 6800", "6800" },
+    { "RX 6800 XT", "6800 XT" },
+    { "RX 6900 XT", "6900 XT" },
+    { "RX 6950 XT", "6950 XT" },
+    { "RX 5500 XT", "5500 XT" },
+    { "RX 5600 XT", "5600 XT" },
+    { "RX 5700", "5700" },
+    { "RX 5700 XT", "5700 XT" },
+    { "RX 550", "550" },
+    { "RX 560", "560" },
+    { "RX 570", "570" },
+    { "RX 580", "580" },
+    { "RX 590", "590" },
+    { "RX 460", "460" },
+    { "RX 470", "470" },
+    { "RX 480", "480" },
+    { "RX VEGA 64", "Vega 64" },
+    { "RX VEGA 56", "Vega 56" },
+    { "VEGA 11", "Vega 11" },
+    { "VEGA 10", "Vega 10" },
+    { "VEGA 8", "Vega 8" },
+    { "VEGA 7", "Vega 7" },
+    { "VEGA 6", "Vega 6" },
+    { "VEGA 3", "Vega 3" },
+    { "RADEON VII", "Radeon VII" },
+    { "RADEON PRO W7900", "W7900" },
+    { "RADEON PRO W7800", "W7800" },
+    { "RADEON PRO W7700", "W7700" },
+    { "RADEON PRO W7600", "W7600" },
+    { "RADEON PRO W7500", "W7500" },
+    { "RADEON PRO W6900X", "W6900X" },
+    { "RADEON PRO W6800", "W6800" },
+    { "RADEON PRO W6600", "W6600" },
+    { "RADEON PRO W5700", "W5700" },
+    { "RADEON PRO W5500", "W5500" },
+    { "AI PRO R9700", "R9700" },
+    { "AI PRO R9700S", "R9700S" },
+    { "AI PRO R9600D", "R9600D" },
+    { "RADEON 890M", "Radeon 890M" },
+    { "RADEON 880M", "Radeon 880M" },
+    { "RADEON 860M", "Radeon 860M" },
+    { "RADEON 840M", "Radeon 840M" },
+    { "RADEON 780M", "Radeon 780M" },
+    { "RADEON 760M", "Radeon 760M" },
+    { "RADEON 740M", "Radeon 740M" },
+    { "RADEON 680M", "Radeon 680M" },
+    { "RADEON 660M", "Radeon 660M" },
+    { "RADEON 610M", "Radeon 610M" },
+    { "RADEON GRAPHICS", "Radeon Graphics" },
+    { "ARC B770", "B770 Graphics" },
+    { "ARC B580", "B580 Graphics" },
+    { "ARC B570", "B570 Graphics" },
+    { "ARC B390", "B390 Graphics" },
+    { "ARC B370", "B370 Graphics" },
+    { "ARC A770", "A770 Graphics" },
+    { "ARC A750", "A750 Graphics" },
+    { "ARC A580", "A580 Graphics" },
+    { "ARC A380", "A380 Graphics" },
+    { "ARC A310", "A310 Graphics" },
+    { "ARC A770M", "A770M Graphics" },
+    { "ARC A730M", "A730M Graphics" },
+    { "ARC A570M", "A570M Graphics" },
+    { "ARC A550M", "A550M Graphics" },
+    { "ARC A530M", "A530M Graphics" },
+    { "ARC A370M", "A370M Graphics" },
+    { "ARC A350M", "A350M Graphics" },
+    { "ARC PRO B70", "Pro B70 Graphics" },
+    { "ARC PRO B65", "Pro B65 Graphics" },
+    { "ARC PRO B60", "Pro B60 Graphics" },
+    { "ARC PRO B60 DUAL", "Pro B60 Dual Graphics" },
+    { "ARC PRO B50", "Pro B50 Graphics" },
+    { "ARC PRO A60", "Pro A60 Graphics" },
+    { "ARC PRO A50", "Pro A50 Graphics" },
+    { "ARC PRO A40", "Pro A40 Graphics" },
+    { "ARC GRAPHICS", "Arc Graphics" },
+    { "ARC 140V", "Arc 140V" },
+    { "ARC 130V", "Arc 130V" },
+    { "ARC 100V", "Arc 100V" },
+    { "IRIS XE MAX GRAPHICS", "Iris Xe MAX" },
+    { "IRIS XE GRAPHICS", "Iris Xe" },
+    { "IRIS PLUS GRAPHICS", "Iris Plus" },
+    { "IRIS PRO GRAPHICS", "Iris Pro" },
+    { "INTEL GRAPHICS", "Intel Graphics" },
+};
+
+inline char upperAscii(char c)
+{
+    return (c >= 'a' && c <= 'z') ? (char)(c - 'a' + 'A') : c;
+}
+
+inline bool equalNoCase(const std::string& text, size_t pos, const char* word)
+{
+    const size_t n = std::strlen(word);
+    if (text.size() < pos + n) return false;
+    for (size_t i = 0; i < n; ++i)
+        if (upperAscii(text[pos + i]) != upperAscii(word[i])) return false;
+    return true;
+}
+
+inline bool containsNoCase(const std::string& text, const char* word)
+{
+    for (size_t i = 0; i + std::strlen(word) <= text.size(); ++i)
+        if (equalNoCase(text, i, word)) return true;
+    return false;
+}
+
+// 去掉 (R) (TM) (C) 这类商标标记（括号里的大小写和空格都容忍）
+inline std::string stripTags(const std::string& text)
+{
+    std::string out;
+    for (size_t i = 0; i < text.size(); ++i)
+    {
+        if (text[i] != '(') { out += text[i]; continue; }
+        size_t close = text.find(')', i + 1);
+        if (close == std::string::npos || close - i > 5) { out += text[i]; continue; }
+        std::string inner;
+        for (size_t k = i + 1; k < close; ++k)
+            if (!std::isspace((unsigned char)text[k])) inner += upperAscii(text[k]);
+        if (inner == "R" || inner == "TM" || inner == "C") { i = close; continue; }   // 整个标记丢掉
+        out.append(text, i, close - i + 1);
+        i = close;
+    }
+    return out;
+}
+
+// 归一化：大写 + 非字母数字→单空格 + 压空格，首尾各补一个空格方便「整词」匹配
+inline std::string normalize(const std::string& text)
+{
+    std::string out = " ";
+    for (size_t i = 0; i < text.size(); ++i)
+    {
+        const unsigned char c = (unsigned char)text[i];
+        if (std::isalnum(c)) { out += upperAscii((char)c); continue; }
+        if (out[out.size() - 1] != ' ') out += ' ';
+    }
+    if (out[out.size() - 1] != ' ') out += ' ';
+    return out;
+}
+
+// 去掉首尾空格并把中间多余空格压成一个
+inline std::string squeeze(const std::string& text)
+{
+    std::string out;
+    for (size_t i = 0; i < text.size(); ++i)
+    {
+        const char c = text[i];
+        if (c == ' ' && (out.empty() || out[out.size() - 1] == ' ')) continue;
+        out += c;
+    }
+    while (!out.empty() && out[out.size() - 1] == ' ') out.erase(out.size() - 1);
+    return out;
+}
+
+// 表里没有时：去厂商前缀 + 去结尾 GPU / Generation / with Max-Q Design
+inline std::string genericStrip(const std::string& clean)
+{
+    std::string s = squeeze(clean);
+    // 反复剥前缀："NVIDIA GeForce RTX 7090" 要一路剥到 "RTX 7090"
+    static const char* kPrefix[] = { "NVIDIA ", "AMD ", "INTEL ", "GEFORCE " };
+    for (bool stripped = true; stripped; )
+    {
+        stripped = false;
+        for (const char* p : kPrefix)
+            if (equalNoCase(s, 0, p)) { s = squeeze(s.substr(std::strlen(p))); stripped = true; break; }
+    }
+
+    static const char* kTail[] = { " with Max-Q Design", " Max-Q Design", " Generation", " GPU" };
+    for (const char* t : kTail)
+    {
+        const size_t n = std::strlen(t);
+        if (s.size() >= n && equalNoCase(s, s.size() - n, t)) s = squeeze(s.substr(0, s.size() - n));
+    }
+    return s;
+}
+
+// 入口：返回显示用的短名；简化不出来就原样返回全名
+inline std::string shorten(const std::string& full)
+{
+    const std::string clean = stripTags(full);
+    const std::string norm = normalize(clean);
+
+    const Entry* hit = nullptr;
+    for (const Entry& e : kTable)
+    {
+        const std::string needle = std::string(" ") + e.key + " ";
+        if (norm.find(needle) == std::string::npos) continue;
+        if (!hit || std::strlen(e.key) > std::strlen(hit->key)) hit = &e;   // 长的 key 优先
+    }
+
+    std::string out = hit ? std::string(hit->shortName) : genericStrip(clean);
+    if (out.empty() || !std::isalnum((unsigned char)out[0])) out = full;    // 简化失败：保留全名
+
+    if (containsNoCase(norm, " LAPTOP ") && !containsNoCase(out, "Laptop")) out += " Laptop";
+    if (containsNoCase(norm, " MAX Q ") && !containsNoCase(out, "Max-Q")) out += " Max-Q";
+    return out;
+}
+
+} // namespace gpuname

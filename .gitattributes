@@ -1,0 +1,20 @@
+# 源码统一按 LF 入库、检出时按本机习惯（Windows 下即 CRLF）
+* text=auto
+
+# 必须保持 LF 的脚本
+*.sh text eol=lf
+
+# 二进制
+*.dll binary
+*.exe binary
+*.pdb binary
+*.png binary
+*.jpg binary
+*.ico binary
+*.bin binary
+
+# VS 工程文件容易产生冲突，合并时取并集
+*.sln merge=union
+
+# 中文文件名/路径不要被转义显示
+*.md -text

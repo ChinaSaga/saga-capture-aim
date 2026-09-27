@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ============================================================================
+   SagaApp.vcxproj —— 唯一的工程（64 位 / x64 / Release）
+
+   历史：原来是两个工程
+     · Saga.vcxproj       -> Saga.dll   （采集卡 + NCNN/ONNX + Makcu 串口，源码在 ConsoleApplication2\）
+     · SagaApp.vcxproj    -> SagaApp.exe（易语言主程序的 C++ 翻写版，源码在 SagaApp\）
+   现在：两者合并为一个 Application 工程，源码统一在 src\，
+        产物 SagaApp.exe **运行时不再需要 Saga.dll**。
+        原 Saga.vcxproj 的第三方库路径 / AVX2 / fp:fast 等设置已并入本文件。
+
+   ⚠ 字符集：全工程统一 /source-charset:utf-8 /execution-charset:.936
+     （源码存 UTF-8，中文常量编成 GBK —— 全程序"内部 GBK、对外 UTF-8"的设计靠这个，
+      不要改成 /utf-8）
+   ============================================================================
+-->
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>18.0</VCProjectVersion>
+    <ProjectGuid>{7C1E5A93-4D62-4F08-9B3A-6D2E51C0F8A4}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <RootNamespace>SagaApp</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+    <TargetName>圣人双机服务端</TargetName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <LinkIncremental>true</LinkIncremental>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>false</SDLCheck><BufferSecurityCheck>false</BufferSecurityCheck><ControlFlowGuard>false</ControlFlowGuard>
+      <PreprocessorDefinitions>_WIN32_WINNT=0x0A00;NDEBUG;_WINDOWS;_CRT_SECURE_NO_WARNINGS;_WINSOCK_DEPRECATED_NO_WARNINGS;ASIO_USE_TS_EXECUTOR_AS_DEFAULT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <!-- 不开 /permissive-：原 DLL 工程也没开，asio 那套模板在老工程里没验证过 -->
+      <ConformanceMode>false</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)src\Makcu\cat\src;$(ProjectDir)src\Makcu\cat\include;$(ProjectDir)src\Makcu\include;D:\NCNN\x64\include;D:\NCNN\x64\include\ncnn;D:\DirectMLx64onnx\ort-dml-x64-1.24.4\include;D:\openCV\build\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <!-- Makcu 源码里有 try/catch，必须开异常处理；原 DLL 工程没开（C4530，异常时析构不执行） -->
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <!-- Mouse.cpp / NCNN.cpp 用了 AVX2+FMA 内联指令 -->
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <FloatingPointModel>Fast</FloatingPointModel>
+      <Optimization>MaxSpeed</Optimization>
+      <!-- /Ob3 通过 AdditionalOptions 启用，避免显式 /Ob2 与其重复。 -->
+      <InlineFunctionExpansion>Default</InlineFunctionExpansion>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <OmitFramePointers>true</OmitFramePointers>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <AdditionalOptions>/source-charset:utf-8 /execution-charset:.936 %(AdditionalOptions) /Ob3</AdditionalOptions>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>D:\NCNN\x64\lib;D:\openCV\build\x64\vc16\lib;D:\DirectMLx64onnx\ort-dml-x64-1.24.4\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>ncnn.lib;opencv_world4120.lib;onnxruntime.lib;strmiids.lib;winmm.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_WIN32_WINNT=0x0A00;NDEBUG;_ITERATOR_DEBUG_LEVEL=0;_WINDOWS;_CRT_SECURE_NO_WARNINGS;_WINSOCK_DEPRECATED_NO_WARNINGS;ASIO_USE_TS_EXECUTOR_AS_DEFAULT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <ConformanceMode>false</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)src\Makcu\cat\src;$(ProjectDir)src\Makcu\cat\include;$(ProjectDir)src\Makcu\include;D:\NCNN\x64\include;D:\NCNN\x64\include\ncnn;D:\DirectMLx64onnx\ort-dml-x64-1.24.4\include;D:\openCV\build\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <AdditionalOptions>/source-charset:utf-8 /execution-charset:.936 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>D:\NCNN\x64\lib;D:\openCV\build\x64\vc16\lib;D:\DirectMLx64onnx\ort-dml-x64-1.24.4\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>ncnn.lib;opencv_world4120.lib;onnxruntime.lib;strmiids.lib;winmm.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <!-- 应用层（原 SagaApp\） -->
+    <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\Util.cpp" />
+    <ClCompile Include="src\Aim.cpp" />
+    <ClCompile Include="src\Input.cpp" />
+    <ClCompile Include="src\Capture.cpp" />
+    <ClCompile Include="src\Ui.cpp" />
+    <ClCompile Include="src\Net.cpp" />
+    <!-- 引擎层（原 Saga.vcxproj / Saga.dll） -->
+    <ClCompile Include="src\OpnecvCapture.cpp" />
+    <ClCompile Include="src\NCNN.cpp" />
+    <ClCompile Include="src\ONNX.cpp" />
+    <ClCompile Include="src\Mouse.cpp" />
+    <ClCompile Include="src\Makcu\Makcu.cpp" />
+    <ClCompile Include="src\Makcu\src\serialport.cpp" />
+    <ClCompile Include="src\Makcu\cat\src\aes_functions.cpp" />
+    <ClCompile Include="src\Makcu\cat\src\catdevice.cpp" />
+    <ClCompile Include="src\Makcu\cat\src\cat_net_core.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\CapturePixels.h" />
+    <ClInclude Include="src\FrameWait.h" />
+    <ClInclude Include="src\App.h" />
+    <ClInclude Include="src\Inference.h" />
+    <ClInclude Include="src\TensorPixels.h" />
+    <ClInclude Include="src\NcnnPostprocess.h" />
+    <ClInclude Include="src\detection.hpp" />
+    <ClInclude Include="src\drawing.hpp" />
+    <ClInclude Include="src\nms.hpp" />
+    <ClInclude Include="src\onnx_metadata.hpp" />
+    <ClInclude Include="src\preprocessing.hpp" />
+    <ClInclude Include="src\session_base.hpp" />
+    <ClInclude Include="src\types.hpp" />
+    <ClInclude Include="src\utils.hpp" />
+    <ClInclude Include="src\version.hpp" />
+    <ClInclude Include="src\yolos.hpp" />
+    <ClInclude Include="src\Makcu\include\makcu.h" />
+    <ClInclude Include="src\Makcu\include\commands.h" />
+    <ClInclude Include="src\Makcu\include\serialprotocol.h" />
+    <ClInclude Include="src\Makcu\include\serialport.h" />
+    <ClInclude Include="src\Makcu\cat\include\catdevice.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+    <Import Project="$(MSBuildThisFileDirectory)RuntimeDependencies.targets" />
+  </ImportGroup>
+</Project>

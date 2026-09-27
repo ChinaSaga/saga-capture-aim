@@ -16,6 +16,7 @@
 ![运行演示 1](docs/demo/demo-01.png)
 ![运行演示 2](docs/demo/demo-02.png)
 ![运行演示 3](docs/demo/demo-03.png)
+![运行演示 4](docs/demo/demo-04.png)
 
 🎬 **[观看完整运行演示（36 MB，放在 Release 附件）](https://github.com/ChinaSaga/saga-capture-aim/releases/latest)**
 

@@ -37,8 +37,11 @@ build*/
 licenses/DirectML/
 
 # ============ 模型与人手数据（体积大 / 属于个人数据）============
-# 注意：不是 *.bin 全忽略 —— 只忽略人手轨迹 mouse.bin
+# mouse.bin / mouse_data.csv 都是本人真实鼠标数据 —— 不入库，谁用谁自己采、自己训
+# （注意：不是 *.bin 全忽略，免得误伤其它二进制）
 mouse.bin
+mouse_data.csv
+mouse_data_test.csv
 *.onnx
 *.param
 *.engine

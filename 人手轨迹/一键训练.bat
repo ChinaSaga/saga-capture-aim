@@ -1,0 +1,1 @@
+D:\miniconda3\envs\mouse\python.exe train.py

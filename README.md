@@ -38,7 +38,7 @@ bash "D:/C++采集卡源码/.workbuddy/build.sh"     # → .workbuddy\build-x64\
 |---|---|---|
 | `DirectML.dll`、`ncnn.dll`、`onnxruntime.dll`、`opencv_world4120.dll` | 随构建复制 | 缺一项启动时弹「缺少 …」并退出 |
 | VC 运行库 `msvcp140*.dll`、`vcruntime140*.dll`、`vcomp140.dll` 等 | 随构建复制 | 工程用 `/MD` |
-| `mouse.bin` | 用户自备 | 人手轨迹模型，缺失直接提示退出 |
+| `mouse.bin` | 自备：自己采集训练，或把你那份拷进去 | 人手轨迹模型，缺失直接提示退出。训练工程见 [人手轨迹\README.md](人手轨迹/README.md)（**仓库不含该文件**，属个人数据） |
 | `<模型名>.param` + `<模型名>.bin` | 用户自备 | NCNN 模型（`推理引擎=1`） |
 | `<模型名>.onnx` + `空类别.txt` | 用户自备 | ONNX 模型（`推理引擎=2`，缺类别文件会写空文件） |
 | `圣人自用.js` | 首次启动自动按默认值生成 | 全部配置键值对 |
@@ -66,6 +66,7 @@ D:\C++采集卡源码
 │   ├── ONNX 侧：preprocessing.hpp detection.hpp nms.hpp session_base.hpp …
 │   └── Makcu\                         串口协议 + Cat(网络键鼠，暂未启用) + 自带 asio
 ├── web\圣人视觉识别系统.html           网页控制面板（HTTP 调本机 :8888）
+├── 人手轨迹\                          mouse.bin 的采集/训练工程（Python + PyTorch）
 ├── x64\Release\                       构建输出（EXE + PDB + 运行时 DLL + 配置，不入库）
 ├── docs\                              本文档与其配套文档
 │   └── reference\                     GPU 型号表数据源（pci.ids 等）
@@ -91,8 +92,8 @@ D:\C++采集卡源码
 
 ## 5. 仓库包含 / 不包含什么（准备上传 GitHub）
 
-**入库**：`README.md`、`docs\`（含 `reference\`）、`src\`、`web\`、`Saga.sln`、`SagaApp.vcxproj`、
-`RuntimeDependencies.targets`、`圣人自用.sample.js`、`.gitignore`、`.gitattributes`。
+**入库**：`README.md`、`docs\`（含 `reference\`）、`src\`、`web\`、`人手轨迹\`（只含脚本，**不含个人采集数据**）、`Saga.sln`、`SagaApp.vcxproj`、
+`RuntimeDependencies.targets`、`圣人自用.sample.js`、`.gitignore`、`.gitattributes`、`LICENSE`。
 
 **不入库**（见 `.gitignore`）：
 

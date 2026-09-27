@@ -11,6 +11,20 @@
 
 ---
 
+## 0. 运行效果
+
+![运行演示 1](docs/demo/demo-01.png)
+![运行演示 2](docs/demo/demo-02.png)
+![运行演示 3](docs/demo/demo-03.png)
+
+🎬 **[观看完整运行演示（36 MB，放在 Release 附件）](https://github.com/ChinaSaga/saga-capture-aim/releases/latest)**
+
+> 视频没放进仓库：GitHub 的 Markdown 渲染器不支持内联播放仓库里的 mp4（`<video>` 会被清掉，
+> raw 链接只会触发下载），而且 36 MB 会让每次 `git clone` 都变慢。
+> 放在 Release 附件里，点开即可播放，仓库体积保持在 11 MB 左右。
+
+---
+
 ## 1. 30 秒构建
 
 ```powershell

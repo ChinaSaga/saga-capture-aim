@@ -51,6 +51,9 @@ mouse_data_test.csv
 模型*/
 YoloServer/
 
+# 演示视频体积大（36MB），放 Release 附件，不进仓库
+docs/demo/*.mp4
+
 # ============ 运行期生成的文件 ============
 圣人自用.js
 主机IP.ini

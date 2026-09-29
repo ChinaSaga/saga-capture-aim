@@ -1,25 +1,33 @@
 // ============================================================================
 //  DriverSetup.cpp —— Makcu 盒子（WCH CH343 USB 转串口）驱动自动安装
 //
-//  为什么要它：CH343 是 USB 转串口芯片，Windows 必须装好它的功能驱动才会
-//  出现 COM 口；没装驱动时程序枚举不到盒子，表现为“连不上 Makcu”。
+//  为什么要它：CH343 是 USB 转串口芯片，Windows 必须装好功能驱动才会出现 COM 口；
+//  没装驱动时程序枚举不到盒子，表现为“连不上 Makcu”。
 //
-//  做法（不碰 WCH 那个图形安装器，pnputil 一行命令搞定）：
-//    1. 先查系统是否已经装过这个驱动包（快路径看 System32\drivers\CH343S64.SYS，
-//       否则跑 pnputil /enum-drivers 找 ch343ser.inf）
-//    2. 没装就从本 EXE 的资源里把 9 个驱动文件释放到 %TEMP%
-//    3. 用微软自带的 pnputil /add-driver <INF> /install 安装（无任何窗口）
-//    4. 再 pnputil /scan-devices 让已经插着的盒子立刻绑定驱动
+//  ---------------------------------------------------------------------------
+//  判断“装好了没有”的口径（踩过坑，别改回只看驱动包）
+//  ---------------------------------------------------------------------------
+//  2026-09-29 的教训：只看「驱动包在不在 DriverStore 里」是**不够**的 ——
+//  WCH 的安装器点“卸载”会把服务和 System32\drivers 下的 .sys 删掉，但驱动包
+//  还留在系统里；只看包就会误判成“已装好”，于是既没安装、也没有任何提示。
+//
+//  现在按下面顺序判断：
+//    1. 盒子的串口在不在（makcu::SerialPort::findMakcuPorts）→ 在就一切正常，直接收工
+//    2. 驱动是否真的被设备用着：服务键 CH34* 存在 **且** System32\drivers\CH343S64.SYS 在
+//       （卸载会留下孤儿服务键，所以必须两个条件都满足）
+//    3. 以上都不满足 → 释放资源 + pnputil 安装 + scan-devices（幂等，重复跑也不会出重复包）
+//
+//  安装过程完全无窗口；失败会弹一个消息框（否则用户根本不知道没装上）。
 //
 //  ⚠ 安装驱动需要管理员权限。本工程的 EXE 清单已设为 requireAdministrator，
 //    所以启动时就已经提权，这一步能全程无提示完成。
-//    如果哪次是以普通用户身份运行的，这里会失败并把 pnputil 的原文记进日志。
 //
 //  驱动来源与版本见 src\DriverRes.rc 顶部注释（WCH 官方 2.0.2025.03，WHQL 签名，
 //  取自官方包 CH343SER.EXE，提取方法见 src\drv\README.txt）。
 // ============================================================================
 
 #include "App.h"
+#include "serialport.h"     // makcu::SerialPort::findMakcuPorts（判断盒子串口在不在）
 
 #include <cstdarg>
 #include <shellapi.h>
@@ -45,8 +53,6 @@ struct DrvFile
 };
 
 // 官方包里的全部 9 个驱动文件（正好是 INF 的 [SourceDisksFiles] 那 9 条）。
-// 之前只带 x64 的 6 个，在本机（驱动已存在）能装，但缺文件的包在干净系统上有风险，
-// 现在按官方原样全带 —— 反正一共才 640 KB 左右，打进 EXE 换省心。
 const DrvFile kDrvFiles[] = {
     { IDR_MAKCU_DRV_INF,           "CH343SER.INF" },
     { IDR_MAKCU_DRV_CAT,           "CH343SER.CAT" },
@@ -60,23 +66,26 @@ const DrvFile kDrvFiles[] = {
 };
 
 const char* kInfName = "CH343SER.INF";
-const char* kPnpMarker = "ch343ser.inf";   // pnputil /enum-drivers 输出里的“原始名称”
 
-// ---- 日志：追加进 EXE 目录下的启动日志 --------------------------------------
+// ---- 日志 ------------------------------------------------------------------
+// 必须复用 main.cpp 里那个启动日志句柄：如果再 fopen 一次同一文件，
+// 两个句柄各自记住自己的写位置，互相覆盖 —— 上一版就是这么把日志写花的。
 void drvLog(const char* fmt, ...)
 {
-    std::string path = g.runDir + "\\SagaApp_startup.log";
-    FILE* f = fopen(path.c_str(), "ab");
-    if (!f) return;
     va_list ap;
     va_start(ap, fmt);
-    vfprintf(f, fmt, ap);
+
+    FILE* f = g_logFile();
+    if (f)
+    {
+        vfprintf(f, fmt, ap);
+        fputc('\n', f);
+        fflush(f);
+    }
     va_end(ap);
-    fputc('\n', f);
-    fclose(f);
 }
 
-// ---- 当前进程是否已提权 ------------------------------------------------------
+// ---- 进程是否已提权（只用于日志）--------------------------------------------
 bool isElevated()
 {
     HANDLE token = nullptr;
@@ -129,7 +138,7 @@ bool runCapture(const char* exePath, const std::string& args,
     while (ReadFile(rd, buf, sizeof(buf), &got, nullptr) && got > 0)
         output.append(buf, got);
 
-    WaitForSingleObject(pi.hProcess, 60000);        // pnputil 正常几百毫秒内结束
+    WaitForSingleObject(pi.hProcess, 120000);   // pnputil 正常几百毫秒；装机慢时留足
     GetExitCodeProcess(pi.hProcess, &exitCode);
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
@@ -144,20 +153,41 @@ std::string system32Path(const char* name)
     return std::string(dir) + "\\" + name;
 }
 
-// ---- 驱动包是否已经装过 ------------------------------------------------------
-// 查 pnputil 比查注册表更准：驱动包可能已安装但盒子没插过，那种情况下
-// System32\drivers 里还看不到 .sys，只能靠 pnputil 列出的驱动包判断。
-bool driverPackagePresent()
+// ---- 盒子的串口出现了没有（最直接的“能用”判据）------------------------------
+bool makcuPortPresent(std::string* portOut)
 {
-    DWORD code = 0;
-    std::string out;
-    if (!runCapture(system32Path("pnputil.exe").c_str(), "/enum-drivers", code, out))
+    std::vector<std::string> ports = makcu::SerialPort::findMakcuPorts();
+    if (!ports.empty() && portOut) *portOut = ports.front();
+    return !ports.empty();
+}
+
+// ---- 驱动是否被设备用着 ------------------------------------------------------
+// 注意：卸载驱动后服务键可能残留成孤儿键，所以必须同时确认 .sys 文件还在。
+// 驱动包本身在不在 DriverStore 里**不作为**判据（见文件头注释）。
+bool driverBound()
+{
+    char sysRoot[MAX_PATH] = {};
+    GetSystemDirectoryA(sysRoot, MAX_PATH);
+    if (!fileExists(std::string(sysRoot) + "\\drivers\\CH343S64.SYS")) return false;
+
+    HKEY services = nullptr;
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Services",
+                      0, KEY_READ, &services) != ERROR_SUCCESS)
         return false;
 
-    // 输出是本地 ANSI 编码（中文系统是 GBK），原始名称一行形如 "原始名称:      ch343ser.inf"
-    std::string low = out;
-    for (char& c : low) c = (char)tolower((unsigned char)c);
-    return low.find(kPnpMarker) != std::string::npos;
+    bool found = false;
+    for (DWORD i = 0;; ++i)
+    {
+        char name[512] = {};
+        DWORD len = sizeof(name);
+        if (RegEnumKeyExA(services, i, name, &len, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS)
+            break;
+        std::string up(name);
+        for (char& c : up) c = (char)toupper((unsigned char)c);
+        if (up.find("CH34") != std::string::npos) { found = true; break; }
+    }
+    RegCloseKey(services);
+    return found;
 }
 
 // ---- 把资源里的驱动释放到临时目录 -------------------------------------------
@@ -219,27 +249,30 @@ void cleanupDir(const std::string& dir)
 
 bool makcuDriverReady()
 {
-    // 快路径：驱动已经绑定过设备，System32\drivers 里就有它的 .sys
-    char sysRoot[MAX_PATH] = {};
-    GetSystemDirectoryA(sysRoot, MAX_PATH);
-    if (fileExists(std::string(sysRoot) + "\\drivers\\CH343S64.SYS")) return true;
-
-    // 慢路径（要起一个 pnputil 进程，约几十毫秒）：驱动包是否已经安装
-    return driverPackagePresent();
+    // 盒子已经能用（串口出现）＝ 什么都不用做
+    if (makcuPortPresent(nullptr)) return true;
+    // 驱动已被设备用着（盒子没插或没识别，但驱动是好的）
+    return driverBound();
 }
 
 bool ensureMakcuDriver(bool* installedNow)
 {
     if (installedNow) *installedNow = false;
 
-    if (makcuDriverReady())
+    std::string port;
+    if (makcuPortPresent(&port))
     {
-        drvLog("[drv] CH343 驱动已存在，跳过安装");
+        drvLog("[drv] 盒子串口已就绪（%s），无需安装驱动", port.c_str());
         return true;
     }
 
-    drvLog("[drv] 未检测到 CH343 驱动，开始从 EXE 资源安装（提权=%d）",
-           (int)isElevated());
+    if (driverBound())
+    {
+        drvLog("[drv] 驱动已安装（服务与 CH343S64.SYS 均在），盒子未插或未识别，跳过安装");
+        return true;
+    }
+
+    drvLog("[drv] 未检测到可用驱动 → 开始从 EXE 资源安装（提权=%d）", (int)isElevated());
 
     char tmp[MAX_PATH] = {};
     if (!GetTempPathA(MAX_PATH, tmp))
@@ -247,47 +280,60 @@ bool ensureMakcuDriver(bool* installedNow)
         drvLog("[drv] GetTempPath 失败");
         return false;
     }
-    std::string dir = std::string(tmp) + "SagaMakcuDrv";
-    // 用进程号区分，避免多开时互相覆盖
-    dir += "_" + std::to_string((unsigned long)GetCurrentProcessId());
+    std::string dir = std::string(tmp) + "SagaMakcuDrv_" +
+                      std::to_string((unsigned long)GetCurrentProcessId());
 
     if (!extractDriverFiles(dir))
     {
         drvLog("[drv] 驱动文件释放失败");
         cleanupDir(dir);
+        MessageBoxA(nullptr,
+            "Makcu 驱动文件释放失败，请看 EXE 目录下的 SagaApp_startup.log（[drv] 开头那几行）",
+            "驱动安装失败", MB_OK | MB_ICONWARNING);
         return false;
     }
-    drvLog("[drv] 已释放驱动到 %s", dir.c_str());
+    drvLog("[drv] 已释放 %d 个驱动文件到 %s", (int)(sizeof(kDrvFiles) / sizeof(kDrvFiles[0])), dir.c_str());
 
-    std::string pnputil = system32Path("pnputil.exe");
-    std::string infPath = dir + "\\" + kInfName;
+    const std::string pnputil = system32Path("pnputil.exe");
+    const std::string infPath = dir + "\\" + kInfName;
 
     DWORD code = 0;
     std::string out;
     bool ran = runCapture(pnputil.c_str(),
                           "/add-driver \"" + infPath + "\" /install", code, out);
     drvLog("[drv] pnputil /add-driver 退出码=%lu", (unsigned long)code);
-    if (!out.empty()) drvLog("[drv] 输出:\n%s", out.c_str());
+    if (!out.empty()) drvLog("[drv] pnputil 输出:\n%s", out.c_str());
 
-    // 退出码 0 = 成功；3010 = 成功但需重启；其它按失败处理
-    bool ok = ran && (code == 0 || code == 3010);
-    if (ok)
+    // 0 = 成功；3010 = 成功但需重启；3011 = 已存在（不同版本时的提示）
+    const bool ok = ran && (code == 0 || code == 3010 || code == 3011);
+    if (!ok)
     {
-        // 让已经插着的盒子立刻绑定驱动（否则要拔插一次）
-        DWORD scanCode = 0;
-        std::string scanOut;
-        runCapture(pnputil.c_str(), "/scan-devices", scanCode, scanOut);
-        drvLog("[drv] pnputil /scan-devices 退出码=%lu", (unsigned long)scanCode);
-        if (installedNow) *installedNow = true;
-        drvLog("[drv] 驱动安装成功%s", code == 3010 ? "（需重启生效）" : "");
-    }
-    else
-    {
-        // 保留临时文件，方便排查（日志里能看到路径）
-        drvLog("[drv] 驱动安装失败，文件保留在 %s（可手动运行 pnputil 重试）", dir.c_str());
+        drvLog("[drv] 安装失败，驱动文件保留在 %s 供排查", dir.c_str());
+        MessageBoxA(nullptr,
+            ("Makcu 驱动安装失败（pnputil 退出码 " + std::to_string((unsigned long)code) +
+             "）。\n\n详情见 EXE 目录下的 SagaApp_startup.log（[drv] 开头的行）。\n"
+             "也可以手动双击官方 CH343SER.EXE 安装。").c_str(),
+            "驱动安装失败", MB_OK | MB_ICONWARNING);
         return false;
     }
 
+    // 让已经插着的盒子立刻绑定驱动（不必拔插）
+    DWORD scanCode = 0;
+    std::string scanOut;
+    runCapture(pnputil.c_str(), "/scan-devices", scanCode, scanOut);
+    drvLog("[drv] pnputil /scan-devices 退出码=%lu", (unsigned long)scanCode);
+
     cleanupDir(dir);
+
+    // 复查：盒子插着的话现在应该已经出串口了
+    std::string portAfter;
+    if (makcuPortPresent(&portAfter))
+        drvLog("[drv] 安装完成，盒子已识别为 %s%s", portAfter.c_str(),
+               code == 3010 ? "（建议重启一次）" : "");
+    else
+        drvLog("[drv] 安装完成%s；盒子还没插（或未被识别）——插上后系统会自动装设备，"
+               "可能会提示“正在安装设备驱动软件”", code == 3010 ? "（需重启生效）" : "");
+
+    if (installedNow) *installedNow = true;
     return true;
 }

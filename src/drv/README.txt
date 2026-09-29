@@ -12,7 +12,7 @@
         CH343SER.EXE -s2 -d<目标目录>
     -s2 = 不显示任何界面。它会顺带启动 DRVSETUP64.exe（WCH 的图形安装器），
     我们不用它 —— 直接用 pnputil 装 INF 更干净，把那个进程忽略/结束掉即可。
-    本仓库的提取脚本：`.workbuddy\extract_driver.py`
+    本仓库的提取脚本：`tools\extract_driver.py`
 
 为什么是这 9 个
     正好是 INF 里 [SourceDisksFiles] 列的 9 条，一条不缺：

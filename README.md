@@ -69,9 +69,12 @@ bash "D:/C++采集卡源码/.workbuddy/build.sh"     # → .workbuddy\build-x64\
 Makcu 盒子用的是 WCH **CH343** 芯片，Windows 没有内置它的驱动，没装时枚举不到 COM 口。
 本程序把驱动（WCH 官方 2.0.2025.03，WHQL 签名）以资源形式打包进 EXE，启动时：
 
-1. 查系统是否已装（`pnputil /enum-drivers` 里找 `ch343ser.inf`，另有 `System32\drivers\CH343S64.SYS` 快路径）
+1. 判断是否真的能用：盒子的串口在不在；不在就看服务键 `CH34*` 与 `System32\drivers\CH343S64.SYS` 是否都在
+   （**只看驱动包在不在是不够的** —— WCH 安装器卸载后驱动包会残留）
 2. 没装就把官方包里的 9 个驱动文件释放到 `%TEMP%\SagaMakcuDrv_<pid>\`
 3. `pnputil /add-driver CH343SER.INF /install` + `pnputil /scan-devices`（让已插着的盒子立刻可用）
+
+过程全在 `SagaApp_startup.log` 的 `[drv]` 行里（含 pnputil 原文）；装失败会弹一个消息框。
 
 **代价：安装驱动要管理员权限**，所以 EXE 清单声明了 `requireAdministrator` —— 双击时会弹一次系统 UAC。
 详见 [docs\架构与源码索引.md](docs/架构与源码索引.md) 和 `src\DriverRes.rc` 顶部注释。

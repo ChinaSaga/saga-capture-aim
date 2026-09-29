@@ -213,6 +213,10 @@ int           sagaOnnxDetect(const unsigned char* d, int n, float conf, float nm
 // ============================================================================
 //  Makcu / 轨迹
 // ============================================================================
+// 启动日志句柄（main.cpp 里 fopen 的那个）—— 别的地方要写日志就复用它，
+// **不要**自己再 fopen 同一文件：两个句柄位置互相覆盖，会把日志写乱。
+FILE* g_logFile();
+
 // CH343（Makcu 盒子）驱动：驱动已打进 EXE 资源，缺了就静默装（DriverSetup.cpp）
 bool makcuDriverReady();                       // 只检测，不起安装
 bool ensureMakcuDriver(bool* installedNow = nullptr);   // 缺则从资源安装（需管理员）

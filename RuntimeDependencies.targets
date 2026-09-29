@@ -11,7 +11,6 @@
       <SagaRuntimeDll Include="D:\NCNN\x64\bin\ncnn.dll" />
       <SagaRuntimeDll Include="D:\openCV\build\x64\vc16\bin\opencv_world4120.dll" />
       <SagaRuntimeDll Include="D:\DirectMLx64onnx\ort-dml-x64-1.24.4\lib\onnxruntime.dll" />
-      <SagaRuntimeDll Include="D:\DirectMLx64onnx\ort-dml-x64-1.24.4\lib\onnxruntime_providers_shared.dll" />
       <SagaRuntimeDll Include="D:\DirectMLx64onnx\directml-1.15.4-x64\DirectML.dll" />
       <!-- Both application configurations use /MD and release third-party libraries. -->
       <SagaRuntimeDll Include="$(SagaVCRedistX64)\Microsoft.VC145.CRT\concrt140.dll" />

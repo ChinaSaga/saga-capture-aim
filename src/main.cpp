@@ -104,6 +104,17 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
         return 0;
     }
     LOG("[05] trajInit 完成");
+
+    // ---------------- CH343（Makcu 盒子）驱动 ----------------
+    // 驱动已编进本 EXE 的资源；没装过就静默装一次（EXE 清单已要求管理员权限，
+    // 所以这里不会弹任何窗口）。装不上也继续跑，下面 makcuConnect 会如实报结果。
+    {
+        bool justInstalled = false;
+        const bool drvOk = ensureMakcuDriver(&justInstalled);
+        LOG("[05b] CH343 驱动 %s%s", drvOk ? "就绪" : "不可用",
+            justInstalled ? "（本次已安装）" : "");
+    }
+
     const bool makcuReady = makcuConnect(0);
     LOG("[06] makcuConnect %s", makcuReady ? "成功" : "失败（未收到有效设备应答）");
 

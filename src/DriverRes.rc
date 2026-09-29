@@ -1,0 +1,55 @@
+// ============================================================================
+//  DriverRes.rc —— 把 Makcu（WCH CH343 串口）驱动打进 EXE 资源
+//
+//  来源：WCH 官方 CH343 驱动包（makcu驱动.EXE 里是它的 WinRAR 自解压版）
+//        版本 2.0.2025.03 / 2025-03-03，WHQL 签名（Microsoft Windows Hardware
+//        Compatibility Publisher），发布名 oem244.inf。
+//        文件取自本机已安装的驱动仓库：
+//        C:\Windows\System32\DriverStore\FileRepository\ch343ser.inf_amd64_*
+//
+//  这 6 个文件是 x64 安装所必需的（[CH343SER_Inst.NTamd64] 只用这些）：
+//    CH343SER.INF            INF 本体
+//    CH343SER.CAT            签名目录（不能改，改了签名就废）
+//    CH343S64.SYS            x64 驱动本体（SYSA64）
+//    CH343PTA64.DLL          x64 属性页（DLLA64）
+//    CH343PORTSA64.DLL       x64 端口配置（DLLA64）
+//    CH343PT.DLL             WOW64 属性页（WOWDLL）
+//
+//  CH343SER.SYS / CH343M64.SYS / CH343PORTS.DLL 分别是 x86 / ARM64 / x86 用的，
+//  64 位系统不需要，故不带。
+// ============================================================================
+
+// ---------------------------------------------------------------------------
+//  1) 提权清单（RT_MANIFEST，ID 必须是 1）
+//
+//  这里而不是靠链接器的 /MANIFESTUAC：手工构建（build.sh）时 /MANIFESTINPUT 需要
+//  mt.exe，环境里不一定找得到。直接当资源编进去最省事，MSBuild 与脚本两条路通吃
+//  （代价是两边都要关掉清单的自动生成，见 vcxproj 的 GenerateManifest=false 与
+//   build.sh 的 /MANIFEST:NO）。
+// ---------------------------------------------------------------------------
+//  rc.exe 不认识 RT_MANIFEST 这个宏（那是 winuser.h 里的），不定义就会被当成
+//  字符串型的资源名 “RT_MANIFEST” 写进去，而 Windows 只认**数字型 24**，
+//  结果就是清单形同虚设、程序不会提权。必须显式定义成 24。
+#ifndef RT_MANIFEST
+#define RT_MANIFEST 24
+#endif
+#define CREATEPROCESS_MANIFEST_RESOURCE_ID 1
+
+// ---------------------------------------------------------------------------
+//  2) Makcu(CH343) 驱动文件（RCDATA）
+// ---------------------------------------------------------------------------
+#define IDR_MAKCU_DRV_INF          401
+#define IDR_MAKCU_DRV_CAT          402
+#define IDR_MAKCU_DRV_SYS          403
+#define IDR_MAKCU_DRV_DLL_PT       404
+#define IDR_MAKCU_DRV_DLL_PT_A64   405
+#define IDR_MAKCU_DRV_DLL_PORTS_A64 406
+
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "app.manifest"
+
+IDR_MAKCU_DRV_INF          RCDATA  "drv\\CH343SER.INF"
+IDR_MAKCU_DRV_CAT          RCDATA  "drv\\CH343SER.CAT"
+IDR_MAKCU_DRV_SYS          RCDATA  "drv\\CH343S64.SYS"
+IDR_MAKCU_DRV_DLL_PT       RCDATA  "drv\\CH343PT.DLL"
+IDR_MAKCU_DRV_DLL_PT_A64   RCDATA  "drv\\CH343PTA64.DLL"
+IDR_MAKCU_DRV_DLL_PORTS_A64 RCDATA "drv\\CH343PORTSA64.DLL"

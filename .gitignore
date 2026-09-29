@@ -35,6 +35,9 @@ build*/
 *.dll
 *.exe
 licenses/DirectML/
+# 例外：Makcu(CH343) 驱动要打进 EXE 资源，必须入库
+!src/drv/*.DLL
+!src/drv/*.dll
 
 # ============ 模型与人手数据（体积大 / 属于个人数据）============
 # mouse.bin / mouse_data.csv 都是本人真实鼠标数据 —— 不入库，谁用谁自己采、自己训

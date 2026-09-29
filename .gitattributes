@@ -5,6 +5,9 @@
 *.sh text eol=lf
 
 # 二进制
+# ⚠ 驱动文件一个字节都不能被 git 改写（INF 也在签名目录的校验范围内），
+#   必须整目录按 binary 处理，否则 CAT 校验会失败、静默安装被驱动签名强制拦下
+src/drv/** binary
 *.dll binary
 *.exe binary
 *.pdb binary

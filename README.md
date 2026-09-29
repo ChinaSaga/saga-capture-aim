@@ -51,6 +51,7 @@ bash "D:/C++采集卡源码/.workbuddy/build.sh"     # → .workbuddy\build-x64\
 
 | 文件 | 来源 | 说明 |
 |---|---|---|
+| CH343 串口驱动 | **已打进 EXE 资源** | Makcu 盒子（WCH CH343 USB 转串口）的驱动，检测到没装会自动静默安装，见下 |
 | `DirectML.dll`、`ncnn.dll`、`onnxruntime.dll`、`opencv_world4120.dll` | 随构建复制 | 缺一项启动时弹「缺少 …」并退出 |
 | VC 运行库 `msvcp140*.dll`、`vcruntime140*.dll`、`vcomp140.dll` 等 | 随构建复制 | 工程用 `/MD` |
 | `mouse.bin` | 自备：自己采集训练，或把你那份拷进去 | 人手轨迹模型，缺失直接提示退出。训练工程见 [人手轨迹\README.md](人手轨迹/README.md)（**仓库不含该文件**，属个人数据） |
@@ -63,6 +64,18 @@ bash "D:/C++采集卡源码/.workbuddy/build.sh"     # → .workbuddy\build-x64\
 启动会写 `SagaApp_startup.log`（分步骤 `[01]`~`[13]`），崩溃时先查它。
 界面变量记忆写 `配置保存.ini`，配置快照/网页多配置写在 `配置保存\` 目录。
 
+### 关于那个 USB 串口驱动
+
+Makcu 盒子用的是 WCH **CH343** 芯片，Windows 没有内置它的驱动，没装时枚举不到 COM 口。
+本程序把驱动（WCH 官方 2.0.2025.03，WHQL 签名）以资源形式打包进 EXE，启动时：
+
+1. 查系统是否已装（`pnputil /enum-drivers` 里找 `ch343ser.inf`，另有 `System32\drivers\CH343S64.SYS` 快路径）
+2. 没装就把 6 个驱动文件释放到 `%TEMP%\SagaMakcuDrv_<pid>\`
+3. `pnputil /add-driver CH343SER.INF /install` + `pnputil /scan-devices`（让已插着的盒子立刻可用）
+
+**代价：安装驱动要管理员权限**，所以 EXE 清单声明了 `requireAdministrator` —— 双击时会弹一次系统 UAC。
+详见 [docs\架构与源码索引.md](docs/架构与源码索引.md) 和 `src\DriverRes.rc` 顶部注释。
+
 ---
 
 ## 3. 目录结构
@@ -74,7 +87,10 @@ D:\C++采集卡源码
 ├── .gitignore / .gitattributes        入库规则：排除产物、DLL、模型、私有目录
 ├── 圣人自用.sample.js                 配置模板（入库版本；真实 `圣人自用.js` 被忽略）
 ├── src\                               全部源码（应用层 + 引擎层 + Makcu）
-│   ├── 应用层：main / Ui / Util / Capture / Aim / Input / Net
+│   ├── 应用层：main / Ui / Util / Capture / Aim / Input / Net / DriverSetup
+│   ├── drv\                           打进 EXE 的 CH343 驱动（INF/CAT/SYS/DLL）
+│   ├── DriverRes.rc                   资源：驱动文件 + 提权清单
+│   ├── app.manifest                   清单本体（requireAdministrator）
 │   ├── 引擎层：OpnecvCapture / NCNN / ONNX / Mouse（原 Saga.dll）
 │   ├── 头-only：App.h / Inference.h / AimLock.h / CapturePixels.h /
 │   │            TensorPixels.h / NcnnPostprocess.h / FrameWait.h

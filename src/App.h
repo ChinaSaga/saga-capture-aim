@@ -213,6 +213,10 @@ int           sagaOnnxDetect(const unsigned char* d, int n, float conf, float nm
 // ============================================================================
 //  Makcu / 轨迹
 // ============================================================================
+// CH343（Makcu 盒子）驱动：驱动已打进 EXE 资源，缺了就静默装（DriverSetup.cpp）
+bool makcuDriverReady();                       // 只检测，不起安装
+bool ensureMakcuDriver(bool* installedNow = nullptr);   // 缺则从资源安装（需管理员）
+
 bool makcuConnect(int port);
 void makcuMove(float x, float y);
 void makcuDown(int key);

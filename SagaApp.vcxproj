@@ -101,6 +101,8 @@
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
+      <!-- 提权清单在 src\DriverRes.rc 里以 RT_MANIFEST 资源提供，别让链接器再生成一份 -->
+      <GenerateManifest>false</GenerateManifest>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -121,6 +123,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>D:\NCNN\x64\lib;D:\openCV\build\x64\vc16\lib;D:\DirectMLx64onnx\ort-dml-x64-1.24.4\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>ncnn.lib;opencv_world4120.lib;onnxruntime.lib;strmiids.lib;winmm.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <GenerateManifest>false</GenerateManifest>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -132,6 +135,7 @@
     <ClCompile Include="src\Capture.cpp" />
     <ClCompile Include="src\Ui.cpp" />
     <ClCompile Include="src\Net.cpp" />
+    <ClCompile Include="src\DriverSetup.cpp" />
     <!-- 引擎层（原 Saga.vcxproj / Saga.dll） -->
     <ClCompile Include="src\OpnecvCapture.cpp" />
     <ClCompile Include="src\NCNN.cpp" />
@@ -165,6 +169,13 @@
     <ClInclude Include="src\Makcu\include\serialprotocol.h" />
     <ClInclude Include="src\Makcu\include\serialport.h" />
     <ClInclude Include="src\Makcu\cat\include\catdevice.h" />
+    <ClInclude Include="src\drv\CH343SER.INF" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Makcu（WCH CH343）驱动：打进 EXE 资源，缺驱动时自动静默安装 -->
+    <ResourceCompile Include="src\DriverRes.rc">
+      <AdditionalIncludeDirectories>$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

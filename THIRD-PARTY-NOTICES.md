@@ -7,6 +7,7 @@
 |---|---|---|
 | standalone Asio（头文件版） | `src\Makcu\cat\asio\` | Boost Software License 1.0（与 GPL-3.0 兼容） |
 | Makcu / Cat(Kmbox) 串口与网络协议实现 | `src\Makcu\Makcu.cpp`、`src\Makcu\src\serialport.cpp`、`src\Makcu\include\`、`src\Makcu\cat\src\` | **第三方 SDK 源码，原授权未在仓库中声明** |
+| **WCH CH343 USB 转串口驱动** | `src\drv\`（6 个文件，编进 EXE 资源） | 南京沁恒（WCH，wch.cn）官方驱动，版本 2.0.2025.03 / 2025-03-03，**WHQL 签名**（Microsoft Windows Hardware Compatibility Publisher）。文件原样分发、未作任何修改 |
 | PCI 设备 ID 表数据 | `src\GpuIdTable.h`（源数据 `docs\reference\pci.ids`） | pci.ids 项目：GPL-2.0+ 或 3-clause BSD（二选一，均可与本项目共存） |
 | 显卡名简化规则 | `src\GpuNameTable.h` | 本项目自行整理 |
 | YOLO/ONNX 相关后处理头文件 | `src\yolos.hpp`、`detection.hpp`、`nms.hpp`、`session_base.hpp`、`preprocessing.hpp` 等 | 依照其原始工程惯例整理 |

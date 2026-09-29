@@ -1,4 +1,6 @@
 #include "App.h"
+#include "AppExit.h"
+#include "HumanTrajectory.h"
 
 #include <cstdlib>
 #include <mmsystem.h>
@@ -27,14 +29,18 @@ static bool missingDeps()
 
 // ---- 启动日志（定位崩溃用，可随时移除）----
 static FILE* g_log = nullptr;
-#define LOG(...) do { if (g_log) { fprintf(g_log, __VA_ARGS__); fputc('\n', g_log); fflush(g_log); } } while (0)
+static ULONGLONG g_startTick = 0;
+#define LOG(...) do { if (g_log) { _lock_file(g_log); fprintf(g_log, "[+%llums] ", GetTickCount64() - g_startTick); fprintf(g_log, __VA_ARGS__); fputc('\n', g_log); fflush(g_log); _unlock_file(g_log); } } while (0)
 
 FILE* g_logFile() { return g_log; }
 
 int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
 {
+    g_startTick = GetTickCount64();
     // Native pixel rendering prevents blurry bitmap scaling on high-DPI displays.
     SetProcessDPIAware();
+    int toolResult = 0;
+    if (runHumanTrajectoryCommandLine(hInst, toolResult)) return toolResult;
     // 易语言的随机数命令会在运行期初始化；C 运行库默认种子固定，必须显式播种。
     srand((unsigned)(GetTickCount64() ^ (unsigned long long)GetCurrentProcessId()));
 
@@ -47,6 +53,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
 
     g_log = fopen((g.runDir + "\\SagaApp_startup.log").c_str(), "wb");
     LOG("[01] runDir=%s", g.runDir.c_str());
+    LOG("[build] CH343 async/skip-absent v4; main-close/IP-reprompt/Esc-ignore v5; %s %s", __DATE__, __TIME__);
 
     g.running = true;
     SetDllDirectoryA(g.runDir.c_str());
@@ -65,11 +72,6 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
     {
         MessageBoxA(nullptr, "缺少 DirectML.dll / ncnn.dll / onnxruntime.dll / opencv_world4120.dll 中的一项",
             "系统提示", MB_OK | MB_SETFOREGROUND);
-        return 0;
-    }
-    if (!fileExists(g.runDir + "\\mouse.bin"))
-    {
-        MessageBoxA(nullptr, "mouse.bin不存在,请去记录自己的人手数据", "系统提示", MB_OK | MB_SETFOREGROUND);
         return 0;
     }
 
@@ -99,38 +101,14 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
     LOG("[04] configInit 完成");
     if (!trajInit())
     {
-        LOG("[05] mouse.bin 加载失败");
-        MessageBoxA(nullptr, "mouse.bin无法读取或数据不完整，请检查轨迹文件", "系统提示", MB_OK | MB_SETFOREGROUND);
-        return 0;
+        LOG("[05] 人手模型未就绪，仍可进入界面记录和训练，轨迹移动已禁用");
     }
-    LOG("[05] trajInit 完成");
-
-    // ---------------- CH343（Makcu 盒子）驱动 ----------------
-    // 驱动已编进本 EXE 的资源；没装过就静默装一次（EXE 清单已要求管理员权限，
-    // 所以这里不会弹任何窗口）。装不上也继续跑，下面 makcuConnect 会如实报结果。
-    {
-        bool justInstalled = false;
-        const bool drvOk = ensureMakcuDriver(&justInstalled);
-        LOG("[05b] CH343 驱动 %s%s", drvOk ? "就绪" : "不可用",
-            justInstalled ? "（本次已安装）" : "");
-    }
-
-    const bool makcuReady = makcuConnect(0);
-    LOG("[06] makcuConnect %s", makcuReady ? "成功" : "失败（未收到有效设备应答）");
+    else LOG("[05] trajInit 完成");
 
     g.shotPort = 6666;
     g.localPort = 8888;
 
-    std::string ipFile = g.runDir + "\\主机IP.ini";
-    if (fileExists(ipFile))
-    {
-        std::string ip = trimStr(readFileAll(ipFile));
-        if (!ip.empty()) g.hostIp = ip;
-    }
-    else
-    {
-        writeFileAll(ipFile, g.hostIp);
-    }
+    g.hostIp = "127.0.0.1"; // Local default; listeners separately accept LAN connections.
 
     // ---------------- 类别颜色（集_识别类型_颜色_数组）----------------
     const int colors[10] = {
@@ -146,10 +124,18 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
     LOG("[07] 准备创建窗口");
     if (!uiCreate(hInst)) { LOG("[ER] uiCreate 失败"); return 0; }
     LOG("[08] 窗口创建完成");
+    // Driver installation and serial handshaking must never delay the window.
+    // The serial API publishes its connection atomically; until ready, input
+    // and motion calls safely return without touching an unfinished connection.
+    std::thread(makcuStartupThread).detach();
+    LOG("[hw] Makcu 检测与连接已交给后台线程");
+    if (!trajReady())
+        MessageBoxA(nullptr, "尚无可用的人手轨迹模型。\n请点击“点我开始记录人手数据”，记录后点击“点我开始训练人手模型”。\n训练成功后自动使用新模型，无需重启程序。",
+            "人手轨迹", MB_OK | MB_SETFOREGROUND);
     soundInit();
 
     // ---------------- 命令行分支（原版 _启动子程序 里的 取命令行 判断）----------------
-    // 无参数 → 弹输入框问本机IP；有参数 → 隐藏画面 + 用 监控双机.ini 自动开始采集
+    // 无参数 → 直接显示画面；有参数 → 隐藏画面 + 用 监控双机.ini 自动开始采集
     uiStartupCommandLine();
     LOG("[08b] 命令行分支完成: ip=%s showImg=%d", g.hostIp.c_str(), (int)g.showImg.load());
 
@@ -191,5 +177,5 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
     LOG("[13] 消息循环退出");
 
     g.running = false;
-    return 0;
+    exitApplicationNow();
 }

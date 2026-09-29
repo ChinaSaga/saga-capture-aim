@@ -1,4 +1,7 @@
 #include "App.h"
+#include "AppExit.h"
+#include "HumanTrajectory.h"
+#include "WebAccess.h"
 #include "GpuIdTable.h"     // 硬件 PCI 设备 ID → 真实显卡型号（注册表改名也不认）
 #include "GpuNameTable.h"   // 显卡名称简化（面子工程）
 
@@ -567,6 +570,12 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         {
             makcuMove(120, 0);
         }
+        else if ((id == 104 || id == 105) && code == BN_CLICKED)
+        {
+            startHumanTrajectoryTool(h, id == 105);
+        }
+        else if (id == 106 && code == BN_CLICKED) webShowDiagnostics(h);
+        else if (id == 107 && code == BN_CLICKED) webOpenLocalPage(h);
         else if (id == 200 && code == CBN_SELCHANGE)  // 组合框_设备名
         {
             char dev[256] = {};
@@ -639,8 +648,8 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
     }
 
     case WM_KEYDOWN:
-        // 原版窗体 Esc键关闭 = 真
-        if (w == VK_ESCAPE) { PostMessageA(h, WM_CLOSE, 0, 0); return 0; }
+        // Esc has no action; only the window close control exits.
+        if (w == VK_ESCAPE) return 0;
         break;
 
     case WM_CTLCOLORSTATIC:
@@ -663,6 +672,15 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
 
     case WM_TIMER:
         if (w == 1) {
+            static std::wstring previousTitle;
+            const std::wstring title = L"圣人视觉 C++ · 采集与推理  |  网页访问IP：" + webAccessAddress();
+            if (title != previousTitle) {
+                SetWindowTextW(h, title.c_str());
+                previousTitle = title;
+            }
+            if (trajReloadIfChanged()) EnableWindow(GetDlgItem(h, 102), TRUE);
+            RECT hardware{696, 26, 1056, 56};
+            InvalidateRect(h, &hardware, TRUE);
             RECT status{24, 65, 1056, 96};
             InvalidateRect(h, &status, TRUE);
             RECT footer{24, 748, 664, 780};
@@ -751,13 +769,12 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         line += tail;
         textAt(dc, line.c_str(), statusRect, g_uiFont, RGB(101,118,142),
             DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-        textAt(dc, "采集卡 · 本地推理 · MAKCU", {696,26,1056,56}, g_uiFont, RGB(101,118,142));
+        const std::string hardware = std::string("本地推理 · ") + makcuStartupStatus();
+        textAt(dc, hardware.c_str(), {696,26,1056,56}, g_uiFont, RGB(101,118,142));
         textAt(dc, "画面等比显示 · F1 快速开关", {696,65,1056,94}, g_uiFont, RGB(101,118,142));
         textAt(dc, "识别范围为中心裁剪尺寸", {696,365,1056,391}, g_uiFont, RGB(119,132,153));
-        textAt(dc, "设备测试", {696,535,1056,563}, g_uiFontBold, RGB(47,62,83));
-        textAt(dc, "自动截图保存位置", {696,643,1056,668}, g_uiFontBold, RGB(47,62,83));
-        textAt(dc, "EXE 目录 / 模型名 / 时间戳.jpg", {696,675,1056,701}, g_uiFont, RGB(119,132,153));
-        textAt(dc, "JPEG 格式 · 95% 质量", {696,705,1056,731}, g_uiFont, RGB(119,132,153));
+        textAt(dc, "数据：EXE / 人手数据 · 训练后自动生效", {696,738,1056,760}, g_uiFont, RGB(119,132,153));
+        textAt(dc, "截图：EXE / 模型名 / 时间戳.jpg · JPEG 95%", {696,763,1056,785}, g_uiFont, RGB(119,132,153));
         char status[192];
         snprintf(status, sizeof(status), "最近距离 %d     优先锁定 %.2f", g.nearestDist.load(), g.prioRatio);
         textAt(dc, status, {24,749,664,779}, g_uiFont, RGB(101,118,142));
@@ -788,13 +805,11 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         WritePrivateProfileStringA("窗口", "大小", std::to_string(g.imgSize).c_str(), ini.c_str());
         WritePrivateProfileStringA("窗口", "刷新", g.showImg.load() ? "1" : "0", ini.c_str());
 
-        DestroyWindow(h);
-        return 0;
+        exitApplicationNow();
     }
 
     case WM_DESTROY:
-        PostQuitMessage(0);
-        return 0;
+        exitApplicationNow();
     }
     return DefWindowProcA(h, m, w, l);
 }
@@ -825,7 +840,7 @@ bool uiCreate(HINSTANCE hInst)
     const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN;
     RECT rc{0, 0, 1080, 792};
     AdjustWindowRect(&rc, style, FALSE);
-    g_hwnd = CreateWindowA("SagaAppWindow", "圣人视觉 C++ · 采集与推理",
+    g_hwnd = CreateWindowA("SagaAppWindow", "圣人视觉 C++ · 采集与推理  |  网页访问IP：正在获取",
         style, CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top,
         nullptr, nullptr, hInst, nullptr);
     if (!g_hwnd) return false;
@@ -854,9 +869,9 @@ bool uiCreate(HINSTANCE hInst)
     g_cbDevice = combo(200, 140);
     g_cbFormat = combo(201, 228);
     g_cbSize = combo(202, 316);
-    const auto button = [&](int id, const char* value, int x, int y) {
+    const auto button = [&](int id, const char* value, int x, int y, int width = 174) {
         HWND control = CreateWindowA("BUTTON", value, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-            x, y, 174, 44, h, (HMENU)(INT_PTR)id, hInst, nullptr);
+            x, y, width, 44, h, (HMENU)(INT_PTR)id, hInst, nullptr);
         SendMessageA(control, WM_SETFONT, (WPARAM)g_uiFontBold, TRUE);
         SetWindowSubclass(control, controlProc, 1, 0);
     };
@@ -867,8 +882,13 @@ bool uiCreate(HINSTANCE hInst)
         h, (HMENU)300, hInst, nullptr);
     SendMessageA(g_chkRefresh, WM_SETFONT, (WPARAM)g_uiFont, TRUE);
     SetWindowTheme(g_chkRefresh, L"Explorer", nullptr);
+    button(106, "本机网络检查", 696, 522);
+    button(107, "打开本机调参", 882, 522);
     button(102, "轨迹测试 · 10 次", 696, 576);
     button(103, "移动 · 120 像素", 882, 576);
+    button(104, "点我开始记录人手数据", 696, 634, 360);
+    button(105, "点我开始训练人手模型", 696, 688, 360);
+    EnableWindow(GetDlgItem(h, 102), trajReady());
     SetTimer(h, 1, 500, nullptr);
 
     // 对齐原版：初始化采集卡成功前，设备和格式下拉框均不可操作。
@@ -963,11 +983,16 @@ static bool comboConfirmKey(UINT key)
 void uiThread()
 {
     MSG msg;
-    while (GetMessageA(&msg, nullptr, 0, 0))
+    while (GetMessageA(&msg, nullptr, 0, 0) > 0)
     {
-        // 下拉列表展开时的回车/ESC 必须在 IsDialogMessage 之前截下来：
+        // Consume Esc before controls or IsDialogMessage can act on it.
+        if ((msg.message == WM_KEYDOWN || msg.message == WM_KEYUP ||
+             msg.message == WM_SYSKEYDOWN || msg.message == WM_SYSKEYUP ||
+             msg.message == WM_CHAR) && msg.wParam == VK_ESCAPE)
+            continue;
+        // 下拉列表展开时的回车必须在 IsDialogMessage 之前截下来：
         // 否则回车会被它转成 WM_COMMAND(IDOK) 吃掉，列表反而收不起来。
-        if (msg.message == WM_KEYDOWN && (msg.wParam == VK_RETURN || msg.wParam == VK_ESCAPE)
+        if (msg.message == WM_KEYDOWN && msg.wParam == VK_RETURN
             && comboConfirmKey((UINT)msg.wParam))
             continue;
         if (!IsDialogMessageA(g_hwnd, &msg)) {
@@ -1020,7 +1045,7 @@ static LRESULT CALLBACK inputProc(HWND h, UINT m, WPARAM w, LPARAM l)
     {
         int id = LOWORD(w);
         if (id == 1) { inputAccept(h); return 0; }
-        if (id == 2) { g_inOk = false; DestroyWindow(h); return 0; }
+        if (id == 2) exitApplicationNow();
     }
     else if (m == WM_CLOSE)
     {
@@ -1053,8 +1078,8 @@ bool uiInputBox(const char* prompt, const char* title, std::string& text)
     AdjustWindowRect(&rc, WS_CAPTION | WS_SYSMENU | WS_POPUP, FALSE);
     HWND h = CreateWindowA("SagaAppInput", title, WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_VISIBLE,
         CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top,
-        nullptr, nullptr, GetModuleHandleA(nullptr), nullptr);
-    if (!h) return false;
+        g_hwnd, nullptr, GetModuleHandleA(nullptr), nullptr);
+    if (!h) exitApplicationNow();
 
     CreateWindowA("STATIC", prompt, WS_CHILD | WS_VISIBLE, 15, 12, 330, 20, h, nullptr, nullptr, nullptr);
     g_inEdit = CreateWindowA("EDIT", text.c_str(),
@@ -1068,8 +1093,12 @@ bool uiInputBox(const char* prompt, const char* title, std::string& text)
     SetFocus(g_inEdit);
 
     MSG msg;
-    while (IsWindow(h) && GetMessageA(&msg, nullptr, 0, 0))
+    while (IsWindow(h) && GetMessageA(&msg, nullptr, 0, 0) > 0)
     {
+        if ((msg.message == WM_KEYDOWN || msg.message == WM_KEYUP ||
+             msg.message == WM_SYSKEYDOWN || msg.message == WM_SYSKEYUP ||
+             msg.message == WM_CHAR) && msg.wParam == VK_ESCAPE)
+            continue;
         if (msg.message == WM_KEYDOWN && msg.wParam == VK_RETURN && msg.hwnd == g_inEdit)
         {
             inputAccept(h);
@@ -1086,7 +1115,7 @@ bool uiInputBox(const char* prompt, const char* title, std::string& text)
 
 // ============================================================================
 //  _启动子程序 的命令行分支
-//  无命令行参数 → 循环弹输入框问本机 IP，确定后写 主机IP.ini，并勾选实时刷新
+//  无命令行参数 → 直接打开主界面；本地默认地址为 127.0.0.1
 //  有命令行参数 → 取消实时刷新，并用 监控双机.ini 的参数自动开始采集（双机模式）
 // ============================================================================
 void uiStartupCommandLine()
@@ -1098,10 +1127,6 @@ void uiStartupCommandLine()
 
     if (argc == 0)
     {
-        std::string ip = g.hostIp;
-        while (!uiInputBox("请手动输入本机IP", "系统提示", ip)) { /* 原版：取消就再弹 */ }
-        g.hostIp = ip;
-        writeFileAll(g.runDir + "\\主机IP.ini", g.hostIp);
         uiSetShowImg(true);
     }
     else

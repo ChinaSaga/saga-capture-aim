@@ -1,22 +1,12 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
-    <script src="圣人自用.js">
-    </script>
-    <!--
-      兜底：上面的“圣人自用.js”既是本程序的配置文件（键=值），又被浏览器当脚本载入，
-      只为取 服务器ip / 本地端口 两个变量。程序写出的配置里万一存在空值行（如“准星扳机=”），
-      这段 JS 就不再合法 → 整个脚本不执行 → 下面的变量取不到。这里补一层默认值。
-    -->
-    <script>
-        if (typeof 服务器ip === 'undefined' || !服务器ip) {
-            var 服务器ip = (location.hostname || '127.0.0.1');
-        }
-        if (typeof 本地端口 === 'undefined' || !本地端口) {
-            var 本地端口 = 8888;
-        }
-    </script>
     <head>
         <meta charset="UTF-8">
+        <script src="/config.js"></script>
+        <script>
+            // Connect to the computer serving this page, including on the LAN.
+            const apiEndpoint = location.origin + '/api';
+        </script>
         <title>视觉识别系统 - 专业配置面板</title>
         <style>
             :root {
@@ -1920,7 +1910,7 @@
         }
 
         function 发送消息给服务器(参数名, 发送的消息) {
-            fetch('http://' + 服务器ip + ':' + 本地端口 + '/', {
+            fetch(apiEndpoint, {
                 method: 'POST',
                 body: 参数名 + "|" + 发送的消息
             }).catch(err => console.log("发送失败", err));
@@ -1929,7 +1919,7 @@
         async function 发送消息给服务器并获取返回值(参数名, 发送的消息) {
             try {
                 const response = await fetch(
-                    'http://' + 服务器ip + ':' + 本地端口 + '/', {
+                    apiEndpoint, {
                         method: 'POST',
                         body: 参数名 + "|" + 发送的消息
                     }
@@ -1943,7 +1933,7 @@
 
         async function fetchData() {
             try {
-                const response = await fetch('http://' + 服务器ip + ':' + 本地端口);
+                const response = await fetch(apiEndpoint);
                 if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                 const obj = await response.json();
                 const 实际帧率 = Number(obj["推理帧率"]);

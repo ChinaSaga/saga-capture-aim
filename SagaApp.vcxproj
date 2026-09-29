@@ -133,12 +133,18 @@
   <ItemGroup>
     <!-- 应用层（原 SagaApp\） -->
     <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\HumanTrajectory.cpp" />
+    <ClCompile Include="src\HumanTrajectoryModel.cpp">
+      <!-- Backpropagation and finite-value checks require precise FP semantics. -->
+      <FloatingPointModel>Precise</FloatingPointModel>
+    </ClCompile>
     <ClCompile Include="src\Util.cpp" />
     <ClCompile Include="src\Aim.cpp" />
     <ClCompile Include="src\Input.cpp" />
     <ClCompile Include="src\Capture.cpp" />
     <ClCompile Include="src\Ui.cpp" />
     <ClCompile Include="src\Net.cpp" />
+    <ClCompile Include="src\WebAccess.cpp" />
     <ClCompile Include="src\DriverSetup.cpp" />
     <!-- 引擎层（原 Saga.vcxproj / Saga.dll） -->
     <ClCompile Include="src\OpnecvCapture.cpp" />
@@ -155,6 +161,8 @@
     <ClInclude Include="src\CapturePixels.h" />
     <ClInclude Include="src\FrameWait.h" />
     <ClInclude Include="src\App.h" />
+    <ClInclude Include="src\HumanTrajectory.h" />
+    <ClInclude Include="src\HumanTrajectoryModel.h" />
     <ClInclude Include="src\Inference.h" />
     <ClInclude Include="src\TensorPixels.h" />
     <ClInclude Include="src\NcnnPostprocess.h" />
@@ -174,6 +182,10 @@
     <ClInclude Include="src\Makcu\include\serialport.h" />
     <ClInclude Include="src\Makcu\cat\include\catdevice.h" />
     <ClInclude Include="src\drv\CH343SER.INF" />
+    <ClInclude Include="src\WchHardwareId.h" />
+    <ClInclude Include="src\AppExit.h" />
+    <ClInclude Include="src\LanFirewall.h" />
+    <ClInclude Include="src\WebAccess.h" />
   </ItemGroup>
   <ItemGroup>
     <!-- Makcu（WCH CH343）驱动：打进 EXE 资源，缺驱动时自动静默安装 -->

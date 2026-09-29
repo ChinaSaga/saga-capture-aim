@@ -280,9 +280,43 @@ void makcuState(int key, bool& out)
 // ============================================================================
 //  模拟轨迹（对齐 模拟轨迹.txt）
 // ============================================================================
+static std::atomic<bool> g_trajReady{false};
+static WIN32_FILE_ATTRIBUTE_DATA g_trajFileStamp{}; // Accessed only by the UI thread.
+
+bool trajReady() { return g_trajReady; }
+
 bool trajInit()
 {
-    return saga::mc_create((g.runDir + "\\mouse.bin").c_str()) != 0;
+    const std::string trained = g.runDir + "\\人手数据\\mouse.bin";
+    const std::string model = fileExists(trained) ? trained : g.runDir + "\\mouse.bin";
+    const bool loaded = saga::mc_create(model.c_str()) != 0;
+    if (loaded) g_trajReady = true;
+    GetFileAttributesExA(trained.c_str(), GetFileExInfoStandard, &g_trajFileStamp);
+    return loaded;
+}
+
+bool trajReloadIfChanged()
+{
+    const std::string trained = g.runDir + "\\人手数据\\mouse.bin";
+    WIN32_FILE_ATTRIBUTE_DATA stamp{};
+    if (!GetFileAttributesExA(trained.c_str(), GetFileExInfoStandard, &stamp) ||
+        (stamp.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) return false;
+    if (CompareFileTime(&stamp.ftLastWriteTime, &g_trajFileStamp.ftLastWriteTime) == 0 &&
+        CompareFileTime(&stamp.ftCreationTime, &g_trajFileStamp.ftCreationTime) == 0 &&
+        stamp.nFileSizeLow == g_trajFileStamp.nFileSizeLow &&
+        stamp.nFileSizeHigh == g_trajFileStamp.nFileSizeHigh) return false;
+    // Training publishes a complete file atomically. mc_create also swaps the
+    // in-memory weights under a lock; a failed load preserves the running model.
+    const bool loaded = saga::mc_create(trained.c_str()) != 0;
+    g_trajFileStamp = stamp;
+    if (loaded) g_trajReady = true;
+    if (FILE* log = g_logFile()) {
+        _lock_file(log);
+        fprintf(log, "[traj] model hot reload: %s\n", loaded ? "success" : "failed; previous model retained");
+        fflush(log);
+        _unlock_file(log);
+    }
+    return loaded;
 }
 
 // out[20] = x1,y1,x2,y2,...,x10,y10 （0 基）
@@ -305,6 +339,7 @@ static bool needMove(float ax, float ay)
 
 void trajMove10(float endX, float endY)
 {
+    if (!g_trajReady) return;
     float arr[20] = {}, mx[10] = {}, my[10] = {};
     saga::mc_calc(endX, endY, arr);
     trajDelta(endX, endY, arr, mx, my);
@@ -325,6 +360,7 @@ void trajMove10(float endX, float endY)
 
 void trajMove5(float endX, float endY)
 {
+    if (!g_trajReady) return;
     float arr[20] = {}, mx[10] = {}, my[10] = {};
     saga::mc_calc(endX, endY, arr);
     trajDelta(endX, endY, arr, mx, my);
@@ -346,6 +382,7 @@ void trajMove5(float endX, float endY)
 
 void trajMove3(float endX, float endY)
 {
+    if (!g_trajReady) return;
     float arr[20] = {}, mx[10] = {}, my[10] = {};
     saga::mc_calc(endX, endY, arr);
     trajDelta(endX, endY, arr, mx, my);

@@ -89,7 +89,7 @@ void frameThreadUdp()
     std::memset(&local, 0, sizeof(local));
     local.sin_family = AF_INET;
     local.sin_port = htons((u_short)g.shotPort);
-    local.sin_addr.s_addr = inet_addr(g.hostIp.c_str());
+    local.sin_addr.s_addr = htonl(INADDR_ANY);
     if (bind(s, (sockaddr*)&local, sizeof(local)) != 0)
     {
         closesocket(s);

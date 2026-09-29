@@ -13,6 +13,8 @@
 
 ## 0. 运行效果
 
+本次新增原生人手数据采集、CPU 训练与模型热加载、局域网网页调参、网络自检及窗口标题实际 IP。使用与验证说明见 [2026-09-29 更新说明](docs/更新说明-2026-09-29.md)。
+
 ![运行演示 1](docs/demo/demo-01.png)
 ![运行演示 2](docs/demo/demo-02.png)
 ![运行演示 3](docs/demo/demo-03.png)
@@ -54,30 +56,39 @@ bash "D:/C++采集卡源码/.workbuddy/build.sh"     # → .workbuddy\build-x64\
 | CH343 串口驱动 | **已打进 EXE 资源** | Makcu 盒子（WCH CH343 USB 转串口）的驱动，检测到没装会自动静默安装，见下 |
 | `DirectML.dll`、`ncnn.dll`、`onnxruntime.dll`、`opencv_world4120.dll` | 随构建复制 | 缺一项启动时弹「缺少 …」并退出 |
 | VC 运行库 `msvcp140*.dll`、`vcruntime140*.dll`、`vcomp140.dll` 等 | 随构建复制 | 工程用 `/MD` |
-| `mouse.bin` | 自备：自己采集训练，或把你那份拷进去 | 人手轨迹模型，缺失直接提示退出。训练工程见 [人手轨迹\README.md](人手轨迹/README.md)（**仓库不含该文件**，属个人数据） |
+| `人手数据\mouse.bin`（兼容旧的 `mouse.bin`） | 主界面点击“点我开始记录人手数据”和“点我开始训练人手模型”生成 | 缺失时仍可进入界面采集训练；训练成功后自动替换并加载，无需重启。使用说明见 [人手轨迹\README.md](人手轨迹/README.md) |
+| 红蓝球采集与 CPU 训练 | 已编入 EXE 的原生 C++ 功能 | 两个按钮直接使用，无需安装 Python、PyTorch 或其它训练环境 |
 | `<模型名>.param` + `<模型名>.bin` | 用户自备 | NCNN 模型（`推理引擎=1`） |
 | `<模型名>.onnx` + `空类别.txt` | 用户自备 | ONNX 模型（`推理引擎=2`，缺类别文件会写空文件） |
 | `圣人自用.js` | 首次启动自动按默认值生成 | 全部配置键值对 |
-| `主机IP.ini` | 首次启动自动写 | 无命令行参数时弹框问本机 IP |
+| `主机IP.ini` | 旧版文件，新版不再读取或生成 | 启动不询问 IP；点击“打开本机调参”使用实际本机地址，局域网地址见“本机网络检查” |
+| `圣人视觉识别系统.html` | 与 EXE 放在同一目录 | 使用外部网页文件；缺失时访问 IP 显示“网页不存在”，调参接口停用；补回文件后刷新恢复 |
 | `监控双机.ini` | 按需要 | 双机模式下自动出图：`[保留参数] 宽/高/编码/名称/帧率/截图范围` |
 
 启动会写 `SagaApp_startup.log`（分步骤 `[01]`~`[13]`），崩溃时先查它。
 界面变量记忆写 `配置保存.ini`，配置快照/网页多配置写在 `配置保存\` 目录。
 
+启动在后台预设当前程序的局域网防火墙规则，并验证本机 HTTP、网页文件和网络状态。
+HTTP 首选 8888，端口冲突会自动回退；80 可用时支持直接访问 IP。局域网绑定被系统拒绝时尝试仅监听本机。
+“本机网络检查”及 EXE 同目录的 `网络自检.txt` 提供实际访问地址和排查提示，不影响主窗口启动。
+本机自检通过不代表其他设备必然可达；路由器隔离、VPN 或系统管理策略等限制会按可检测范围提示。
+
 ### 关于那个 USB 串口驱动
 
 Makcu 盒子用的是 WCH **CH343** 芯片，Windows 没有内置它的驱动，没装时枚举不到 COM 口。
-本程序把驱动（WCH 官方 2.0.2025.03，WHQL 签名）以资源形式打包进 EXE，启动时：
+本程序把驱动（WCH 官方 2.0.2025.03，WHQL 签名）以资源形式打包进 EXE。
+先显示主界面，再在后台检查和连接；右上角显示 MAKCU 状态：
 
-1. 判断是否真的能用：盒子的串口在不在；不在就看服务键 `CH34*` 与 `System32\drivers\CH343S64.SYS` 是否都在
-   （**只看驱动包在不在是不够的** —— WCH 安装器卸载后驱动包会残留）
-2. 没装就把官方包里的 9 个驱动文件释放到 `%TEMP%\SagaMakcuDrv_<pid>\`
-3. `pnputil /add-driver CH343SER.INF /install`
+1. 串口已就绪时直接连接；未插盒子时跳过安装、硬件扫描和连接等待，已有驱动保持不变。
+2. 只有发现受支持的设备、但串口不可用时，才从资源释放 9 个驱动文件和官方安装器，运行 `DRVSETUP64.exe /S`。
+3. 必要时再执行 `pnputil /add-driver CH343SER.INF /install`
    → **`UpdateDriverForPlugAndPlayDevices` 强制装到当前在场的设备上**（官方安装器同款 API）
    → **重枚举设备节点**（`CM_Reenumerate_DevNode`）→ `pnputil /scan-devices`
    —— 重枚举这一步是关键：它等价于帮你拔插一次，所以**盒子不用拔插就能用**
 
-过程全在 `SagaApp_startup.log` 的 `[drv]` 行里（含 pnputil 原文）；装失败会弹一个消息框。
+过程全在 `SagaApp_startup.log` 的 `[drv]` 行里；需要修复驱动时才写完整的 `Makcu驱动报告.txt`。
+异常显示在右上角并记录日志，不用阻塞弹窗等待确认。启动日志包含毫秒计时，便于定位延迟。
+如果启动时没插盒子，插入后重新启动即可连接；必要的安装和连接重试不会阻塞主界面。
 
 **代价：安装驱动要管理员权限**，所以 EXE 清单声明了 `requireAdministrator` —— 双击时会弹一次系统 UAC。
 详见 [docs\架构与源码索引.md](docs/架构与源码索引.md) 和 `src\DriverRes.rc` 顶部注释。
@@ -102,8 +113,8 @@ D:\C++采集卡源码
 │   │            TensorPixels.h / NcnnPostprocess.h / FrameWait.h
 │   ├── ONNX 侧：preprocessing.hpp detection.hpp nms.hpp session_base.hpp …
 │   └── Makcu\                         串口协议 + Cat(网络键鼠，暂未启用) + 自带 asio
-├── web\圣人视觉识别系统.html           网页控制面板（HTTP 调本机 :8888）
-├── 人手轨迹\                          mouse.bin 的采集/训练工程（Python + PyTorch）
+├── web\圣人视觉识别系统.html           网页控制面板（部署到 EXE 同目录，同源 API）
+├── 人手轨迹\                          采集/训练说明与保留的 Python 参考脚本；EXE 使用 src 内的原生 C++ 实现
 ├── x64\Release\                       构建输出（EXE + PDB + 运行时 DLL + 配置，不入库）
 ├── docs\                              本文档与其配套文档
 │   └── reference\                     GPU 型号表数据源（pci.ids 等）

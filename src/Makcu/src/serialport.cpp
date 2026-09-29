@@ -7,6 +7,7 @@
 #include <utility>
 
 #ifdef _WIN32
+#include "../../WchHardwareId.h"
 #include <setupapi.h>
 #include <devguid.h>
 #include <cfgmgr32.h>
@@ -585,14 +586,25 @@ namespace {
             char description[256] = { 0 };
             char portName[256] = { 0 };
 
+            char hardwareIds[4096] = {};
+            DWORD hardwareBytes = 0, hardwareType = 0;
+            const bool supportedWch = SetupDiGetDeviceRegistryPropertyA(
+                deviceInfoSet, &deviceInfoData, SPDRP_HARDWAREID, &hardwareType,
+                reinterpret_cast<BYTE*>(hardwareIds), sizeof(hardwareIds), &hardwareBytes) &&
+                hardwareType == REG_MULTI_SZ &&
+                wch::findSupportedHardwareId(hardwareIds, hardwareBytes);
+            ULONG status = 0, problem = 0;
+            if (CM_Get_DevNode_Status(&status, &problem, deviceInfoData.DevInst, 0) != CR_SUCCESS ||
+                problem != 0 || !(status & DN_STARTED)) continue;
+
             if (SetupDiGetDeviceRegistryPropertyA(deviceInfoSet, &deviceInfoData,
                 SPDRP_DEVICEDESC, nullptr,
                 reinterpret_cast<BYTE*>(description),
-                sizeof(description), nullptr)) {
+                sizeof(description), nullptr) || supportedWch) {
                 std::string desc(description);
 
                 // 支持多种串口芯片：CH340, CH343, CH347, CP2102
-                if (desc.find("USB-Enhanced-SERIAL CH343") != std::string::npos ||
+                if (supportedWch || desc.find("USB-Enhanced-SERIAL CH343") != std::string::npos ||
                     desc.find("USB-SERIAL CH340") != std::string::npos ||
                     desc.find("CH347") != std::string::npos ||
                     desc.find("CP210") != std::string::npos ||

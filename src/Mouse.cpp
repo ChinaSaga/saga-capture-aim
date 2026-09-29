@@ -11,6 +11,10 @@
 
 #include <cstdio>
 #include <immintrin.h>
+#include <bit>
+#include <cstdint>
+#include <mutex>
+#include <shared_mutex>
 
 // -------------------------------------------------------------------
 //  网络参数：32 字节对齐，专为 SIMD 设计
@@ -31,6 +35,7 @@ struct alignas(32) NetOpt {
 
 static alignas(32) NetOpt g_net;
 static int              g_loaded = 0;
+static std::shared_mutex g_netMutex;
 
 // ===================================================================
 //  mc_create : 一次性文件读取 + 转置重排 + Layer3 padding
@@ -53,35 +58,48 @@ int saga::mc_create(const char* path)
         fclose(f);
         return 0;
     }
+    const bool exactSize = fgetc(f) == EOF && !ferror(f);
     fclose(f);
+    if (!exactSize) return 0;
+    // Bitwise validation remains reliable with the inference file's /fp:fast.
+    const auto finite = [](const auto& values) {
+        for (float value : values)
+            if ((std::bit_cast<uint32_t>(value) & 0x7f800000u) == 0x7f800000u) return false;
+        return true;
+    };
+    if (!finite(net_orig.w1) || !finite(net_orig.b1) || !finite(net_orig.w2) ||
+        !finite(net_orig.b2) || !finite(net_orig.w3) || !finite(net_orig.b3)) return 0;
+    NetOpt replacement{};
 
     // 第一层：分离 x / y 权重
     for (int i = 0; i < 64; ++i) {
-        g_net.w1_x[i] = net_orig.w1[i * 2];
-        g_net.w1_y[i] = net_orig.w1[i * 2 + 1];
-        g_net.b1[i] = net_orig.b1[i];
+        replacement.w1_x[i] = net_orig.w1[i * 2];
+        replacement.w1_y[i] = net_orig.w1[i * 2 + 1];
+        replacement.b1[i] = net_orig.b1[i];
     }
 
     // 第二层转置 [32][64] -> [64][32]
     for (int j = 0; j < 64; ++j) {
         for (int i = 0; i < 32; ++i) {
-            g_net.w2_t[j][i] = net_orig.w2[i * 64 + j];
+            replacement.w2_t[j][i] = net_orig.w2[i * 64 + j];
         }
     }
-    for (int i = 0; i < 32; ++i) g_net.b2[i] = net_orig.b2[i];
+    for (int i = 0; i < 32; ++i) replacement.b2[i] = net_orig.b2[i];
 
     // 第三层转置 [20][32] -> [32][24]，并用 0 填充右侧 4 列
     for (int j = 0; j < 32; ++j) {
         for (int i = 0; i < 20; ++i) {
-            g_net.w3_t[j][i] = net_orig.w3[i * 32 + j];
+            replacement.w3_t[j][i] = net_orig.w3[i * 32 + j];
         }
         // 填充 0 以保证 32 字节对齐加载
         for (int i = 20; i < 24; ++i) {
-            g_net.w3_t[j][i] = 0.0f;
+            replacement.w3_t[j][i] = 0.0f;
         }
     }
-    for (int i = 0; i < 20; ++i) g_net.b3[i] = net_orig.b3[i];
+    for (int i = 0; i < 20; ++i) replacement.b3[i] = net_orig.b3[i];
 
+    std::unique_lock lock(g_netMutex);
+    g_net = replacement;
     g_loaded = 1;
     return 1;
 }
@@ -90,6 +108,7 @@ int saga::mc_create(const char* path)
 //  mc_calc : 极致优化推理
 void saga::mc_calc(float x, float y, float* __restrict out)
 {
+    std::shared_lock lock(g_netMutex);
     if (!g_loaded) return;
 
     const __m256 vx = _mm256_set1_ps(x);
@@ -163,5 +182,6 @@ void saga::mc_calc(float x, float y, float* __restrict out)
 // ===================================================================
 void saga::mc_destroy()
 {
+    std::unique_lock lock(g_netMutex);
     g_loaded = 0;
 }

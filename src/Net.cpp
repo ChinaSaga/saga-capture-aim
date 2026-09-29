@@ -5,6 +5,7 @@
 #include <mutex>
 #include <sstream>
 #include <thread>
+#include "WebAccess.h"
 
 // ============================================================================
 //  配置哈希表（替代易语言 哈希表_ASM）
@@ -13,6 +14,8 @@ static std::map<std::string, std::string> g_hash;
 // 必须是可重入锁：configSyncAll 持锁期间会反复调用 hashGet()
 static std::recursive_mutex g_hashMutex;
 static std::string g_outBuf;                       // 集_写出内容
+static std::map<std::string, std::string> g_webConfig;
+static std::string jsonEscape(const std::string& s);
 
 static std::vector<std::string> splitStr(const std::string& s, const std::string& sep)
 {
@@ -92,6 +95,7 @@ void configApplyStartupDefaults()
 static void bufInt(const char* name, int& v)
 {
     v = atoi(hashGet(name).c_str());
+    g_webConfig[name] = std::to_string(v);
     g_outBuf += name;
     g_outBuf += "=";
     g_outBuf += std::to_string(v);
@@ -101,6 +105,8 @@ static void bufInt(const char* name, int& v)
 static void bufStr(const char* name, std::string& v)
 {
     v = hashGet(name);
+    g_webConfig[name] = (v == "true" || v == "false") && std::string(name) != "模型名称"
+        ? v : "\"" + jsonEscape(v) + "\"";
     if (name == std::string("模型名称")) return;      // 原版：读了但不写回缓冲
     if (name == std::string("移动延时")) return;
     g_outBuf += name;
@@ -116,6 +122,7 @@ static void bufFlt(const char* name, float& v)
     g_outBuf += "=";
     char tmp[64];
     snprintf(tmp, sizeof(tmp), "%g", (double)v);
+    g_webConfig[name] = std::isfinite(v) ? tmp : "0";
     g_outBuf += tmp;
     g_outBuf += "\n";
 }
@@ -125,6 +132,7 @@ void configSyncAll(bool save)
 {
     std::lock_guard<std::recursive_mutex> lk(g_hashMutex);
     g_outBuf.clear();
+    g_webConfig.clear();
 
     bufInt("本地端口", g.localPort);
     bufInt("移动方式", g.moveMode);
@@ -216,6 +224,11 @@ static std::string jsonEscape(const std::string& s)
     for (char c : s)
     {
         if (c == '"' || c == '\\') { r += '\\'; r += c; }
+        else if (static_cast<unsigned char>(c) < 0x20) {
+            char escaped[7];
+            snprintf(escaped, sizeof(escaped), "\\u%04x", static_cast<unsigned char>(c));
+            r += escaped;
+        }
         else r += c;
     }
     return r;
@@ -252,10 +265,15 @@ static std::string buildJsonBody(const std::string& extraKey = "",
     return j;
 }
 
-static void sendResponse(SOCKET c, int code, const std::string& body)
+static void sendResponse(SOCKET c, int code, const std::string& body,
+                         const char* contentType = "application/json; charset=utf-8")
 {
-    std::string head = "HTTP/1.1 " + std::to_string(code) + " OK\r\n";
-    head += "Content-Type: application/json; charset=utf-8\r\n";
+    const char* reason = code == 200 ? "OK" : code == 201 ? "Created" :
+        code == 400 ? "Bad Request" : code == 404 ? "Not Found" :
+        code == 405 ? "Method Not Allowed" : "Internal Server Error";
+    std::string head = "HTTP/1.1 " + std::to_string(code) + " " + reason + "\r\n";
+    head += std::string("Content-Type: ") + contentType + "\r\n";
+    head += "Cache-Control: no-store\r\n";
     head += "Access-Control-Allow-Origin: *\r\n";
     head += "Access-Control-Allow-Headers: *\r\n";
     head += "Access-Control-Allow-Methods: POST, GET, OPTIONS\r\n";
@@ -263,7 +281,35 @@ static void sendResponse(SOCKET c, int code, const std::string& body)
     head += "Connection: close\r\n\r\n";
 
     std::string all = head + body;
-    send(c, all.data(), (int)all.size(), 0);
+    size_t offset = 0;
+    while (offset < all.size()) {
+        int sent = send(c, all.data() + offset, (int)(all.size() - offset), 0);
+        if (sent <= 0) break;
+        offset += sent;
+    }
+}
+
+static std::string webConfigScript()
+{
+    std::lock_guard<std::recursive_mutex> lock(g_hashMutex);
+    std::string script = "Object.assign(window,{";
+    bool first = true;
+    for (const auto& [key, value] : g_webConfig) {
+        if (!first) script += ',';
+        first = false;
+        script += "\"" + jsonEscape(key) + "\":" + value;
+    }
+    script += "});\n";
+    return ansiToUtf8(script);
+}
+
+static void sendMissingWebPanel(SOCKET c)
+{
+    sendResponse(c, 404, ansiToUtf8(
+        "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
+        "<title>网页不存在</title></head><body><h1>网页不存在</h1>"
+        "<p>请将 圣人视觉识别系统.html 放到 EXE 同目录，然后刷新此页面。</p>"
+        "</body></html>"), "text/html; charset=utf-8");
 }
 
 static void handleRequest(SOCKET c, const std::string& req)
@@ -275,6 +321,40 @@ static void handleRequest(SOCKET c, const std::string& req)
 
     bool isPost = (head.size() >= 4 && head.compare(0, 4, "POST") == 0);
     bool isOpt = (head.size() >= 7 && head.compare(0, 7, "OPTIONS") == 0);
+    std::istringstream requestLine(head);
+    std::string method, path;
+    requestLine >> method >> path;
+    path = path.substr(0, path.find('?'));
+    if (method == "GET" && path == "/__saga_health") {
+        sendResponse(c, 200, "{\"service\":\"SagaApp\",\"pid\":" + std::to_string(GetCurrentProcessId()) + "}");
+        return;
+    }
+    // The panel is supplied alongside the EXE. Never fall back to an embedded
+    // page or a different folder; stale browser tabs must not tune without it.
+    const std::string panelPath = g.runDir + "\\圣人视觉识别系统.html";
+    if (!fileExists(panelPath)) {
+        sendMissingWebPanel(c);
+        return;
+    }
+    if (method == "GET" && path == "/config.js") {
+        sendResponse(c, 200, webConfigScript(), "application/javascript; charset=utf-8");
+        return;
+    }
+    if (method == "GET" && (path == "/" || path == "/index.html") &&
+        head.find("application/json") == std::string::npos) {
+        const std::string page = readFileAll(panelPath);
+        if (page.empty()) sendMissingWebPanel(c);
+        else sendResponse(c, 200, page, "text/html; charset=utf-8");
+        return;
+    }
+    if (path != "/" && path != "/api") {
+        sendResponse(c, 404, "{\"error\":\"Not found\"}");
+        return;
+    }
+    if (method != "GET" && !isPost && !isOpt) {
+        sendResponse(c, 405, "{\"error\":\"Method not allowed\"}");
+        return;
+    }
 
     std::string extra;
     if (isPost)
@@ -310,8 +390,15 @@ static void handleRequest(SOCKET c, const std::string& req)
 
     if (parts.size() == 2)
     {
+        std::lock_guard<std::recursive_mutex> lock(g_hashMutex);
         const std::string& cmd = trim(parts[0]);
         const std::string& arg = trim(parts[1]);
+        if ((cmd == "保存配置" || cmd == "删除配置" || cmd == "导入配置") &&
+            (arg.empty() || arg.size() > 128 || arg == "." || arg == ".." ||
+             arg.find_first_of("\\/:*?\"<>|") != std::string::npos)) {
+            sendResponse(c, 400, "{\"error\":\"Invalid configuration name\"}");
+            return;
+        }
 
         std::string cfgDir = g.runDir + "\\配置保存";
         CreateDirectoryA(cfgDir.c_str(), nullptr);
@@ -352,9 +439,12 @@ static void handleRequest(SOCKET c, const std::string& req)
         }
         else if (cmd == "导入配置")
         {
-            DeleteFileA(g.cfgPath.c_str());
-            CopyFileA((cfgDir + "\\" + arg + ".js").c_str(), g.cfgPath.c_str(), FALSE);
+            if (!CopyFileA((cfgDir + "\\" + arg + ".js").c_str(), g.cfgPath.c_str(), FALSE)) {
+                sendResponse(c, 400, "{\"error\":\"Configuration not found\"}");
+                return;
+            }
             configInit();
+            configApplyStartupDefaults();
             configSyncAll(true);
             json = buildJsonBody("是否刷新", "是");
         }
@@ -370,6 +460,9 @@ static void handleRequest(SOCKET c, const std::string& req)
 
 static void clientThread(SOCKET c)
 {
+    DWORD timeout = 5000;
+    setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+    setsockopt(c, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
     std::string req;
     char buf[4096];
     for (;;)
@@ -397,39 +490,47 @@ static void clientThread(SOCKET c)
 
 void httpServerThread()
 {
-    WSADATA wsa;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return;
-
-    SOCKET srv = socket(AF_INET, SOCK_STREAM, 0);
-    if (srv == INVALID_SOCKET) { WSACleanup(); return; }
-
-    sockaddr_in addr;
-    std::memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons((u_short)g.localPort);
-    addr.sin_addr.s_addr = inet_addr(g.hostIp.c_str());
-    if (addr.sin_addr.s_addr == INADDR_NONE) addr.sin_addr.s_addr = htonl(INADDR_ANY);
-
-    if (bind(srv, (sockaddr*)&addr, sizeof(addr)) != 0 || listen(srv, 16) != 0)
-    {
-        // 原版：崩溃信息框("http启动失败!") + 进程_结束()
-        extern FILE* g_logFile();
-        if (g_logFile()) { fprintf(g_logFile(), "[ER] HTTP 启动失败(端口 %d 被占用?)\n", g.localPort); fflush(g_logFile()); }
-        closesocket(srv);
-        WSACleanup();
-        MessageBoxA(nullptr, "http启动失败!", "系统提示", MB_OK | MB_SETFOREGROUND);
-        ExitProcess(0);
+    WSADATA wsa{};
+    const int startup = WSAStartup(MAKEWORD(2, 2), &wsa);
+    if (startup != 0) {
+        webAccessFailed(L"Windows 网络初始化失败，错误 " + std::to_wstring(startup) + L"。\r\n");
+        return;
     }
-
+    WebListeners listeners = startWebListeners((unsigned short)g.localPort);
+    if (listeners.primary == INVALID_SOCKET) {
+        webAccessFailed(listeners.notes);
+        WSACleanup();
+        return;
+    }
+    if (FILE* log = g_logFile()) {
+        _lock_file(log);
+        fprintf(log, "[web] LAN listener ready: %s:%u, port80=%s; background preflight started\n",
+            listeners.lan ? "0.0.0.0" : "127.0.0.1", listeners.port,
+            listeners.standard != INVALID_SOCKET ? "ready" : "unavailable");
+        fflush(log);
+        _unlock_file(log);
+    }
+    std::thread(webAccessMonitor, listeners).detach();
     while (g.running.load())
     {
-        sockaddr_in from;
-        int fl = sizeof(from);
-        SOCKET c = accept(srv, (sockaddr*)&from, &fl);
-        if (c == INVALID_SOCKET) { sleepMs(10); continue; }
-        std::thread(clientThread, c).detach();
+        fd_set readable;
+        FD_ZERO(&readable);
+        FD_SET(listeners.primary, &readable);
+        if (listeners.standard != INVALID_SOCKET) FD_SET(listeners.standard, &readable);
+        timeval timeout{0, 500000};
+        const int selected = select(0, &readable, nullptr, nullptr, &timeout);
+        if (selected == SOCKET_ERROR) {
+            webAccessFailed(L"网页监听发生错误 " + std::to_wstring(WSAGetLastError()) + L"。\r\n");
+            break;
+        }
+        if (selected == 0) continue;
+        for (SOCKET listener : {listeners.primary, listeners.standard}) {
+            if (listener == INVALID_SOCKET || !FD_ISSET(listener, &readable)) continue;
+            SOCKET c = accept(listener, nullptr, nullptr);
+            if (c != INVALID_SOCKET) std::thread(clientThread, c).detach();
+        }
     }
 
-    closesocket(srv);
+    closeWebListeners(listeners);
     WSACleanup();
 }

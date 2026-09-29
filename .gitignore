@@ -38,13 +38,17 @@ licenses/DirectML/
 # 例外：Makcu(CH343) 驱动要打进 EXE 资源，必须入库
 !src/drv/*.DLL
 !src/drv/*.dll
+!src/drv/DRVSETUP64.exe
 
 # ============ 模型与人手数据（体积大 / 属于个人数据）============
 # mouse.bin / mouse_data.csv 都是本人真实鼠标数据 —— 不入库，谁用谁自己采、自己训
 # （注意：不是 *.bin 全忽略，免得误伤其它二进制）
 mouse.bin
 mouse_data.csv
+人手数据.txt
 mouse_data_test.csv
+人手数据/
+__pycache__/
 *.onnx
 *.param
 *.engine
@@ -65,5 +69,6 @@ docs/demo/*.mp4
 配置保存.ini
 配置保存/
 SagaApp_startup.log
+网络自检.txt
 *.log
 自动截图/

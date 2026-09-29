@@ -3,7 +3,36 @@
 用神经网络拟合真人鼠标移动轨迹 —— 主程序 `src\Mouse.cpp` 加载的 `mouse.bin` 就是这里训练出来的。
 
 > **本仓库不包含 `mouse.bin` 和采集数据**：那是本人真实鼠标移动数据，属于个人信息。
-> 需要的话按下面的流程自己采、自己训（约 300 条轨迹就够），产出直接放到主程序 EXE 同目录。
+> 可以直接使用主程序右侧的两个按钮采集和训练，数据与模型保存在 EXE 同目录的 `人手数据` 文件夹。
+
+## 在主程序中使用
+
+1. 点击 **点我开始记录人手数据**：打开全屏红蓝球窗口。点红球开始，移动到蓝球再点击结束；每次有效记录立即追加到 `人手数据\人手数据.txt`，可直接用记事本查看。顶部显示已保存的累计记录数，关闭再打开会接着计数；一次有效采集算一条，自动生成的镜像样本不重复计数。按 Esc 或 Q 退出。
+2. 关闭记录窗口后点击 **点我开始训练人手模型**：打开独立控制台窗口，使用 CPU 默认训练 500 轮，显示每轮损失、学习率和用时。没有数据时会提示先记录。
+3. 成功后自动替换 `人手数据\mouse.bin`，运行中的主程序会在约 0.5 秒内加载新模型，无需重启或关闭训练结果窗口。Ctrl+C 或关闭窗口可中止；只有完整模型才会替换已有模型，加载失败时继续使用旧模型。
+
+**采集和 CPU 训练均为 EXE 内置的原生 C++ 功能，不需要 Python、Conda、PyTorch 或额外的训练库。**
+采集使用 Win32 窗口；训练使用 C++ 前向计算、反向传播、MSE 和 Adam。
+默认 batch size 64、学习率 0.001，保留原脚本每 50 个优化步乘 0.9 的衰减规则。
+按钮启动同一个 EXE 的独立功能进程，跳过主界面的驱动、采集卡、网络及模型初始化，主界面不会被训练阻塞。
+原主程序的运行时 DLL 仍按原有构建流程随行；这两个功能没有新增外部依赖。
+旧的 `python_path.txt` 和之前释放的 `.py` 文件不再使用。首次采集或训练时，如果只有旧 `mouse_data.csv`，会自动改名为 `人手数据.txt`，保留全部记录；两个文件同时存在时使用 `人手数据.txt`。文本内部仍采用原有的坐标格式。
+
+启动优先加载 `人手数据\mouse.bin`；该文件不存在时兼容旧的 `EXE\mouse.bin`。
+没有可用模型也能进入主界面采集和训练，此时轨迹测试及分段轨迹移动不可用；训练成功后自动启用。
+同一个数据目录同时只允许一个记录或训练窗口，训练结束后请关闭窗口再开始下一项。
+
+## 原生功能命令行（可选）
+
+```powershell
+& '.\圣人双机服务端.exe' --collect-human-data
+& '.\圣人双机服务端.exe' --train-human-data
+# 自动测试或指定训练目录；不传目录时固定使用 EXE\人手数据
+& '.\圣人双机服务端.exe' --train-human-data --data-dir 'D:\测试数据' --epochs 1 --no-pause
+```
+
+网络结构、CSV 十点采样与水平镜像、float32 二进制顺序保持兼容。
+随机初始化和浮点累计顺序不同，不要求训练权重与 Python 逐位相同。
 
 ## 它解决什么问题
 
@@ -22,38 +51,40 @@
 
 | 文件 | 作用 |
 |---|---|
-| `collect_mouse_data.py` | 采集工具（Tkinter 全屏）：点红球开始记录 → 移动到蓝球再点结束，一条轨迹自动采样成 10 个关键点追加进 `mouse_data.csv`（同时做一次水平镜像增广，一条变两条） |
-| `train.py` | 训练 + 导出：读 `mouse_data.csv`，训练 `SimpleNet(2→64→ReLU→32→ReLU→20)`，500 epoch，最后导出 `mouse.bin` |
+| `src\HumanTrajectory.cpp` | EXE 内置的 Win32 红蓝球窗口、独立功能进程、控制台进度和取消 |
+| `src\HumanTrajectoryModel.cpp` | 原生 CPU 网络、反向传播、Adam、CSV 读写及原子模型导出 |
+| `collect_mouse_data.py` | 采集工具（Tkinter 全屏）：点红球开始记录 → 移动到蓝球再点结束，一条轨迹自动采样成 10 个关键点追加进 `人手数据.txt`（同时做一次水平镜像增广，一条变两条）；仅有旧 CSV 时先改名 |
+| `train.py` | 训练 + 导出：读 `人手数据.txt`（兼容旧 `mouse_data.csv`），训练 `SimpleNet(2→64→ReLU→32→ReLU→20)`，500 epoch，最后导出 `mouse.bin` |
 | `show.py` | 画散点图，肉眼验证拟合出的 10 个点像不像自己的轨迹 |
 | `test.py` | 检查 `mouse.onnx` 是否导出成功（可选路径，本项目实际只用 bin） |
 | `collect_mouse_data.spec` | PyInstaller 打包配置（生成免 Python 环境的采集 exe） |
 | `一键训练.bat` | 调本机 conda 环境 `mouse` 跑 `train.py`（**里面写的是作者的 python 路径，改成你自己的**） |
 | `训练人手和打包.txt` | 训练 + 打包的步骤速记 |
 
-## 完整流程
+## 原 Python 脚本（保留作参考，可选）
+
+以下依赖只用于单独运行原 Python 脚本，主程序的两个按钮不使用这些脚本。
 
 ```bash
 # 0. 依赖
 pip install numpy pandas torch
 
-# 1. 采集（约 300 条；Esc 随时退出，数据追加进 mouse_data.csv）
-python collect_mouse_data.py
+# 1. 采集（约 300 条；Esc 随时退出，数据追加进 人手数据.txt）
+python collect_mouse_data.py --data-dir "你的EXE目录/人手数据"
 
 # 2.（可选）自己切一部分数据到 mouse_data_test.csv 当验证集
 
 # 3. 训练并导出 mouse.bin
-python train.py
-
-# 4. 部署：放到主程序 EXE 同目录
-cp mouse.bin  <主程序输出目录>/mouse.bin
+python train.py --data-dir "你的EXE目录/人手数据"
 ```
 
-主程序启动时 `trajInit()` 会读 `运行目录\mouse.bin`，**缺文件会弹框并退出**。
-`mouse.bin` / `mouse_data.csv` 已被 `.gitignore` 排除，放心放在这个目录里也不会被提交。
+不传 `--data-dir` 时使用脚本所在目录，不受启动时的工作目录影响。
+`train.py --epochs 1` 可做快速训练检查，默认仍为 500 轮。
+`人手数据/`、`人手数据.txt`、`mouse.bin`、`mouse_data.csv` 已被 `.gitignore` 排除，不会提交个人数据。
 
 ## mouse.bin 的格式
 
-按 float32 顺序直接写下（`train.py::export_bin`）：
+按 float32 顺序直接写下（`HumanTrajectoryModel.cpp::saveModel`；兼容 `train.py::export_bin`）：
 
 ```
 w1[64×2]  b1[64]  w2[32×64]  b2[32]  w3[20×32]  b3[20]

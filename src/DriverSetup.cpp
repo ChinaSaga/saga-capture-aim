@@ -1,46 +1,10 @@
-// ============================================================================
-//  DriverSetup.cpp —— Makcu 盒子（WCH CH343 USB 转串口）驱动自动安装
-//
-//  为什么要它：CH343 是 USB 转串口芯片，Windows 必须装好功能驱动才会出现 COM 口；
-//  没装驱动时程序枚举不到盒子，表现为“连不上 Makcu”。
-//
-//  ---------------------------------------------------------------------------
-//  判断“装好了没有”的口径（踩过坑，别改回只看驱动包）
-//  ---------------------------------------------------------------------------
-//  2026-09-29 的教训：只看「驱动包在不在 DriverStore 里」是**不够**的 ——
-//  WCH 的安装器点“卸载”会把服务和 System32\drivers 下的 .sys 删掉，但驱动包
-//  还留在系统里；只看包就会误判成“已装好”，于是既没安装、也没有任何提示。
-//
-//  现在按下面顺序判断：
-//    1. 盒子的串口在不在（makcu::SerialPort::findMakcuPorts）→ 在就一切正常，直接收工
-//    2. 驱动是否真的被设备用着：服务键 CH34* 存在 **且** System32\drivers\CH343S64.SYS 在
-//       （卸载会留下孤儿服务键，所以必须两个条件都满足）
-//    3. 以上都不满足 → 释放资源 + pnputil 安装 + **重枚举设备节点** + scan-devices
-//
-//  ---------------------------------------------------------------------------
-//  为什么必须重枚举设备（2026-09-29 补，官方安装器就是这么干的）
-//  ---------------------------------------------------------------------------
-//  用户问过：“官方 CH343SER.EXE 装完不用拔插就能用，为什么你的不行？”
-//  反查官方安装器（SETUP.EXE / DRVSETUP64.exe）的导入表，它用的是：
-//      SetupCopyOEMInfA                把 INF 复制进驱动仓库（≈ pnputil /add-driver）
-//      SetupDiGetClassDevsA + Enum…    枚举设备
-//      SetupDiBuildDriverInfoList …    找匹配的驱动
-//      SetupDiCallClassInstaller       真正把驱动装到设备上
-//      SetupInstallFilesFromInfSectionA 按 INF 段把文件铺到 System32\drivers 等目录
-//      CM_Locate_DevNodeA + CM_Reenumerate_DevNode   ★ 重枚举设备节点＝等价于拔插一次
-//  我们之前只做了“把驱动包放进系统”，设备节点还是老状态，所以得靠拔插才生效。
-//  现在补上 CM_Locate_DevNode + CM_Reenumerate_DevNode，效果与官方安装器一致。
-//
-//  安装过程完全无窗口；失败会弹一个消息框（否则用户根本不知道没装上）。
-//
-//  ⚠ 安装驱动需要管理员权限。本工程的 EXE 清单已设为 requireAdministrator，
-//    所以启动时就已经提权，这一步能全程无提示完成。
-//
-//  驱动来源与版本见 src\DriverRes.rc 顶部注释（WCH 官方 2.0.2025.03，WHQL 签名，
-//  取自官方包 CH343SER.EXE，提取方法见 src\drv\README.txt）。
-// ============================================================================
-
+// CH343 driver bootstrap: extract the embedded signed package, stage it, bind
+// exact INF hardware IDs to present devices, then wait for the COM interface.
+// A staged package or a successful bus scan is not proof of a usable device.
+// Driver repair and protocol handshaking run after the main window is shown.
+// Administrator rights are supplied by the application manifest.
 #include "App.h"
+#include "WchHardwareId.h"
 #include "serialport.h"     // makcu::SerialPort::findMakcuPorts（判断盒子串口在不在）
 
 #include <cstdarg>
@@ -64,9 +28,13 @@
 #define IDR_MAKCU_DRV_DLL_PT_X64    407
 #define IDR_MAKCU_DRV_DLL_PORTS_X86 408
 #define IDR_MAKCU_DRV_DLL_PORTS_X64 409
+#define IDR_MAKCU_DRV_INSTALLER     410
 
 namespace
 {
+
+enum class StartupState { Checking, Repairing, Connecting, Ready, Absent, Failed };
+std::atomic<StartupState> startupState{StartupState::Checking};
 
 struct DrvFile
 {
@@ -74,7 +42,7 @@ struct DrvFile
     const char* name;
 };
 
-// 官方包里的全部 9 个驱动文件（正好是 INF 的 [SourceDisksFiles] 那 9 条）。
+// Nine INF payloads plus the original signed WCH x64 installer.
 const DrvFile kDrvFiles[] = {
     { IDR_MAKCU_DRV_INF,           "CH343SER.INF" },
     { IDR_MAKCU_DRV_CAT,           "CH343SER.CAT" },
@@ -85,6 +53,7 @@ const DrvFile kDrvFiles[] = {
     { IDR_MAKCU_DRV_DLL_PT_X64,    "CH343PTA64.DLL" },
     { IDR_MAKCU_DRV_DLL_PORTS_X86, "CH343PORTS.dll" },
     { IDR_MAKCU_DRV_DLL_PORTS_X64, "CH343PORTSA64.dll" },
+    { IDR_MAKCU_DRV_INSTALLER,     "DRVSETUP64\\DRVSETUP64.exe" },
 };
 
 const char* kInfName = "CH343SER.INF";
@@ -100,9 +69,11 @@ void drvLog(const char* fmt, ...)
     FILE* f = g_logFile();
     if (f)
     {
+        _lock_file(f);
         vfprintf(f, fmt, ap);
         fputc('\n', f);
         fflush(f);
+        _unlock_file(f);
     }
     va_end(ap);
 }
@@ -175,6 +146,46 @@ std::string system32Path(const char* name)
     return std::string(dir) + "\\" + name;
 }
 
+// The signed x64 installer bundled inside CH343SER.EXE documents /S as
+// implicit installation (not /P, which only preinstalls the package).
+// Preserve the original package layout: on x64 Windows the installer strips
+// two components off its module path to find the INF. CWD alone cannot fix it.
+// root/CH343SER.INF, root/<payloads>, root/DRVSETUP64/DRVSETUP64.exe.
+bool runOfficialInstaller(const std::string& dir, DWORD& code)
+{
+    const std::string exe = dir + "\\DRVSETUP64\\DRVSETUP64.exe";
+    if (!fileExists(dir + "\\" + kInfName) || !fileExists(exe)) {
+        code = ERROR_FILE_NOT_FOUND;
+        drvLog("[drv] official installer layout incomplete: %s", dir.c_str());
+        return false;
+    }
+    const std::string command = "\"" + exe + "\" /S";
+    std::vector<char> args(command.begin(), command.end());
+    args.push_back(0);
+    STARTUPINFOA si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+    PROCESS_INFORMATION pi{};
+    code = ERROR_SUCCESS;
+    if (!CreateProcessA(exe.c_str(), args.data(), nullptr, nullptr, FALSE,
+                        CREATE_NO_WINDOW, nullptr, dir.c_str(), &si, &pi)) {
+        code = GetLastError();
+        drvLog("[drv] official installer launch failed: error=%lu", code);
+        return false;
+    }
+    CloseHandle(pi.hThread);
+    // Do not remove the extracted files or start a second installer if this
+    // one has not finished. It may still be modifying a device's driver.
+    const DWORD wait = WaitForSingleObject(pi.hProcess, 120000);
+    const bool finished = wait == WAIT_OBJECT_0;
+    if (!finished) code = wait == WAIT_TIMEOUT ? WAIT_TIMEOUT : GetLastError();
+    else if (!GetExitCodeProcess(pi.hProcess, &code)) code = GetLastError();
+    CloseHandle(pi.hProcess);
+    drvLog("[drv] official DRVSETUP64.exe /S: finished=%d code=%lu", finished, code);
+    return finished;
+}
+
 // ---- 盒子的串口出现了没有（最直接的“能用”判据）------------------------------
 bool makcuPortPresent(std::string* portOut)
 {
@@ -183,9 +194,18 @@ bool makcuPortPresent(std::string* portOut)
     return !ports.empty();
 }
 
+bool waitForMakcuPort(std::string* portOut, DWORD timeoutMs)
+{
+    const ULONGLONG deadline = GetTickCount64() + timeoutMs;
+    do {
+        if (makcuPortPresent(portOut)) return true;
+        if (GetTickCount64() >= deadline) return false;
+        Sleep(250);
+    } while (true);
+}
+
 // ---- 找出所有 WCH(CH34x) 设备的实例 ID ---------------------------------------
-// INF 支持的硬件 ID 是 USB\VID_1A86&PID_55D2/55D3/55D4/55D5/55D6/55D7/55D8/55DA…/55DE/55DF，
-// 统一按前缀 "USB\VID_1A86&PID_55D" 匹配即可（Makcu 盒子是 PID_55D3）。
+// Exact supported IDs are shared with serial-port discovery in WchHardwareId.h.
 struct WchDevice
 {
     std::string instanceId;
@@ -212,10 +232,9 @@ std::vector<WchDevice> findWchDevices()
             continue;
 
         WchDevice item;
-        for (const char* p = hwids; *p; p += strlen(p) + 1)
-        {
-            if (_strnicmp(p, "USB\\VID_1A86&PID_55D", 21) == 0) { item.hardwareId = p; break; }
-        }
+        if (type == REG_MULTI_SZ)
+            if (const char* id = wch::findSupportedHardwareId(hwids, need))
+                item.hardwareId = id;
         if (item.hardwareId.empty()) continue;
 
         char inst[512] = {};
@@ -236,7 +255,7 @@ std::vector<WchDevice> findWchDevices()
 // SETUP.EXE 里那句 "安装成功!UpdateDriverForPlugA…" 就是写在调用点上的。
 // 它会：把驱动装到所有在场匹配设备 + 重启这些设备 —— 所以**不需要拔插**。
 // 只跑 pnputil /add-driver 只是把包放进系统，达不到这个效果。
-int forceInstallOnPresentDevices(const std::string& infPath)
+int forceInstallOnPresentDevices(const std::string& infPath, bool& rebootRequired)
 {
     int ok = 0;
     for (const WchDevice& d : findWchDevices())
@@ -245,15 +264,49 @@ int forceInstallOnPresentDevices(const std::string& infPath)
         const BOOL r = UpdateDriverForPlugAndPlayDevicesA(
             nullptr, d.hardwareId.c_str(), infPath.c_str(),
             INSTALLFLAG_FORCE | INSTALLFLAG_NONINTERACTIVE, &needReboot);
-        drvLog("[drv] UpdateDriverForPlugAndPlayDevices(%s) → %s%s",
+        const DWORD error = r ? ERROR_SUCCESS : GetLastError();
+        rebootRequired = rebootRequired || needReboot != FALSE;
+        drvLog("[drv] UpdateDriverForPlugAndPlayDevices(%s) → %s%s error=%lu",
                d.instanceId.c_str(), r ? "成功" : "失败",
-               (r && needReboot) ? "（需重启）" : "");
+               needReboot ? "（需重启）" : "", error);
         if (r) ++ok;
     }
     return ok;
 }
 
-// ---- 重枚举设备节点（等价于“拔插一次”）---------------------------------------
+// Recovery after installing: request a real stop/start of only matching
+// devices. Reenumerating a leaf devnode alone does not restart its driver.
+void restartPresentDevices(bool& rebootRequired)
+{
+    HDEVINFO set = SetupDiCreateDeviceInfoList(nullptr, nullptr);
+    if (set == INVALID_HANDLE_VALUE) return;
+    for (const WchDevice& device : findWchDevices()) {
+        SP_DEVINFO_DATA data{};
+        data.cbSize = sizeof(data);
+        if (!SetupDiOpenDeviceInfoA(set, device.instanceId.c_str(), nullptr, 0, &data)) {
+            drvLog("[drv] restart open failed: %s error=%lu", device.instanceId.c_str(), GetLastError());
+            continue;
+        }
+        SP_PROPCHANGE_PARAMS change{};
+        change.ClassInstallHeader.cbSize = sizeof(SP_CLASSINSTALL_HEADER);
+        change.ClassInstallHeader.InstallFunction = DIF_PROPERTYCHANGE;
+        change.StateChange = DICS_PROPCHANGE;
+        change.Scope = DICS_FLAG_CONFIGSPECIFIC;
+        const BOOL ok = SetupDiSetClassInstallParamsA(set, &data,
+            &change.ClassInstallHeader, sizeof(change)) &&
+            SetupDiCallClassInstaller(DIF_PROPERTYCHANGE, set, &data);
+        const DWORD error = ok ? ERROR_SUCCESS : GetLastError();
+        SP_DEVINSTALL_PARAMS_A params{};
+        params.cbSize = sizeof(params);
+        if (SetupDiGetDeviceInstallParamsA(set, &data, &params))
+            rebootRequired = rebootRequired || (params.Flags & (DI_NEEDRESTART | DI_NEEDREBOOT)) != 0;
+        drvLog("[drv] device restart: %s success=%d error=%lu reboot=%d",
+            device.instanceId.c_str(), ok, error, rebootRequired);
+    }
+    SetupDiDestroyDeviceInfoList(set);
+}
+
+// ---- Scan the parent bus; this is not a physical unplug/replug. --------------
 bool reenumerateDevices(std::vector<std::string>& done)
 {
     done.clear();
@@ -262,8 +315,13 @@ bool reenumerateDevices(std::vector<std::string>& done)
         DEVINST dev = 0;
         if (CM_Locate_DevNodeA(&dev, (DEVINSTID_A)d.instanceId.c_str(), CM_LOCATE_DEVNODE_NORMAL) != CR_SUCCESS)
             continue;
-        // 同步重枚举：返回时设备已经重新走完 PnP，后面查串口才查得到
-        if (CM_Reenumerate_DevNode(dev, CM_REENUMERATE_SYNCHRONOUS) == CR_SUCCESS)
+        // Enumerate the parent bus. Returning does not guarantee the COM
+        // interface is ready; callers must wait for it separately.
+        DEVINST parent = 0;
+        if (CM_Get_Parent(&parent, dev, 0) != CR_SUCCESS) parent = dev;
+        const CONFIGRET result = CM_Reenumerate_DevNode(parent, CM_REENUMERATE_SYNCHRONOUS);
+        drvLog("[drv] reenumerate(%s): CR=0x%lx", d.instanceId.c_str(), result);
+        if (result == CR_SUCCESS)
             done.push_back(d.instanceId);
     }
     return !done.empty();
@@ -430,6 +488,9 @@ bool extractDriverFiles(const std::string& dir)
     if (!GetTempPathA(MAX_PATH, tmp)) return false;
     if (!CreateDirectoryA(dir.c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS)
         return false;
+    const std::string installerDir = dir + "\\DRVSETUP64";
+    if (!CreateDirectoryA(installerDir.c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS)
+        return false;
 
     HMODULE mod = GetModuleHandleA(nullptr);
     for (const DrvFile& df : kDrvFiles)
@@ -471,6 +532,7 @@ void cleanupDir(const std::string& dir)
 {
     for (const DrvFile& df : kDrvFiles)
         DeleteFileA((dir + "\\" + df.name).c_str());
+    RemoveDirectoryA((dir + "\\DRVSETUP64").c_str());
     RemoveDirectoryA(dir.c_str());
 }
 
@@ -484,55 +546,39 @@ bool makcuDriverReady()
 {
     // 盒子已经能用（串口出现）＝ 什么都不用做
     if (makcuPortPresent(nullptr)) return true;
-    // 驱动已被设备用着（盒子没插或没识别，但驱动是好的）
-    return driverBound();
+    return findWchDevices().empty() && driverBound();
 }
 
 bool ensureMakcuDriver(bool* installedNow)
 {
     if (installedNow) *installedNow = false;
 
-    // 现场快照写进《Makcu驱动报告.txt》—— 出问题时把这个文件发来就能定位
-    appendReportFile(collectStateText("启动时"));
-
     std::string port;
     if (makcuPortPresent(&port))
     {
         drvLog("[drv] 盒子串口已就绪（%s），无需安装驱动", port.c_str());
-        appendReportFile(collectStateText("无需处理（串口已就绪）"));
         return true;
     }
 
     std::vector<WchDevice> devs = findWchDevices();
-    const bool haveDevice = !devs.empty();
+    bool haveDevice = !devs.empty();
+    const bool bound = driverBound();
     drvLog("[drv] 盒子设备: %s | 驱动已绑定(服务+sys): %s",
-           haveDevice ? "已插上" : "没插", driverBound() ? "是" : "否");
+           haveDevice ? "已插上" : "没插", bound ? "是" : "否");
+    // An unplugged box is not a broken driver. Do not reinstall, scan buses,
+    // collect pnputil reports or wait for a COM interface that cannot appear.
+    if (!haveDevice) {
+        drvLog("[drv] 未发现盒子，跳过安装、硬件扫描及串口等待%s",
+            bound ? "（已有驱动保留）" : "（连接设备后重新启动可自动安装）");
+        return bound;
+    }
+    startupState = StartupState::Repairing;
+    // Full reports spawn pnputil; only collect them when a present device
+    // actually needs driver repair, never on a healthy or unplugged startup.
+    appendReportFile(collectStateText("设备在场但串口未就绪，准备修复"));
     for (const WchDevice& d : devs)
         drvLog("[drv]   在场设备 %s（%s / %s）",
                d.instanceId.c_str(), d.description.c_str(), d.hardwareId.c_str());
-
-    if (driverBound() && !haveDevice)
-    {
-        drvLog("[drv] 驱动已安装，盒子未插。插上后系统会自动装设备，无需再动程序");
-        appendReportFile(collectStateText("无需处理（驱动已装、盒子未插）"));
-        return true;
-    }
-
-    // 驱动是好的、设备也在，却没出串口 → 多半是设备节点还停在旧状态：重枚举一次就好（不用拔插）
-    if (driverBound() && haveDevice)
-    {
-        std::vector<std::string> reenum;
-        reenumerateDevices(reenum);
-        drvLog("[drv] 驱动正常但没出串口 → 已重枚举 %d 个设备节点", (int)reenum.size());
-        if (makcuPortPresent(&port))
-        {
-            drvLog("[drv] 重枚举后盒子已识别为 %s（没有拔插）", port.c_str());
-            appendReportFile(collectStateText("重枚举后已识别"));
-            if (installedNow) *installedNow = true;
-            return true;
-        }
-        drvLog("[drv] 重枚举后仍无串口 → 继续走重装流程");
-    }
 
     drvLog("[drv] 未检测到可用驱动 → 开始从 EXE 资源安装（提权=%d）", (int)isElevated());
 
@@ -549,12 +595,26 @@ bool ensureMakcuDriver(bool* installedNow)
     {
         drvLog("[drv] 驱动文件释放失败");
         cleanupDir(dir);
-        MessageBoxA(nullptr,
-            "Makcu 驱动文件释放失败，请看 EXE 目录下的 SagaApp_startup.log（[drv] 开头那几行）",
-            "驱动安装失败", MB_OK | MB_ICONWARNING);
         return false;
     }
     drvLog("[drv] 已释放 %d 个驱动文件到 %s", (int)(sizeof(kDrvFiles) / sizeof(kDrvFiles[0])), dir.c_str());
+
+    DWORD officialCode = 0;
+    if (!runOfficialInstaller(dir, officialCode)) {
+        // Preserve files while the installer may still be running.
+        drvLog("[drv] official installer incomplete; files retained: %s", dir.c_str());
+        appendReportFile(collectStateText("官方安装器未完成"));
+        return false;
+    }
+    if (installedNow) *installedNow = true;
+    if (waitForMakcuPort(&port, 10000)) {
+        drvLog("[drv] official installation: port ready=%s", port.c_str());
+        cleanupDir(dir);
+        appendReportFile(collectStateText("官方安装器完成，串口已就绪"));
+        return true;
+    }
+    haveDevice = haveDevice || !findWchDevices().empty();
+    drvLog("[drv] official installation returned but no usable port; attempting PnP recovery");
 
     const std::string pnputil = system32Path("pnputil.exe");
     const std::string infPath = dir + "\\" + kInfName;
@@ -566,28 +626,27 @@ bool ensureMakcuDriver(bool* installedNow)
     drvLog("[drv] pnputil /add-driver 退出码=%lu", (unsigned long)code);
     if (!out.empty()) drvLog("[drv] pnputil 输出:\n%s", out.c_str());
 
-    // 0 = 成功；3010 = 成功但需重启；3011 = 已存在（不同版本时的提示）
-    const bool ok = ran && (code == 0 || code == 3010 || code == 3011);
+    // 3010/3011 indicate a required system restart/service restart, not "already exists".
+    bool rebootRequired = code == ERROR_SUCCESS_REBOOT_REQUIRED ||
+                          code == ERROR_SUCCESS_RESTART_REQUIRED;
+    const bool ok = ran && (code == ERROR_SUCCESS || rebootRequired);
     if (!ok)
     {
         drvLog("[drv] 安装失败，驱动文件保留在 %s 供排查", dir.c_str());
-        MessageBoxA(nullptr,
-            ("Makcu 驱动安装失败（pnputil 退出码 " + std::to_string((unsigned long)code) +
-             "）。\n\n详情见 EXE 目录下的 SagaApp_startup.log（[drv] 开头的行）。\n"
-             "也可以手动双击官方 CH343SER.EXE 安装。").c_str(),
-            "驱动安装失败", MB_OK | MB_ICONWARNING);
         return false;
     }
 
     // ★ 关键一步 1：把驱动强制装到「当前在场」的匹配设备上（官方安装器的核心动作）。
     //   这一步会让设备重新启动，所以盒子插着也能立刻生效、不用拔插。
     //   必须在 cleanupDir 之前调用 —— 它需要 INF 的路径。
-    const int forced = forceInstallOnPresentDevices(infPath);
+    const int forced = forceInstallOnPresentDevices(infPath, rebootRequired);
     drvLog("[drv] 强制安装到在场设备：%d 个", forced);
+
+    if (!waitForMakcuPort(&port, 3000)) restartPresentDevices(rebootRequired);
 
     cleanupDir(dir);
 
-    // ★ 关键一步 2：重枚举设备节点 —— 另一条“等价于拔插”的路（对没走上面那步的情况兜底）
+    // Scan the parent bus after binding; COM readiness is checked below.
     std::vector<std::string> reenum;
     const bool anyReenum = reenumerateDevices(reenum);
     if (anyReenum)
@@ -610,17 +669,63 @@ bool ensureMakcuDriver(bool* installedNow)
 
     // 复查结果
     std::string portAfter;
-    if (makcuPortPresent(&portAfter))
+    const bool portReady = waitForMakcuPort(&portAfter, haveDevice ? 15000 : 1000);
+    if (portReady)
         drvLog("[drv] 安装完成，盒子已识别为 %s%s", portAfter.c_str(),
-               code == 3010 ? "（建议重启一次）" : "");
+               rebootRequired ? "（系统报告需要重启）" : "");
     else if (haveDevice)
         drvLog("[drv] 设备在场但还没出串口%s。请把 EXE 目录下的『Makcu驱动报告.txt』发来排查",
-               code == 3010 ? "（需重启生效）" : "");
+               rebootRequired ? "（需重启生效）" : "");
     else
         drvLog("[drv] 安装完成%s；盒子还没插 —— 插上即可用，不需要拔插第二次",
-               code == 3010 ? "（需重启生效）" : "");
+               rebootRequired ? "（需重启生效）" : "");
 
     appendReportFile(collectStateText("处理之后"));
     if (installedNow) *installedNow = true;
-    return true;
+    return portReady || (!haveDevice && findWchDevices().empty() && !rebootRequired);
+}
+
+void makcuStartupThread()
+{
+    const ULONGLONG started = GetTickCount64();
+    try {
+        bool installed = false;
+        const bool driverReady = ensureMakcuDriver(&installed);
+        drvLog("[05b] CH343 驱动 %s%s，后台用时 %llums", driverReady ? "就绪" : "未就绪",
+            installed ? "（本次已安装）" : "", GetTickCount64() - started);
+
+        // No device means no serial probes, and in particular no ten-second
+        // retry loop. A present device still gets the existing bounded retry.
+        if (!makcuPortPresent(nullptr)) {
+            startupState = findWchDevices().empty() ? StartupState::Absent : StartupState::Failed;
+            drvLog("[06] 无可用盒子串口，跳过连接等待；后台初始化用时 %llums", GetTickCount64() - started);
+            return;
+        }
+        startupState = StartupState::Connecting;
+        const ULONGLONG deadline = GetTickCount64() + 10000;
+        bool connected = false;
+        do {
+            connected = makcuConnect(0);
+            if (connected || !g.running.load() || !makcuPortPresent(nullptr) || GetTickCount64() >= deadline) break;
+            Sleep(500);
+        } while (g.running.load());
+        startupState = connected ? StartupState::Ready : StartupState::Failed;
+        drvLog("[06] makcuConnect %s；后台初始化用时 %llums", connected ? "成功" : "失败（未收到有效设备应答）",
+            GetTickCount64() - started);
+    } catch (const std::exception& error) {
+        startupState = StartupState::Failed;
+        drvLog("[hw] 后台初始化异常：%s", error.what());
+    }
+}
+
+const char* makcuStartupStatus()
+{
+    switch (startupState.load()) {
+    case StartupState::Checking: return "MAKCU 检测中";
+    case StartupState::Repairing: return "MAKCU 安装驱动中";
+    case StartupState::Connecting: return "MAKCU 连接中";
+    case StartupState::Ready: return saga::makcuIsConnected() ? "MAKCU 已连接" : "MAKCU 已断开";
+    case StartupState::Absent: return "MAKCU 未插入";
+    default: return "MAKCU 异常，见日志";
+    }
 }

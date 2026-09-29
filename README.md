@@ -72,7 +72,8 @@ Makcu 盒子用的是 WCH **CH343** 芯片，Windows 没有内置它的驱动，
 1. 判断是否真的能用：盒子的串口在不在；不在就看服务键 `CH34*` 与 `System32\drivers\CH343S64.SYS` 是否都在
    （**只看驱动包在不在是不够的** —— WCH 安装器卸载后驱动包会残留）
 2. 没装就把官方包里的 9 个驱动文件释放到 `%TEMP%\SagaMakcuDrv_<pid>\`
-3. `pnputil /add-driver CH343SER.INF /install` + `pnputil /scan-devices`（让已插着的盒子立刻可用）
+3. `pnputil /add-driver CH343SER.INF /install` + **重枚举设备节点**（`CM_Reenumerate_DevNode`）+ `pnputil /scan-devices`
+   —— 重枚举这一步是关键：它等价于帮你拔插一次，所以**盒子不用拔插就能用**
 
 过程全在 `SagaApp_startup.log` 的 `[drv]` 行里（含 pnputil 原文）；装失败会弹一个消息框。
 

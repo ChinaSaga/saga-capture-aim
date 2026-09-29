@@ -15,7 +15,21 @@
 //    1. 盒子的串口在不在（makcu::SerialPort::findMakcuPorts）→ 在就一切正常，直接收工
 //    2. 驱动是否真的被设备用着：服务键 CH34* 存在 **且** System32\drivers\CH343S64.SYS 在
 //       （卸载会留下孤儿服务键，所以必须两个条件都满足）
-//    3. 以上都不满足 → 释放资源 + pnputil 安装 + scan-devices（幂等，重复跑也不会出重复包）
+//    3. 以上都不满足 → 释放资源 + pnputil 安装 + **重枚举设备节点** + scan-devices
+//
+//  ---------------------------------------------------------------------------
+//  为什么必须重枚举设备（2026-09-29 补，官方安装器就是这么干的）
+//  ---------------------------------------------------------------------------
+//  用户问过：“官方 CH343SER.EXE 装完不用拔插就能用，为什么你的不行？”
+//  反查官方安装器（SETUP.EXE / DRVSETUP64.exe）的导入表，它用的是：
+//      SetupCopyOEMInfA                把 INF 复制进驱动仓库（≈ pnputil /add-driver）
+//      SetupDiGetClassDevsA + Enum…    枚举设备
+//      SetupDiBuildDriverInfoList …    找匹配的驱动
+//      SetupDiCallClassInstaller       真正把驱动装到设备上
+//      SetupInstallFilesFromInfSectionA 按 INF 段把文件铺到 System32\drivers 等目录
+//      CM_Locate_DevNodeA + CM_Reenumerate_DevNode   ★ 重枚举设备节点＝等价于拔插一次
+//  我们之前只做了“把驱动包放进系统”，设备节点还是老状态，所以得靠拔插才生效。
+//  现在补上 CM_Locate_DevNode + CM_Reenumerate_DevNode，效果与官方安装器一致。
 //
 //  安装过程完全无窗口；失败会弹一个消息框（否则用户根本不知道没装上）。
 //
@@ -30,7 +44,13 @@
 #include "serialport.h"     // makcu::SerialPort::findMakcuPorts（判断盒子串口在不在）
 
 #include <cstdarg>
+#include <cstring>
 #include <shellapi.h>
+#include <setupapi.h>       // SetupDi* 枚举设备
+#include <cfgmgr32.h>       // CM_Locate_DevNode / CM_Reenumerate_DevNode
+
+#pragma comment(lib, "setupapi.lib")
+#pragma comment(lib, "cfgmgr32.lib")
 
 // 资源 ID 与 DriverRes.rc 保持一致
 #define IDR_MAKCU_DRV_INF           401
@@ -161,6 +181,59 @@ bool makcuPortPresent(std::string* portOut)
     return !ports.empty();
 }
 
+// ---- 找出所有 WCH(CH34x) 设备的实例 ID ---------------------------------------
+// INF 支持的硬件 ID 是 USB\VID_1A86&PID_55D2/55D3/55D4/55D5/55D6/55D7/55D8/55DA…/55DE/55DF，
+// 统一按前缀 "USB\VID_1A86&PID_55D" 匹配即可（Makcu 盒子是 PID_55D3）。
+std::vector<std::string> findWchDeviceInstances()
+{
+    std::vector<std::string> ids;
+
+    HDEVINFO set = SetupDiGetClassDevsA(nullptr, nullptr, nullptr,
+                                        DIGCF_ALLCLASSES | DIGCF_PRESENT);
+    if (set == INVALID_HANDLE_VALUE) return ids;
+
+    SP_DEVINFO_DATA dev{};
+    dev.cbSize = sizeof(dev);
+    for (DWORD i = 0; SetupDiEnumDeviceInfo(set, i, &dev); ++i)
+    {
+        char hwids[1024] = {};
+        DWORD type = 0, need = 0;
+        if (!SetupDiGetDeviceRegistryPropertyA(set, &dev, SPDRP_HARDWAREID, &type,
+                                               (PBYTE)hwids, sizeof(hwids), &need))
+            continue;
+
+        bool hit = false;
+        for (const char* p = hwids; *p; p += strlen(p) + 1)
+        {
+            if (_strnicmp(p, "USB\\VID_1A86&PID_55D", 21) == 0) { hit = true; break; }
+        }
+        if (!hit) continue;
+
+        char inst[512] = {};
+        if (SetupDiGetDeviceInstanceIdA(set, &dev, inst, sizeof(inst), nullptr))
+            ids.emplace_back(inst);
+    }
+
+    SetupDiDestroyDeviceInfoList(set);
+    return ids;
+}
+
+// ---- 重枚举设备节点（等价于“拔插一次”，官方安装器的关键一步）------------------
+bool reenumerateDevices(std::vector<std::string>& done)
+{
+    done.clear();
+    for (const std::string& id : findWchDeviceInstances())
+    {
+        DEVINST dev = 0;
+        if (CM_Locate_DevNodeA(&dev, (DEVINSTID_A)id.c_str(), CM_LOCATE_DEVNODE_NORMAL) != CR_SUCCESS)
+            continue;
+        // 同步重枚举：返回时设备已经重新走完 PnP，后面查串口才查得到
+        if (CM_Reenumerate_DevNode(dev, CM_REENUMERATE_SYNCHRONOUS) == CR_SUCCESS)
+            done.push_back(id);
+    }
+    return !done.empty();
+}
+
 // ---- 驱动是否被设备用着 ------------------------------------------------------
 // 注意：卸载驱动后服务键可能残留成孤儿键，所以必须同时确认 .sys 文件还在。
 // 驱动包本身在不在 DriverStore 里**不作为**判据（见文件头注释）。
@@ -266,10 +339,30 @@ bool ensureMakcuDriver(bool* installedNow)
         return true;
     }
 
-    if (driverBound())
+    std::vector<std::string> devs = findWchDeviceInstances();
+    const bool haveDevice = !devs.empty();
+    drvLog("[drv] 盒子设备: %s | 驱动已绑定(服务+sys): %s",
+           haveDevice ? "已插上" : "没插", driverBound() ? "是" : "否");
+
+    if (driverBound() && !haveDevice)
     {
-        drvLog("[drv] 驱动已安装（服务与 CH343S64.SYS 均在），盒子未插或未识别，跳过安装");
+        drvLog("[drv] 驱动已安装，盒子未插。插上后系统会自动装设备，无需再动程序");
         return true;
+    }
+
+    // 驱动是好的、设备也在，却没出串口 → 多半是设备节点还停在旧状态：重枚举一次就好（不用拔插）
+    if (driverBound() && haveDevice)
+    {
+        std::vector<std::string> reenum;
+        reenumerateDevices(reenum);
+        drvLog("[drv] 驱动正常但没出串口 → 已重枚举 %d 个设备节点", (int)reenum.size());
+        if (makcuPortPresent(&port))
+        {
+            drvLog("[drv] 重枚举后盒子已识别为 %s（没有拔插）", port.c_str());
+            if (installedNow) *installedNow = true;
+            return true;
+        }
+        drvLog("[drv] 重枚举后仍无串口 → 继续走重装流程");
     }
 
     drvLog("[drv] 未检测到可用驱动 → 开始从 EXE 资源安装（提权=%d）", (int)isElevated());
@@ -317,22 +410,41 @@ bool ensureMakcuDriver(bool* installedNow)
         return false;
     }
 
-    // 让已经插着的盒子立刻绑定驱动（不必拔插）
+    cleanupDir(dir);
+
+    // ★ 关键一步：重枚举设备节点 —— 等价于拔插一次，官方安装器也是这么做的。
+    //   不做这一步，盒子就得手动拔插才会从“已存在但没驱动”变成可用。
+    std::vector<std::string> reenum;
+    const bool anyReenum = reenumerateDevices(reenum);
+    if (anyReenum)
+    {
+        std::string joined;
+        for (const std::string& s : reenum) joined += (joined.empty() ? "" : ", ") + s;
+        drvLog("[drv] 已重枚举 %d 个 WCH 设备节点（无需拔插）：%s",
+               (int)reenum.size(), joined.c_str());
+    }
+    else
+    {
+        drvLog("[drv] 当前没插着 WCH 设备；插上后系统会自动装设备（可能会提示“正在安装设备驱动软件”）");
+    }
+
+    // 兜底：再让系统扫描一遍新硬件（重枚举已经做了，这里是双保险）
     DWORD scanCode = 0;
     std::string scanOut;
     runCapture(pnputil.c_str(), "/scan-devices", scanCode, scanOut);
     drvLog("[drv] pnputil /scan-devices 退出码=%lu", (unsigned long)scanCode);
 
-    cleanupDir(dir);
-
-    // 复查：盒子插着的话现在应该已经出串口了
+    // 复查结果
     std::string portAfter;
     if (makcuPortPresent(&portAfter))
         drvLog("[drv] 安装完成，盒子已识别为 %s%s", portAfter.c_str(),
                code == 3010 ? "（建议重启一次）" : "");
+    else if (anyReenum)
+        drvLog("[drv] 安装 + 重枚举完成，但仍未见串口%s。可在设备管理器看该设备有无黄色感叹号，"
+               "或重启一次再试", code == 3010 ? "（需重启生效）" : "");
     else
-        drvLog("[drv] 安装完成%s；盒子还没插（或未被识别）——插上后系统会自动装设备，"
-               "可能会提示“正在安装设备驱动软件”", code == 3010 ? "（需重启生效）" : "");
+        drvLog("[drv] 安装完成%s；盒子还没插 —— 插上即可用，不需要拔插第二次",
+               code == 3010 ? "（需重启生效）" : "");
 
     if (installedNow) *installedNow = true;
     return true;

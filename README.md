@@ -70,7 +70,7 @@ Makcu 盒子用的是 WCH **CH343** 芯片，Windows 没有内置它的驱动，
 本程序把驱动（WCH 官方 2.0.2025.03，WHQL 签名）以资源形式打包进 EXE，启动时：
 
 1. 查系统是否已装（`pnputil /enum-drivers` 里找 `ch343ser.inf`，另有 `System32\drivers\CH343S64.SYS` 快路径）
-2. 没装就把 6 个驱动文件释放到 `%TEMP%\SagaMakcuDrv_<pid>\`
+2. 没装就把官方包里的 9 个驱动文件释放到 `%TEMP%\SagaMakcuDrv_<pid>\`
 3. `pnputil /add-driver CH343SER.INF /install` + `pnputil /scan-devices`（让已插着的盒子立刻可用）
 
 **代价：安装驱动要管理员权限**，所以 EXE 清单声明了 `requireAdministrator` —— 双击时会弹一次系统 UAC。

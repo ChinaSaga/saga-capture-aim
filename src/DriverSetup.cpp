@@ -4,9 +4,10 @@
 //  为什么要它：CH343 是 USB 转串口芯片，Windows 必须装好它的功能驱动才会
 //  出现 COM 口；没装驱动时程序枚举不到盒子，表现为“连不上 Makcu”。
 //
-//  做法（不碰 WCH 那个图形安装器）：
-//    1. 先查系统是否已经装过这个驱动包（pnputil /enum-drivers 里找 ch343ser.inf）
-//    2. 没装就从本 EXE 的资源里把 6 个驱动文件释放到 %TEMP%
+//  做法（不碰 WCH 那个图形安装器，pnputil 一行命令搞定）：
+//    1. 先查系统是否已经装过这个驱动包（快路径看 System32\drivers\CH343S64.SYS，
+//       否则跑 pnputil /enum-drivers 找 ch343ser.inf）
+//    2. 没装就从本 EXE 的资源里把 9 个驱动文件释放到 %TEMP%
 //    3. 用微软自带的 pnputil /add-driver <INF> /install 安装（无任何窗口）
 //    4. 再 pnputil /scan-devices 让已经插着的盒子立刻绑定驱动
 //
@@ -14,7 +15,8 @@
 //    所以启动时就已经提权，这一步能全程无提示完成。
 //    如果哪次是以普通用户身份运行的，这里会失败并把 pnputil 的原文记进日志。
 //
-//  驱动来源与版本见 src\DriverRes.rc 顶部注释（WCH 官方 2.0.2025.03，WHQL 签名）。
+//  驱动来源与版本见 src\DriverRes.rc 顶部注释（WCH 官方 2.0.2025.03，WHQL 签名，
+//  取自官方包 CH343SER.EXE，提取方法见 src\drv\README.txt）。
 // ============================================================================
 
 #include "App.h"
@@ -25,10 +27,13 @@
 // 资源 ID 与 DriverRes.rc 保持一致
 #define IDR_MAKCU_DRV_INF           401
 #define IDR_MAKCU_DRV_CAT           402
-#define IDR_MAKCU_DRV_SYS           403
-#define IDR_MAKCU_DRV_DLL_PT        404
-#define IDR_MAKCU_DRV_DLL_PT_A64    405
-#define IDR_MAKCU_DRV_DLL_PORTS_A64 406
+#define IDR_MAKCU_DRV_SYS_X86       403
+#define IDR_MAKCU_DRV_SYS_X64       404
+#define IDR_MAKCU_DRV_SYS_ARM64     405
+#define IDR_MAKCU_DRV_DLL_PT_X86    406
+#define IDR_MAKCU_DRV_DLL_PT_X64    407
+#define IDR_MAKCU_DRV_DLL_PORTS_X86 408
+#define IDR_MAKCU_DRV_DLL_PORTS_X64 409
 
 namespace
 {
@@ -39,14 +44,19 @@ struct DrvFile
     const char* name;
 };
 
-// x64 安装需要的就是这 6 个（INF 的 [CH343SER_Inst.NTamd64] 只引用这些）
+// 官方包里的全部 9 个驱动文件（正好是 INF 的 [SourceDisksFiles] 那 9 条）。
+// 之前只带 x64 的 6 个，在本机（驱动已存在）能装，但缺文件的包在干净系统上有风险，
+// 现在按官方原样全带 —— 反正一共才 640 KB 左右，打进 EXE 换省心。
 const DrvFile kDrvFiles[] = {
     { IDR_MAKCU_DRV_INF,           "CH343SER.INF" },
     { IDR_MAKCU_DRV_CAT,           "CH343SER.CAT" },
-    { IDR_MAKCU_DRV_SYS,           "CH343S64.SYS" },
-    { IDR_MAKCU_DRV_DLL_PT,        "CH343PT.DLL" },
-    { IDR_MAKCU_DRV_DLL_PT_A64,    "CH343PTA64.DLL" },
-    { IDR_MAKCU_DRV_DLL_PORTS_A64, "CH343PORTSA64.DLL" },
+    { IDR_MAKCU_DRV_SYS_X86,       "CH343SER.SYS" },
+    { IDR_MAKCU_DRV_SYS_X64,       "CH343S64.SYS" },
+    { IDR_MAKCU_DRV_SYS_ARM64,     "CH343M64.SYS" },
+    { IDR_MAKCU_DRV_DLL_PT_X86,    "CH343PT.DLL" },
+    { IDR_MAKCU_DRV_DLL_PT_X64,    "CH343PTA64.DLL" },
+    { IDR_MAKCU_DRV_DLL_PORTS_X86, "CH343PORTS.dll" },
+    { IDR_MAKCU_DRV_DLL_PORTS_X64, "CH343PORTSA64.dll" },
 };
 
 const char* kInfName = "CH343SER.INF";

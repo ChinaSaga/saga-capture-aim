@@ -1,47 +1,55 @@
 // ============================================================================
 //  DriverRes.rc —— 把 Makcu（WCH CH343 串口）驱动打进 EXE 资源
 //
-//  来源：WCH 官方 CH343 驱动包（makcu驱动.EXE 里是它的 WinRAR 自解压版）
-//        版本 2.0.2025.03 / 2025-03-03，WHQL 签名（Microsoft Windows Hardware
-//        Compatibility Publisher），发布名 oem244.inf。
-//        文件取自本机已安装的驱动仓库：
-//        C:\Windows\System32\DriverStore\FileRepository\ch343ser.inf_amd64_*
+//  来源：官方驱动包 CH343SER.EXE（WinRAR 自解压，官方原版）。
+//        它带的自解压脚本支持静默解包，所以**不需要任何解压工具**：
+//            CH343SER.EXE -s2 -d<目标目录>
+//        （-s2 = 不显示任何界面。它会顺带启动 DRVSETUP64.exe，
+//          那是 WCH 的图形安装器 —— 我们用不到，pnputil 装 INF 更干净，
+//          所以解包后直接忽略它，见 .workbuddy\extract_driver.py）
 //
-//  这 6 个文件是 x64 安装所必需的（[CH343SER_Inst.NTamd64] 只用这些）：
-//    CH343SER.INF            INF 本体
-//    CH343SER.CAT            签名目录（不能改，改了签名就废）
-//    CH343S64.SYS            x64 驱动本体（SYSA64）
-//    CH343PTA64.DLL          x64 属性页（DLLA64）
-//    CH343PORTSA64.DLL       x64 端口配置（DLLA64）
-//    CH343PT.DLL             WOW64 属性页（WOWDLL）
+//  驱动版本 2.0.2025.03 / 2025-03-03，WHQL 签名
+//  （Microsoft Windows Hardware Compatibility Publisher），发布名 oem244.inf。
 //
-//  CH343SER.SYS / CH343M64.SYS / CH343PORTS.DLL 分别是 x86 / ARM64 / x86 用的，
-//  64 位系统不需要，故不带。
+//  这里放的是官方包里的**全部 9 个驱动文件**，正好覆盖 INF 的 [SourceDisksFiles]：
+//    CH343SER.INF               INF 本体
+//    CH343SER.CAT               签名目录（一个字节都不能改）
+//    CH343SER.SYS               x86    驱动（[CH343SER_Inst.NT]      → CopyFiles.SYS）
+//    CH343S64.SYS               x64    驱动（[CH343SER_Inst.NTamd64] → CopyFiles.SYSA64）
+//    CH343M64.SYS               ARM64  驱动（[CH343SER_Inst.NTARM64] → CopyFiles.SYSM64）
+//    CH343PT.DLL                x86 属性页（CopyFiles.DLL / WOWDLL）
+//    CH343PTA64.DLL             x64 属性页（CopyFiles.DLLA64）
+//    CH343PORTS.dll             x86 端口配置（CopyFiles.DLL）
+//    CH343PORTSA64.dll          x64 端口配置（CopyFiles.DLLA64）
+//
+//  ⚠ 早期版本只带了 x64 那 6 个文件，虽然在本机（驱动已存在）能装，
+//    但 [SourceDisksFiles] 列着 9 个，缺文件的包在干净系统上有装不上的风险，
+//    所以现在按官方原样全带。
+//
+//  ⚠ 这里**不要**放提权清单（RT_MANIFEST）！
+//    清单由工具链自己管：
+//      · MSBuild / VS ：vcxproj 里 EnableUAC + UACExecutionLevel=RequireAdministrator
+//      · 手工 build.sh：编译 src\AppManifest.rc 单独产出一个 .res 再链接
+//    之前把清单也塞进本文件，结果 MSBuild 又生成一份 → 链接期报
+//    “资源重复。类型: MANIFEST，名称: 1，语言: 0x0409”(CVT1100)。
 // ============================================================================
 
-// ---------------------------------------------------------------------------
-//  ⚠ 这里**不要**放提权清单（RT_MANIFEST）！
-//
-//  清单由工具链自己管：
-//    · MSBuild / VS ：vcxproj 里 EnableUAC + UACExecutionLevel=RequireAdministrator
-//    · 手工 build.sh：编译 src\AppManifest.rc 单独产出一个 .res 再链接
-//  之前把清单也塞进本文件，结果 MSBuild 又生成一份 → 链接期报
-//  “资源重复。类型: MANIFEST，名称: 1，语言: 0x0409”(CVT1100)。
-// ---------------------------------------------------------------------------
+#define IDR_MAKCU_DRV_INF           401
+#define IDR_MAKCU_DRV_CAT           402
+#define IDR_MAKCU_DRV_SYS_X86       403
+#define IDR_MAKCU_DRV_SYS_X64       404
+#define IDR_MAKCU_DRV_SYS_ARM64     405
+#define IDR_MAKCU_DRV_DLL_PT_X86    406
+#define IDR_MAKCU_DRV_DLL_PT_X64    407
+#define IDR_MAKCU_DRV_DLL_PORTS_X86 408
+#define IDR_MAKCU_DRV_DLL_PORTS_X64 409
 
-// ---------------------------------------------------------------------------
-//  Makcu(CH343) 驱动文件（RCDATA）
-// ---------------------------------------------------------------------------
-#define IDR_MAKCU_DRV_INF          401
-#define IDR_MAKCU_DRV_CAT          402
-#define IDR_MAKCU_DRV_SYS          403
-#define IDR_MAKCU_DRV_DLL_PT       404
-#define IDR_MAKCU_DRV_DLL_PT_A64   405
-#define IDR_MAKCU_DRV_DLL_PORTS_A64 406
-
-IDR_MAKCU_DRV_INF          RCDATA  "drv\\CH343SER.INF"
-IDR_MAKCU_DRV_CAT          RCDATA  "drv\\CH343SER.CAT"
-IDR_MAKCU_DRV_SYS          RCDATA  "drv\\CH343S64.SYS"
-IDR_MAKCU_DRV_DLL_PT       RCDATA  "drv\\CH343PT.DLL"
-IDR_MAKCU_DRV_DLL_PT_A64   RCDATA  "drv\\CH343PTA64.DLL"
-IDR_MAKCU_DRV_DLL_PORTS_A64 RCDATA "drv\\CH343PORTSA64.DLL"
+IDR_MAKCU_DRV_INF           RCDATA  "drv\\CH343SER.INF"
+IDR_MAKCU_DRV_CAT           RCDATA  "drv\\CH343SER.CAT"
+IDR_MAKCU_DRV_SYS_X86       RCDATA  "drv\\CH343SER.SYS"
+IDR_MAKCU_DRV_SYS_X64       RCDATA  "drv\\CH343S64.SYS"
+IDR_MAKCU_DRV_SYS_ARM64     RCDATA  "drv\\CH343M64.SYS"
+IDR_MAKCU_DRV_DLL_PT_X86    RCDATA  "drv\\CH343PT.DLL"
+IDR_MAKCU_DRV_DLL_PT_X64    RCDATA  "drv\\CH343PTA64.DLL"
+IDR_MAKCU_DRV_DLL_PORTS_X86 RCDATA  "drv\\CH343PORTS.dll"
+IDR_MAKCU_DRV_DLL_PORTS_X64 RCDATA  "drv\\CH343PORTSA64.dll"

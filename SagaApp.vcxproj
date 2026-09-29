@@ -101,8 +101,11 @@
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <!-- 提权清单在 src\DriverRes.rc 里以 RT_MANIFEST 资源提供，别让链接器再生成一份 -->
-      <GenerateManifest>false</GenerateManifest>
+      <!-- 提权清单：装 Makcu(CH343) 驱动需要管理员，见 src\app.manifest。
+           注意别再往 DriverRes.rc 里塞 RT_MANIFEST，否则会出现两份清单，
+           链接报“资源重复。类型: MANIFEST”(CVT1100)。 -->
+      <EnableUAC>true</EnableUAC>
+      <UACExecutionLevel>RequireAdministrator</UACExecutionLevel>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -123,7 +126,8 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>D:\NCNN\x64\lib;D:\openCV\build\x64\vc16\lib;D:\DirectMLx64onnx\ort-dml-x64-1.24.4\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>ncnn.lib;opencv_world4120.lib;onnxruntime.lib;strmiids.lib;winmm.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <GenerateManifest>false</GenerateManifest>
+      <EnableUAC>true</EnableUAC>
+      <UACExecutionLevel>RequireAdministrator</UACExecutionLevel>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>

@@ -20,23 +20,17 @@
 // ============================================================================
 
 // ---------------------------------------------------------------------------
-//  1) 提权清单（RT_MANIFEST，ID 必须是 1）
+//  ⚠ 这里**不要**放提权清单（RT_MANIFEST）！
 //
-//  这里而不是靠链接器的 /MANIFESTUAC：手工构建（build.sh）时 /MANIFESTINPUT 需要
-//  mt.exe，环境里不一定找得到。直接当资源编进去最省事，MSBuild 与脚本两条路通吃
-//  （代价是两边都要关掉清单的自动生成，见 vcxproj 的 GenerateManifest=false 与
-//   build.sh 的 /MANIFEST:NO）。
+//  清单由工具链自己管：
+//    · MSBuild / VS ：vcxproj 里 EnableUAC + UACExecutionLevel=RequireAdministrator
+//    · 手工 build.sh：编译 src\AppManifest.rc 单独产出一个 .res 再链接
+//  之前把清单也塞进本文件，结果 MSBuild 又生成一份 → 链接期报
+//  “资源重复。类型: MANIFEST，名称: 1，语言: 0x0409”(CVT1100)。
 // ---------------------------------------------------------------------------
-//  rc.exe 不认识 RT_MANIFEST 这个宏（那是 winuser.h 里的），不定义就会被当成
-//  字符串型的资源名 “RT_MANIFEST” 写进去，而 Windows 只认**数字型 24**，
-//  结果就是清单形同虚设、程序不会提权。必须显式定义成 24。
-#ifndef RT_MANIFEST
-#define RT_MANIFEST 24
-#endif
-#define CREATEPROCESS_MANIFEST_RESOURCE_ID 1
 
 // ---------------------------------------------------------------------------
-//  2) Makcu(CH343) 驱动文件（RCDATA）
+//  Makcu(CH343) 驱动文件（RCDATA）
 // ---------------------------------------------------------------------------
 #define IDR_MAKCU_DRV_INF          401
 #define IDR_MAKCU_DRV_CAT          402
@@ -44,8 +38,6 @@
 #define IDR_MAKCU_DRV_DLL_PT       404
 #define IDR_MAKCU_DRV_DLL_PT_A64   405
 #define IDR_MAKCU_DRV_DLL_PORTS_A64 406
-
-CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "app.manifest"
 
 IDR_MAKCU_DRV_INF          RCDATA  "drv\\CH343SER.INF"
 IDR_MAKCU_DRV_CAT          RCDATA  "drv\\CH343SER.CAT"

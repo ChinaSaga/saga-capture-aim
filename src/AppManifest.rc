@@ -1,0 +1,22 @@
+// ============================================================================
+//  AppManifest.rc —— 只给**手工构建**（.workbuddy\build.sh）用的提权清单资源
+//
+//  为什么单独一个文件：
+//    MSBuild / VS 那条路由 vcxproj 的 EnableUAC + UACExecutionLevel 自己生成并嵌入清单，
+//    手工脚本没有那套机制（/MANIFESTINPUT 又要 mt.exe），所以脚本这边改成
+//    「rc.exe 把清单编成 .res → 链接时带上 + /MANIFEST:NO」。
+//
+//  两条路都**只有一份**清单，否则链接会报“资源重复。类型: MANIFEST”(CVT1100)。
+//  MSBuild 不编本文件（vcxproj 里只登记了 DriverRes.rc）。
+//
+//  ⚠ 即使只用数字 24：rc.exe 不认识 RT_MANIFEST 这个宏（它在 winuser.h 里），
+//    不显式定义就会被当成**字符串型**资源名“RT_MANIFEST”写进去。Windows 只认数字型 24，
+//    结果清单静默失效、程序不提权，而且编译链接一个错都不报。必须定义成 24。
+// ============================================================================
+
+#ifndef RT_MANIFEST
+#define RT_MANIFEST 24
+#endif
+#define CREATEPROCESS_MANIFEST_RESOURCE_ID 1
+
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "app.manifest"

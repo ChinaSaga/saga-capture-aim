@@ -48,9 +48,11 @@
 #include <shellapi.h>
 #include <setupapi.h>       // SetupDi* 枚举设备
 #include <cfgmgr32.h>       // CM_Locate_DevNode / CM_Reenumerate_DevNode
+#include <newdev.h>         // UpdateDriverForPlugAndPlayDevices（官方安装器同款）
 
 #pragma comment(lib, "setupapi.lib")
 #pragma comment(lib, "cfgmgr32.lib")
+#pragma comment(lib, "newdev.lib")
 
 // 资源 ID 与 DriverRes.rc 保持一致
 #define IDR_MAKCU_DRV_INF           401
@@ -184,13 +186,20 @@ bool makcuPortPresent(std::string* portOut)
 // ---- 找出所有 WCH(CH34x) 设备的实例 ID ---------------------------------------
 // INF 支持的硬件 ID 是 USB\VID_1A86&PID_55D2/55D3/55D4/55D5/55D6/55D7/55D8/55DA…/55DE/55DF，
 // 统一按前缀 "USB\VID_1A86&PID_55D" 匹配即可（Makcu 盒子是 PID_55D3）。
-std::vector<std::string> findWchDeviceInstances()
+struct WchDevice
 {
-    std::vector<std::string> ids;
+    std::string instanceId;
+    std::string hardwareId;     // 喂给 UpdateDriverForPlugAndPlayDevices 的就是这个
+    std::string description;
+};
+
+std::vector<WchDevice> findWchDevices()
+{
+    std::vector<WchDevice> out;
 
     HDEVINFO set = SetupDiGetClassDevsA(nullptr, nullptr, nullptr,
                                         DIGCF_ALLCLASSES | DIGCF_PRESENT);
-    if (set == INVALID_HANDLE_VALUE) return ids;
+    if (set == INVALID_HANDLE_VALUE) return out;
 
     SP_DEVINFO_DATA dev{};
     dev.cbSize = sizeof(dev);
@@ -202,34 +211,60 @@ std::vector<std::string> findWchDeviceInstances()
                                                (PBYTE)hwids, sizeof(hwids), &need))
             continue;
 
-        bool hit = false;
+        WchDevice item;
         for (const char* p = hwids; *p; p += strlen(p) + 1)
         {
-            if (_strnicmp(p, "USB\\VID_1A86&PID_55D", 21) == 0) { hit = true; break; }
+            if (_strnicmp(p, "USB\\VID_1A86&PID_55D", 21) == 0) { item.hardwareId = p; break; }
         }
-        if (!hit) continue;
+        if (item.hardwareId.empty()) continue;
 
         char inst[512] = {};
         if (SetupDiGetDeviceInstanceIdA(set, &dev, inst, sizeof(inst), nullptr))
-            ids.emplace_back(inst);
+            item.instanceId = inst;
+        char desc[256] = {};
+        if (SetupDiGetDeviceRegistryPropertyA(set, &dev, SPDRP_DEVICEDESC, &type,
+                                              (PBYTE)desc, sizeof(desc), nullptr))
+            item.description = desc;
+        out.push_back(item);
     }
 
     SetupDiDestroyDeviceInfoList(set);
-    return ids;
+    return out;
 }
 
-// ---- 重枚举设备节点（等价于“拔插一次”，官方安装器的关键一步）------------------
+// ---- 把驱动强制装到「当前在场的匹配设备」上（～官方安装器的核心动作）---------
+// SETUP.EXE 里那句 "安装成功!UpdateDriverForPlugA…" 就是写在调用点上的。
+// 它会：把驱动装到所有在场匹配设备 + 重启这些设备 —— 所以**不需要拔插**。
+// 只跑 pnputil /add-driver 只是把包放进系统，达不到这个效果。
+int forceInstallOnPresentDevices(const std::string& infPath)
+{
+    int ok = 0;
+    for (const WchDevice& d : findWchDevices())
+    {
+        BOOL needReboot = FALSE;
+        const BOOL r = UpdateDriverForPlugAndPlayDevicesA(
+            nullptr, d.hardwareId.c_str(), infPath.c_str(),
+            INSTALLFLAG_FORCE | INSTALLFLAG_NONINTERACTIVE, &needReboot);
+        drvLog("[drv] UpdateDriverForPlugAndPlayDevices(%s) → %s%s",
+               d.instanceId.c_str(), r ? "成功" : "失败",
+               (r && needReboot) ? "（需重启）" : "");
+        if (r) ++ok;
+    }
+    return ok;
+}
+
+// ---- 重枚举设备节点（等价于“拔插一次”）---------------------------------------
 bool reenumerateDevices(std::vector<std::string>& done)
 {
     done.clear();
-    for (const std::string& id : findWchDeviceInstances())
+    for (const WchDevice& d : findWchDevices())
     {
         DEVINST dev = 0;
-        if (CM_Locate_DevNodeA(&dev, (DEVINSTID_A)id.c_str(), CM_LOCATE_DEVNODE_NORMAL) != CR_SUCCESS)
+        if (CM_Locate_DevNodeA(&dev, (DEVINSTID_A)d.instanceId.c_str(), CM_LOCATE_DEVNODE_NORMAL) != CR_SUCCESS)
             continue;
         // 同步重枚举：返回时设备已经重新走完 PnP，后面查串口才查得到
         if (CM_Reenumerate_DevNode(dev, CM_REENUMERATE_SYNCHRONOUS) == CR_SUCCESS)
-            done.push_back(id);
+            done.push_back(d.instanceId);
     }
     return !done.empty();
 }
@@ -261,6 +296,131 @@ bool driverBound()
     }
     RegCloseKey(services);
     return found;
+}
+
+// ---- 诊断报告（出问题时把 EXE 目录下的《Makcu驱动报告.txt》发来即可）----------
+void appendReportFile(const std::string& text)
+{
+    FILE* f = fopen((g.runDir + "\\Makcu驱动报告.txt").c_str(), "ab");
+    if (!f) return;
+    fwrite(text.data(), 1, text.size(), f);
+    fclose(f);
+}
+
+// 现场快照：设备 / 串口 / 服务 / 驱动包 / drivers 文件
+std::string collectStateText(const char* title)
+{
+    std::string s = "---------- ";
+    s += title;
+    s += " ----------\n";
+    s += "时间: ";
+    {
+        SYSTEMTIME st{};
+        GetLocalTime(&st);
+        char buf[64];
+        sprintf_s(buf, "%04d-%02d-%02d %02d:%02d:%02d", st.wYear, st.wMonth, st.wDay,
+                  st.wHour, st.wMinute, st.wSecond);
+        s += buf;
+    }
+    s += "\n提权: ";
+    s += isElevated() ? "是" : "否";
+    s += "\n\n[WCH 在场设备]\n";
+
+    const std::vector<WchDevice> devs = findWchDevices();
+    if (devs.empty())
+        s += "  （无 —— 盒子没插，或插在别的机器上）\n";
+    for (const WchDevice& d : devs)
+    {
+        s += "  " + d.instanceId + "\n    描述: " + d.description +
+             "\n    硬件ID: " + d.hardwareId;
+        DEVINST dn = 0;
+        if (CM_Locate_DevNodeA(&dn, (DEVINSTID_A)d.instanceId.c_str(), CM_LOCATE_DEVNODE_NORMAL) == CR_SUCCESS)
+        {
+            ULONG status = 0, problem = 0;
+            if (CM_Get_DevNode_Status(&status, &problem, dn, 0) == CR_SUCCESS)
+            {
+                char buf[64];
+                sprintf_s(buf, "\n    状态: 0x%08X  问题代码: %lu%s", status, problem,
+                          problem == 0 ? "（正常）" : problem == 28 ? "（CM_PROB_FAILED_INSTALL＝没装驱动）" : "");
+                s += buf;
+            }
+        }
+        s += "\n";
+    }
+
+    s += "\n[串口]\n  ";
+    {
+        HKEY k = nullptr;
+        bool any = false;
+        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "HARDWARE\\DEVICEMAP\\SERIALCOMM", 0, KEY_READ, &k) == ERROR_SUCCESS)
+        {
+            for (DWORD i = 0;; ++i)
+            {
+                char name[256] = {}, val[256] = {};
+                DWORD nl = sizeof(name), vl = sizeof(val), type = 0;
+                if (RegEnumValueA(k, i, name, &nl, nullptr, &type, (PBYTE)val, &vl) != ERROR_SUCCESS) break;
+                s += std::string(val, vl ? vl - 1 : 0) + " ";
+                any = true;
+            }
+            RegCloseKey(k);
+        }
+        if (!any) s += "（无串口）";
+        s += "\n";
+    }
+
+    s += "\n[驱动服务 / 文件]\n  服务键: ";
+    {
+        HKEY k = nullptr;
+        bool any = false;
+        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Services", 0, KEY_READ, &k) == ERROR_SUCCESS)
+        {
+            for (DWORD i = 0;; ++i)
+            {
+                char name[512] = {};
+                DWORD len = sizeof(name);
+                if (RegEnumKeyExA(k, i, name, &len, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
+                std::string up(name);
+                for (char& c : up) c = (char)toupper((unsigned char)c);
+                if (up.find("CH34") != std::string::npos) { s += std::string(name) + " "; any = true; }
+            }
+            RegCloseKey(k);
+        }
+        if (!any) s += "（无 CH34* 服务）";
+    }
+    {
+        char sysRoot[MAX_PATH] = {};
+        GetSystemDirectoryA(sysRoot, MAX_PATH);
+        s += "\n  System32\\drivers\\CH343S64.SYS: ";
+        s += fileExists(std::string(sysRoot) + "\\drivers\\CH343S64.SYS") ? "在" : "不在";
+    }
+
+    s += "\n\n[驱动包 pnputil /enum-drivers]\n";
+    {
+        std::string out;
+        DWORD code = 0;
+        runCapture(system32Path("pnputil.exe").c_str(), "/enum-drivers", code, out);
+
+        // 按空行切块（注意 pnputil 用的是 CRLF），只打含 ch343ser 的块
+        bool any = false;
+        size_t begin = 0;
+        while (begin < out.size())
+        {
+            size_t end = out.find("\r\n\r\n", begin);
+            if (end == std::string::npos) end = out.size();
+            const std::string block = out.substr(begin, end - begin);
+            std::string low = block;
+            for (char& c : low) c = (char)tolower((unsigned char)c);
+            if (low.find("ch343ser") != std::string::npos)
+            {
+                s += "  " + block + "\n";
+                any = true;
+            }
+            begin = end + 4;
+        }
+        if (!any) s += "  （系统里没有 ch343ser 驱动包）\n";
+    }
+    s += "\n";
+    return s;
 }
 
 // ---- 把资源里的驱动释放到临时目录 -------------------------------------------
@@ -332,21 +492,29 @@ bool ensureMakcuDriver(bool* installedNow)
 {
     if (installedNow) *installedNow = false;
 
+    // 现场快照写进《Makcu驱动报告.txt》—— 出问题时把这个文件发来就能定位
+    appendReportFile(collectStateText("启动时"));
+
     std::string port;
     if (makcuPortPresent(&port))
     {
         drvLog("[drv] 盒子串口已就绪（%s），无需安装驱动", port.c_str());
+        appendReportFile(collectStateText("无需处理（串口已就绪）"));
         return true;
     }
 
-    std::vector<std::string> devs = findWchDeviceInstances();
+    std::vector<WchDevice> devs = findWchDevices();
     const bool haveDevice = !devs.empty();
     drvLog("[drv] 盒子设备: %s | 驱动已绑定(服务+sys): %s",
            haveDevice ? "已插上" : "没插", driverBound() ? "是" : "否");
+    for (const WchDevice& d : devs)
+        drvLog("[drv]   在场设备 %s（%s / %s）",
+               d.instanceId.c_str(), d.description.c_str(), d.hardwareId.c_str());
 
     if (driverBound() && !haveDevice)
     {
         drvLog("[drv] 驱动已安装，盒子未插。插上后系统会自动装设备，无需再动程序");
+        appendReportFile(collectStateText("无需处理（驱动已装、盒子未插）"));
         return true;
     }
 
@@ -359,6 +527,7 @@ bool ensureMakcuDriver(bool* installedNow)
         if (makcuPortPresent(&port))
         {
             drvLog("[drv] 重枚举后盒子已识别为 %s（没有拔插）", port.c_str());
+            appendReportFile(collectStateText("重枚举后已识别"));
             if (installedNow) *installedNow = true;
             return true;
         }
@@ -410,10 +579,15 @@ bool ensureMakcuDriver(bool* installedNow)
         return false;
     }
 
+    // ★ 关键一步 1：把驱动强制装到「当前在场」的匹配设备上（官方安装器的核心动作）。
+    //   这一步会让设备重新启动，所以盒子插着也能立刻生效、不用拔插。
+    //   必须在 cleanupDir 之前调用 —— 它需要 INF 的路径。
+    const int forced = forceInstallOnPresentDevices(infPath);
+    drvLog("[drv] 强制安装到在场设备：%d 个", forced);
+
     cleanupDir(dir);
 
-    // ★ 关键一步：重枚举设备节点 —— 等价于拔插一次，官方安装器也是这么做的。
-    //   不做这一步，盒子就得手动拔插才会从“已存在但没驱动”变成可用。
+    // ★ 关键一步 2：重枚举设备节点 —— 另一条“等价于拔插”的路（对没走上面那步的情况兜底）
     std::vector<std::string> reenum;
     const bool anyReenum = reenumerateDevices(reenum);
     if (anyReenum)
@@ -428,7 +602,7 @@ bool ensureMakcuDriver(bool* installedNow)
         drvLog("[drv] 当前没插着 WCH 设备；插上后系统会自动装设备（可能会提示“正在安装设备驱动软件”）");
     }
 
-    // 兜底：再让系统扫描一遍新硬件（重枚举已经做了，这里是双保险）
+    // 兜底：再让系统扫描一遍新硬件（前面两步已经做了，这里是双保险）
     DWORD scanCode = 0;
     std::string scanOut;
     runCapture(pnputil.c_str(), "/scan-devices", scanCode, scanOut);
@@ -439,13 +613,14 @@ bool ensureMakcuDriver(bool* installedNow)
     if (makcuPortPresent(&portAfter))
         drvLog("[drv] 安装完成，盒子已识别为 %s%s", portAfter.c_str(),
                code == 3010 ? "（建议重启一次）" : "");
-    else if (anyReenum)
-        drvLog("[drv] 安装 + 重枚举完成，但仍未见串口%s。可在设备管理器看该设备有无黄色感叹号，"
-               "或重启一次再试", code == 3010 ? "（需重启生效）" : "");
+    else if (haveDevice)
+        drvLog("[drv] 设备在场但还没出串口%s。请把 EXE 目录下的『Makcu驱动报告.txt』发来排查",
+               code == 3010 ? "（需重启生效）" : "");
     else
         drvLog("[drv] 安装完成%s；盒子还没插 —— 插上即可用，不需要拔插第二次",
                code == 3010 ? "（需重启生效）" : "");
 
+    appendReportFile(collectStateText("处理之后"));
     if (installedNow) *installedNow = true;
     return true;
 }

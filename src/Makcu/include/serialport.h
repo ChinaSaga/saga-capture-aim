@@ -113,7 +113,7 @@ namespace makcu {
         void handleButtonData(uint8_t data);
         void cleanupTimedOutCommands();
         void failPending(const char* reason);
-        void markDisconnected(const char* reason);
+        void markDisconnected(const char* reason, unsigned long windowsError = 0, unsigned long lineErrors = 0);
         void finishPendingLocked();
         unsigned nextQueryTimeout();
         SerialPort(const SerialPort&) = delete;

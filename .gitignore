@@ -68,7 +68,10 @@ docs/demo/*.mp4
 监控双机.ini
 配置保存.ini
 配置保存/
+运行日志.txt
+Makcu驱动报告.txt
 SagaApp_startup.log
 网络自检.txt
+Makcu串口日志.txt
 *.log
 自动截图/

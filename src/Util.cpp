@@ -1,5 +1,6 @@
 #include "App.h"
 #include "Inference.h"
+#include "RuntimeLog.h"
 
 #include <algorithm>
 #include <cmath>
@@ -310,12 +311,7 @@ bool trajReloadIfChanged()
     const bool loaded = saga::mc_create(trained.c_str()) != 0;
     g_trajFileStamp = stamp;
     if (loaded) g_trajReady = true;
-    if (FILE* log = g_logFile()) {
-        _lock_file(log);
-        fprintf(log, "[traj] model hot reload: %s\n", loaded ? "success" : "failed; previous model retained");
-        fflush(log);
-        _unlock_file(log);
-    }
+    runtime_log::write("[traj] model hot reload: %s", loaded ? "success" : "failed; previous model retained");
     return loaded;
 }
 

@@ -2,12 +2,14 @@
 #include "../include/makcu.h"
 #include <algorithm>
 #include <cstring>
+#include <cstdio>
 #include <limits>
 #include <stdexcept>
 #include <utility>
 
 #ifdef _WIN32
 #include "../../WchHardwareId.h"
+#include "../../RuntimeLog.h"
 #include <setupapi.h>
 #include <devguid.h>
 #include <cfgmgr32.h>
@@ -17,6 +19,14 @@
 namespace makcu {
 namespace {
     using Clock = std::chrono::steady_clock;
+#ifdef _WIN32
+    // Failure path only; enqueue in the common logger, with no disk I/O here.
+    void logDisconnect(const std::string& port, const char* reason,
+        unsigned long windowsError, unsigned long lineErrors) {
+        runtime_log::write("[serial] port=%s; reason=%s; windows_error=%lu; line_errors=0x%08lX",
+            port.c_str(), reason, windowsError, lineErrors);
+    }
+#endif
     unsigned remainingMilliseconds(Clock::time_point deadline) {
         const auto left = deadline - Clock::now();
         if (left <= Clock::duration::zero()) return 0;
@@ -269,10 +279,11 @@ namespace {
         }
     }
 
-    void SerialPort::markDisconnected(const char* reason) {
+    void SerialPort::markDisconnected(const char* reason, unsigned long windowsError, unsigned long lineErrors) {
         m_isOpen.store(false, std::memory_order_release);
         m_stopListener.store(true, std::memory_order_release);
 #ifdef _WIN32
+        logDisconnect(m_portName, reason, windowsError, lineErrors);
         // This runs only on the receiver or with m_writeMutex held, so the
         // handle/events cannot be closed until this function returns.
         if (m_stopEvent) SetEvent(m_stopEvent);
@@ -340,8 +351,9 @@ namespace {
             for (;;) {
                 COMSTAT status{};
                 DWORD errors = 0;
-                if (!ClearCommError(m_handle, &errors, &status) || errors) {
-                    markDisconnected("Serial receive line error"); return;
+                const BOOL cleared = ClearCommError(m_handle, &errors, &status);
+                if (!cleared || errors) {
+                    markDisconnected("Serial receive line error", cleared ? 0 : GetLastError(), errors); return;
                 }
                 if (!status.cbInQue) break;
                 overlap = {}; overlap.hEvent = m_readEvent;
@@ -360,13 +372,18 @@ namespace {
                 uint8_t buttonEvents[BUFFER_SIZE];
                 size_t buttonCount = 0;
                 bool protocolError = false;
+                DWORD protocolErrorOffset = 0;
                 {
                     // Finish the entire chunk before waking a query waiter:
                     // trailing noise must invalidate the transition barrier.
                     std::lock_guard<std::mutex> receive(m_receiveMutex);
                     for (DWORD i = 0; i < received; ++i) {
                         auto event = m_parser.consume(buffer[i]);
-                        if (event.kind == protocol::EventKind::ProtocolError) { protocolError = true; break; }
+                        if (event.kind == protocol::EventKind::ProtocolError) {
+                            protocolError = true;
+                            protocolErrorOffset = i;
+                            break;
+                        }
                         if (event.kind == protocol::EventKind::Button) buttonEvents[buttonCount++] = event.buttonMask;
                         if (event.kind == protocol::EventKind::QueryComplete && m_pendingCommand) {
                             m_pendingCommand->received = true;
@@ -375,7 +392,21 @@ namespace {
                     }
                     if (!protocolError) finishPendingLocked();
                 }
-                if (protocolError) { markDisconnected("Serial button stream lost synchronization"); return; }
+                if (protocolError) {
+                    // A small hex window around the rejected byte identifies
+                    // firmware framing without recording the normal stream.
+                    std::string reason = "Serial button stream lost synchronization; RX=";
+                    const DWORD begin = protocolErrorOffset > 16 ? protocolErrorOffset - 16 : 0;
+                    const DWORD end = (std::min)(received, protocolErrorOffset + 17);
+                    for (DWORD i = begin; i < end; ++i) {
+                        char hex[8];
+                        std::snprintf(hex, sizeof(hex), i == protocolErrorOffset ? "[%02X]" : "%02X ",
+                            static_cast<unsigned>(buffer[i]));
+                        reason += hex;
+                    }
+                    markDisconnected(reason.c_str());
+                    return;
+                }
                 for (size_t i = 0; i < buttonCount; ++i) handleButtonData(buttonEvents[i]);
                 if (m_stopListener.load(std::memory_order_acquire)) return;
                 cleanupTimedOutCommands();

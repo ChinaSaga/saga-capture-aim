@@ -1,4 +1,5 @@
-// Build in an isolated directory: listener checks do not change firewall rules.
+// Build in an isolated directory, linking src/RuntimeLog.cpp.
+// Listener checks do not change firewall rules.
 #include "../src/App.h"
 #include "../src/WebAccess.h"
 #include "../src/LanFirewall.h"

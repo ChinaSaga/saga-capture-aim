@@ -1,6 +1,7 @@
 #include "App.h"
 #include "AppExit.h"
 #include "HumanTrajectory.h"
+#include "RuntimeLog.h"
 
 #include <cstdlib>
 #include <mmsystem.h>
@@ -27,12 +28,14 @@ static bool missingDeps()
     return false;
 }
 
-// ---- 启动日志（定位崩溃用，可随时移除）----
-static FILE* g_log = nullptr;
+// ---- 启动事件进入统一后台日志，主线程不执行文件写入 ----
 static ULONGLONG g_startTick = 0;
-#define LOG(...) do { if (g_log) { _lock_file(g_log); fprintf(g_log, "[+%llums] ", GetTickCount64() - g_startTick); fprintf(g_log, __VA_ARGS__); fputc('\n', g_log); fflush(g_log); _unlock_file(g_log); } } while (0)
-
-FILE* g_logFile() { return g_log; }
+template<class... Args>
+static void LOG(const char* format, Args... arguments)
+{
+    const std::string timed = "[+" + std::to_string(GetTickCount64() - g_startTick) + "ms] " + format;
+    runtime_log::write(timed.c_str(), arguments...);
+}
 
 int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
 {
@@ -51,7 +54,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
     g.runDir = exe.substr(0, exe.find_last_of("\\/"));
     g.cfgPath = g.runDir + "\\圣人自用.js";
 
-    g_log = fopen((g.runDir + "\\SagaApp_startup.log").c_str(), "wb");
+    runtime_log::initialize();
     LOG("[01] runDir=%s", g.runDir.c_str());
     LOG("[build] CH343 async/skip-absent v4; main-close/IP-reprompt/Esc-ignore v5; %s %s", __DATE__, __TIME__);
 

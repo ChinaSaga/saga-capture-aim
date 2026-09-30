@@ -1,6 +1,7 @@
 #define NOMINMAX
 #include "App.h"
 #include "WebAccess.h"
+#include "RuntimeLog.h"
 #include "LanFirewall.h"
 #include <iphlpapi.h>
 #include <ws2tcpip.h>
@@ -36,11 +37,7 @@ void publish(const std::wstring& url, const std::wstring& report)
         if (latestReport == report) return;
         latestReport = report;
     }
-    const int size = WideCharToMultiByte(CP_UTF8, 0, report.data(), (int)report.size(), nullptr, 0, nullptr, nullptr);
-    std::string utf8(size, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, report.data(), (int)report.size(), utf8.data(), size, nullptr, nullptr);
-    std::ofstream file(executableDirectory() / L"网络自检.txt", std::ios::binary | std::ios::trunc);
-    file << "\xef\xbb\xbf" << utf8;
+    runtime_log::writeWide(L"[network]\n" + report);
 }
 
 SOCKET bindListener(unsigned short port, bool lan, int& error, unsigned short& actualPort)
@@ -282,7 +279,7 @@ void webAccessMonitor(WebListeners listeners)
         std::ifstream html(page, std::ios::binary);
         const bool hasPage = html && html.peek() != std::char_traits<char>::eof();
         html.close();
-        std::wstring report = L"本机网络自检（自动更新，报告保存在 EXE 同目录的 网络自检.txt）\r\n\r\n";
+        std::wstring report = L"本机网络自检（自动更新，状态变化记录在 EXE 同目录的 运行日志.txt）\r\n\r\n";
         report += L"本机调参地址：" + url + L"\r\n";
         report += probe == 0 ? L"本机 HTTP 自检：通过，已收到当前程序的响应。\r\n"
             : L"本机 HTTP 自检：失败，错误 " + std::to_wstring(probe) + L"，请检查本机安全软件。\r\n";

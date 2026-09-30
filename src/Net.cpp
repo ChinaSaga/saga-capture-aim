@@ -1,4 +1,5 @@
 #include "App.h"
+#include "RuntimeLog.h"
 
 #include <algorithm>
 #include <map>
@@ -51,10 +52,8 @@ void configInit()
     std::lock_guard<std::recursive_mutex> lk(g_hashMutex);
     g_hash.clear();
 
-    extern FILE* g_logFile();
     std::string raw = readFileAll(g.cfgPath);
-    if (g_logFile())
-        fprintf(g_logFile(), "[cfg] path=%s rawSize=%zu\n", g.cfgPath.c_str(), raw.size());
+    runtime_log::write("[cfg] path=%s rawSize=%zu", g.cfgPath.c_str(), raw.size());
     if (raw.empty()) return;
     std::string text = utf8ToAnsi(raw);
     // 去掉可能的 UTF-8 BOM
@@ -502,14 +501,9 @@ void httpServerThread()
         WSACleanup();
         return;
     }
-    if (FILE* log = g_logFile()) {
-        _lock_file(log);
-        fprintf(log, "[web] LAN listener ready: %s:%u, port80=%s; background preflight started\n",
-            listeners.lan ? "0.0.0.0" : "127.0.0.1", listeners.port,
-            listeners.standard != INVALID_SOCKET ? "ready" : "unavailable");
-        fflush(log);
-        _unlock_file(log);
-    }
+    runtime_log::write("[web] LAN listener ready: %s:%u, port80=%s; background preflight started",
+        listeners.lan ? "0.0.0.0" : "127.0.0.1", listeners.port,
+        listeners.standard != INVALID_SOCKET ? "ready" : "unavailable");
     std::thread(webAccessMonitor, listeners).detach();
     while (g.running.load())
     {

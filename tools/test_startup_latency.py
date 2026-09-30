@@ -77,9 +77,9 @@ def main():
                     if name == 'SagaAppWindow' and window is None:
                         window = hwnd
                         visible_after = time.perf_counter() - started
-                log_path = directory / 'SagaApp_startup.log'
+                log_path = directory / '运行日志.txt'
                 if log_path.exists():
-                    log = log_path.read_text(encoding='gbk', errors='replace')
+                    log = log_path.read_text(encoding='utf-8-sig', errors='replace')
                 if window and '[06]' in log and '[12]' in log:
                     break
                 time.sleep(.01)
@@ -89,7 +89,8 @@ def main():
             assert '跳过安装、硬件扫描及串口等待' in log, 'This regression check requires an unplugged box'
             assert '[06] 无可用盒子串口，跳过连接等待' in log
             assert 'official DRVSETUP64' not in log and 'pnputil' not in log
-            assert not (directory / 'Makcu驱动报告.txt').exists()
+            for obsolete in ['SagaApp_startup.log', 'Makcu驱动报告.txt', 'Makcu串口日志.txt', '网络自检.txt']:
+                assert not (directory / obsolete).exists(), obsolete
             assert '#32770' not in observed, f'Unexpected message box: {observed}'
             assert 'SagaAppInput' not in observed, 'Startup must not ask for an IP address'
             print(json.dumps({'visible_seconds': round(visible_after, 3),

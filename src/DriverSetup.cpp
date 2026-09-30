@@ -4,6 +4,7 @@
 // Driver repair and protocol handshaking run after the main window is shown.
 // Administrator rights are supplied by the application manifest.
 #include "App.h"
+#include "RuntimeLog.h"
 #include "WchHardwareId.h"
 #include "serialport.h"     // makcu::SerialPort::findMakcuPorts（判断盒子串口在不在）
 
@@ -59,22 +60,13 @@ const DrvFile kDrvFiles[] = {
 const char* kInfName = "CH343SER.INF";
 
 // ---- 日志 ------------------------------------------------------------------
-// 必须复用 main.cpp 里那个启动日志句柄：如果再 fopen 一次同一文件，
-// 两个句柄各自记住自己的写位置，互相覆盖 —— 上一版就是这么把日志写花的。
+// 所有驱动诊断进入统一后台队列，避免设备初始化线程直接写盘。
 void drvLog(const char* fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
 
-    FILE* f = g_logFile();
-    if (f)
-    {
-        _lock_file(f);
-        vfprintf(f, fmt, ap);
-        fputc('\n', f);
-        fflush(f);
-        _unlock_file(f);
-    }
+    runtime_log::writeV(fmt, ap);
     va_end(ap);
 }
 
@@ -356,13 +348,10 @@ bool driverBound()
     return found;
 }
 
-// ---- 诊断报告（出问题时把 EXE 目录下的《Makcu驱动报告.txt》发来即可）----------
+// ---- 诊断报告（与其他事件一起保存在 EXE 目录的《运行日志.txt》）------------
 void appendReportFile(const std::string& text)
 {
-    FILE* f = fopen((g.runDir + "\\Makcu驱动报告.txt").c_str(), "ab");
-    if (!f) return;
-    fwrite(text.data(), 1, text.size(), f);
-    fclose(f);
+    runtime_log::write("%s", text.c_str());
 }
 
 // 现场快照：设备 / 串口 / 服务 / 驱动包 / drivers 文件
@@ -674,7 +663,7 @@ bool ensureMakcuDriver(bool* installedNow)
         drvLog("[drv] 安装完成，盒子已识别为 %s%s", portAfter.c_str(),
                rebootRequired ? "（系统报告需要重启）" : "");
     else if (haveDevice)
-        drvLog("[drv] 设备在场但还没出串口%s。请把 EXE 目录下的『Makcu驱动报告.txt』发来排查",
+        drvLog("[drv] 设备在场但还没出串口%s。请把 EXE 目录下的『运行日志.txt』发来排查",
                rebootRequired ? "（需重启生效）" : "");
     else
         drvLog("[drv] 安装完成%s；盒子还没插 —— 插上即可用，不需要拔插第二次",

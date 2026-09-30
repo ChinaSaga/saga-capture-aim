@@ -27,6 +27,8 @@ public:
         rawReplySize_ = 0;
         rawTrailerOffset_ = 0;
         framedMaskPending_ = false;
+        optionalFramePrompt_ = false;
+        rawHeader_ = RawHeader::None;
         boundary_ = false;
         query_.clear();
         candidate_.clear();
@@ -62,6 +64,8 @@ public:
         rawReplySize_ = 0;
         rawTrailerOffset_ = 0;
         framedMaskPending_ = false;
+        optionalFramePrompt_ = false;
+        rawHeader_ = RawHeader::None;
         boundary_ = false;
         return true;
     }
@@ -69,27 +73,64 @@ public:
     Event consume(uint8_t byte) {
         if (raw_) {
             // Some real devices keep echoing setters despite echo(0). Separate
-            // bounded, recognized command ACKs from the raw mask stream. Only
-            // CR/LF inside a valid ACK+prompt are text; standalone 10/13 are masks.
+            // bounded, recognized command ACKs from the raw mask stream.
+            // Command ACKs end in CRLF+prompt, but asynchronous km.<mask>
+            // reports end at CRLF. Standalone 10/13 remain valid raw masks.
             constexpr std::string_view trailer = "\r\n>>> ";
             if (rawTrailerOffset_) {
                 if (byte != static_cast<uint8_t>(trailer[rawTrailerOffset_ - 1]))
                     return {EventKind::ProtocolError, 0, {}};
-                if (++rawTrailerOffset_ > trailer.size()) {
+                ++rawTrailerOffset_;
+                if (framedMaskPending_ && rawTrailerOffset_ > 2) {
                     rawTrailerOffset_ = 0;
                     rawReplySize_ = 0;
-                    if (framedMaskPending_) {
-                        framedMaskPending_ = false;
-                        return {EventKind::Button, framedMask_, {}};
-                    }
+                    framedMaskPending_ = false;
+                    optionalFramePrompt_ = true;
+                    return {EventKind::Button, framedMask_, {}};
+                }
+                if (rawTrailerOffset_ > trailer.size()) {
+                    rawTrailerOffset_ = 0;
+                    rawReplySize_ = 0;
                 }
                 return {};
             }
+            if (rawHeader_ != RawHeader::None) {
+                if (rawHeader_ == RawHeader::LF) {
+                    if (byte != '\n') return {EventKind::ProtocolError, 0, {}};
+                    rawHeader_ = RawHeader::Mask;
+                    return {};
+                }
+                if (byte > 31) return {EventKind::ProtocolError, 0, {}};
+                rawHeader_ = RawHeader::None;
+                framedMask_ = byte;
+                framedMaskPending_ = true;
+                rawTrailerOffset_ = 1;
+                return {};
+            }
+            // Older captured frames may include a prompt after the mask CRLF.
+            // Consume it only after a verified frame; otherwise process this
+            // byte as the start of the next frame or as a standalone mask.
+            if (optionalFramePrompt_) {
+                optionalFramePrompt_ = false;
+                if (byte == '>') {
+                    rawTrailerOffset_ = 4; // The first '>' was just consumed.
+                    return {};
+                }
+            }
             if (rawReplySize_) {
                 const std::string_view prefix(rawReply_, rawReplySize_);
+                // A captured firmware decorates each binary button report as
+                // km.buttons() LF <mask> CRLF >>> . Treat only this exact
+                // header as framing; its newline must never become mask 10.
+                if (prefix == "km.buttons()" && (byte == '\n' || byte == '\r')) {
+                    rawReplySize_ = 0;
+                    rawHeader_ = byte == '\r' ? RawHeader::LF : RawHeader::Mask;
+                    return {};
+                }
                 // Captured hardware uses km.<mask>; the legacy API also
-                // documents km.buttons<mask>. Publish only after the full
-                // trailer so framing bytes cannot become phantom presses.
+                // documents km.buttons<mask>. Publish only after CRLF so
+                // framing bytes cannot become phantom presses. The official
+                // asynchronous stream does not include a command prompt.
                 if (byte <= 31 && (prefix == "km." || prefix == "km.buttons")) {
                     framedMask_ = byte;
                     framedMaskPending_ = true;
@@ -224,6 +265,9 @@ private:
     size_t rawReplySize_ = 0;
     unsigned rawTrailerOffset_ = 0;
     bool framedMaskPending_ = false;
+    bool optionalFramePrompt_ = false;
+    enum class RawHeader { None, LF, Mask };
+    RawHeader rawHeader_ = RawHeader::None;
     uint8_t framedMask_ = 0;
     unsigned prompt_ = 0;
     std::string query_, candidate_, line_;

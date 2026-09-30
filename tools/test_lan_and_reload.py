@@ -51,7 +51,7 @@ def main():
         data_dir.mkdir()
         row = ','.join('"%d,%d"' % (i, -i) for i in [9] + list(range(10)))
         (data_dir / '人手数据.txt').write_text((row + '\n') * 4, encoding='ascii')
-        log_file = directory / 'SagaApp_startup.log'
+        log_file = directory / '运行日志.txt'
         occupied = None
         occupied_primary = []
         for occupied_port in range(8888, 8888 + args.occupy_primary_ports):
@@ -74,7 +74,7 @@ def main():
                     observed.add(name)
                     if name == 'SagaAppWindow':
                         window = hwnd
-                log = log_file.read_text(encoding='gbk', errors='replace') if log_file.exists() else ''
+                log = log_file.read_text(encoding='utf-8-sig', errors='replace') if log_file.exists() else ''
                 if '[web] LAN listener ready' in log and '[12]' in log:
                     break
                 time.sleep(.05)
@@ -91,18 +91,19 @@ def main():
             port = 80 if standard_port else primary_port
             health = request('127.0.0.1', primary_port, '/__saga_health')
             assert health[0] == 200 and json.loads(health[2]) == {'service': 'SagaApp', 'pid': process.pid}
-            report_file = directory / '网络自检.txt'
             deadline = time.monotonic() + 10
             report = ''
             while time.monotonic() < deadline:
-                if report_file.exists():
-                    report = report_file.read_text(encoding='utf-8-sig')
+                if log_file.exists():
+                    report = log_file.read_text(encoding='utf-8-sig', errors='replace')
                 if '本机 HTTP 自检：通过' in report:
                     break
                 time.sleep(.1)
             assert '本机 HTTP 自检：通过' in report, report
             assert f'http://127.0.0.1:{primary_port}/' in report and '网页不存在' in report, report
             assert '防火墙预设：已配置' in report and f'TCP {primary_port}' in report, report
+            for obsolete in ['SagaApp_startup.log', 'Makcu驱动报告.txt', 'Makcu串口日志.txt', '网络自检.txt']:
+                assert not (directory / obsolete).exists(), obsolete
             print(f'PASS: current-process HTTP probe and background firewall preflight; actual port {primary_port}.', flush=True)
             expected = args.web_panel.read_bytes()
             panel = directory / '圣人视觉识别系统.html'
@@ -149,7 +150,7 @@ def main():
             assert trained.returncode == 0, trained.stdout.decode('utf-8', errors='replace')
             deadline = time.monotonic() + 3
             while time.monotonic() < deadline:
-                log = log_file.read_text(encoding='gbk', errors='replace')
+                log = log_file.read_text(encoding='utf-8-sig', errors='replace')
                 if '[traj] model hot reload: success' in log:
                     break
                 time.sleep(.05)

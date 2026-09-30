@@ -145,6 +145,7 @@
     <ClCompile Include="src\Ui.cpp" />
     <ClCompile Include="src\Net.cpp" />
     <ClCompile Include="src\WebAccess.cpp" />
+    <ClCompile Include="src\RuntimeLog.cpp" />
     <ClCompile Include="src\DriverSetup.cpp" />
     <!-- 引擎层（原 Saga.vcxproj / Saga.dll） -->
     <ClCompile Include="src\OpnecvCapture.cpp" />
@@ -186,6 +187,7 @@
     <ClInclude Include="src\AppExit.h" />
     <ClInclude Include="src\LanFirewall.h" />
     <ClInclude Include="src\WebAccess.h" />
+    <ClInclude Include="src\RuntimeLog.h" />
   </ItemGroup>
   <ItemGroup>
     <!-- Makcu（WCH CH343）驱动：打进 EXE 资源，缺驱动时自动静默安装 -->

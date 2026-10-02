@@ -34,7 +34,7 @@ class OrtSessionBase {
 public:
     /// @brief Constructor - loads and initializes the ONNX model
     /// @param modelPath Path to the ONNX model file
-    /// @param useGPU Whether to use GPU (CUDA) for inference
+    /// @param useGPU Whether to use GPU (CUDA or DirectML) for inference
     /// @param numThreads Number of intra-op threads (0 = auto)
     OrtSessionBase(const std::string& modelPath, bool useGPU = false, int numThreads = 0)
         : env_(ORT_LOGGING_LEVEL_WARNING, "YOLOS") {
@@ -141,19 +141,12 @@ private:
     void initSession(const std::string& modelPath, bool useGPU, int numThreads) {
         sessionOptions_ = Ort::SessionOptions();
 
-        // Set thread count
-        int threads = (numThreads > 0) ? numThreads : std::min(6, static_cast<int>(std::thread::hardware_concurrency()));
-        sessionOptions_.SetIntraOpNumThreads(threads);
-        sessionOptions_.AddConfigEntry("session.intra_op.allow_spinning", "1");
-        sessionOptions_.AddConfigEntry("session.inter_op.allow_spinning", "1");
         sessionOptions_.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
 
         // Configure execution provider
-        std::vector<std::string> availableProviders = Ort::GetAvailableProviders();
-        auto cudaIt = std::find(availableProviders.begin(), availableProviders.end(), "DmlExecutionProvider");
-
+        bool directML = false;
         if (useGPU) {
-            std::vector<std::string> availableProviders = Ort::GetAvailableProviders();
+            const auto availableProviders = Ort::GetAvailableProviders();
 
             // 1) 优先尝试 CUDA
             auto cudaIt = std::find(availableProviders.begin(), availableProviders.end(), "CUDAExecutionProvider");
@@ -171,6 +164,7 @@ private:
                     sessionOptions_.DisableMemPattern();
                     sessionOptions_.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
                     Ort::ThrowOnError(OrtSessionOptionsAppendExecutionProvider_DML(sessionOptions_, 0));
+                    directML = true;
                     device_ = "gpu";
                     std::cout << "[INFO] Inference device: GPU (DirectML)" << std::endl;
                 }
@@ -186,6 +180,14 @@ private:
             device_ = "cpu";
             std::cout << "[INFO] Inference device: CPU" << std::endl;
         }
+
+        // DirectML's sequential GPU path needs no idle CPU worker pool for
+        // the supplied model. Keep CPU/CUDA defaults and explicit overrides.
+        const int cpuThreads = (std::max)(1, (std::min)(6, static_cast<int>(std::thread::hardware_concurrency())));
+        const int threads = numThreads > 0 ? numThreads : (directML ? 1 : cpuThreads);
+        sessionOptions_.SetIntraOpNumThreads(threads);
+        sessionOptions_.AddConfigEntry("session.intra_op.allow_spinning", directML ? "0" : "1");
+        sessionOptions_.AddConfigEntry("session.inter_op.allow_spinning", directML ? "0" : "1");
 
         // Load model
 #ifdef _WIN32

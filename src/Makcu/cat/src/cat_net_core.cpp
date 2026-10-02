@@ -9,7 +9,7 @@ CatNetCore::CatNetCore() : read_io_context(), send_io_context(), read_socket(rea
 CatNetCore::ErrorCode CatNetCore::init(const std::string& box_ip, int box_port, const std::string& uuid, int milliseconds) {
     m_key = expandTo16Bytes(uuid);
     try {
-        box_endpoint = asio::ip::udp::endpoint(asio::ip::address::from_string(box_ip), box_port);
+        box_endpoint = asio::ip::udp::endpoint(asio::ip::make_address(box_ip), box_port);
         send_socket.open(asio::ip::udp::v4());
         send_socket.bind(asio::ip::udp::endpoint(asio::ip::udp::v4(), box_port));
         

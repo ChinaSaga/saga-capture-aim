@@ -3,15 +3,17 @@
   <PropertyGroup>
     <!-- Ensure Build runs even when only a deployed DLL was removed. -->
     <DisableFastUpToDateCheck>true</DisableFastUpToDateCheck>
-    <SagaVCRedistX64 Condition="'$(SagaVCRedistX64)' == ''">C:\Program Files\Microsoft Visual Studio\18\Community\VC\Redist\MSVC\14.51.36231\x64</SagaVCRedistX64>
+    <SagaVCRedistX64 Condition="'$(SagaVCRedistX64)' == '' and '$(VCToolsRedistDir)' != ''">$(VCToolsRedistDir)x64</SagaVCRedistX64>
+    <SagaVCRedistX64 Condition="'$(SagaVCRedistX64)' == ''">$(VSInstallDir)VC\Redist\MSVC\$(VCToolsVersion)\x64</SagaVCRedistX64>
   </PropertyGroup>
   <Target Name="CopySagaRuntimeDependencies" AfterTargets="Build"
           Condition="'$(Platform)' == 'x64' and '$(DesignTimeBuild)' != 'true'">
     <ItemGroup>
-      <SagaRuntimeDll Include="D:\NCNN\x64\bin\ncnn.dll" />
-      <SagaRuntimeDll Include="D:\openCV\build\x64\vc16\bin\opencv_world4120.dll" />
-      <SagaRuntimeDll Include="D:\DirectMLx64onnx\ort-dml-x64-1.24.4\lib\onnxruntime.dll" />
-      <SagaRuntimeDll Include="D:\DirectMLx64onnx\directml-1.15.4-x64\DirectML.dll" />
+      <SagaRuntimeDll Include="$(SagaNcnnDir)\bin\ncnn.dll" />
+      <SagaRuntimeDll Include="$(SagaOpenCvDir)\x64\vc16\bin\$(SagaOpenCvRuntime)" />
+      <!-- CPU and DirectML are linked into this runtime; no shared provider DLL. -->
+      <SagaRuntimeDll Include="$(SagaOrtDir)\lib\onnxruntime.dll" />
+      <SagaRuntimeDll Include="$(SagaDirectMLDir)\DirectML.dll" />
       <!-- Both application configurations use /MD and release third-party libraries. -->
       <SagaRuntimeDll Include="$(SagaVCRedistX64)\Microsoft.VC145.CRT\concrt140.dll" />
       <SagaRuntimeDll Include="$(SagaVCRedistX64)\Microsoft.VC145.CRT\msvcp140.dll" />
@@ -22,13 +24,24 @@
       <SagaRuntimeDll Include="$(SagaVCRedistX64)\Microsoft.VC145.CRT\vcruntime140.dll" />
       <SagaRuntimeDll Include="$(SagaVCRedistX64)\Microsoft.VC145.CRT\vcruntime140_1.dll" />
       <SagaRuntimeDll Include="$(SagaVCRedistX64)\Microsoft.VC145.OpenMP\vcomp140.dll" />
-      <SagaDirectMLLicense Include="D:\DirectMLx64onnx\directml-1.15.4-x64\LICENSE.txt;D:\DirectMLx64onnx\directml-1.15.4-x64\ThirdPartyNotices.txt" />
+      <SagaDirectMLLicense Include="$(SagaDirectMLDir)\LICENSE.txt;$(SagaDirectMLDir)\ThirdPartyNotices.txt" />
+      <SagaOpenCvLicense Include="$(SagaOpenCvDir)\..\LICENSE*.txt" />
+      <SagaOpenCvNotices Include="$(SagaOpenCvDir)\etc\licenses\**\*" />
+      <SagaNcnnLicense Include="$(SagaNcnnDir)\..\LICENSE.txt" />
+      <SagaOrtLicense Include="$(SagaOrtDir)\LICENSE;$(SagaOrtDir)\ThirdPartyNotices.txt" Condition="Exists('$(SagaOrtDir)\LICENSE')" />
     </ItemGroup>
+    <Error Condition="!Exists('$(SagaOrtDir)\lib\onnxruntime.dll')"
+           Text="Required ONNX Runtime SDK is missing. Run tools/install_dependencies.ps1." />
     <Error Condition="!Exists('%(SagaRuntimeDll.Identity)')"
            Text="Required x64 runtime DLL is missing: %(SagaRuntimeDll.Identity)" />
-    <MakeDir Directories="$(TargetDir);$(TargetDir)licenses\DirectML" />
+    <MakeDir Directories="$(TargetDir);$(TargetDir)licenses\DirectML;$(TargetDir)licenses\OpenCV;$(TargetDir)licenses\NCNN;$(TargetDir)licenses\ONNXRuntime" />
+    <Delete Files="$(TargetDir)onnxruntime_providers_shared.dll" />
     <Copy SourceFiles="@(SagaRuntimeDll)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(SagaDirectMLLicense)" DestinationFolder="$(TargetDir)licenses\DirectML" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(SagaOpenCvLicense)" DestinationFolder="$(TargetDir)licenses\OpenCV" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(SagaOpenCvNotices)" DestinationFiles="@(SagaOpenCvNotices->'$(TargetDir)licenses\OpenCV\third-party\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(SagaNcnnLicense)" DestinationFolder="$(TargetDir)licenses\NCNN" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(SagaOrtLicense)" DestinationFolder="$(TargetDir)licenses\ONNXRuntime" SkipUnchangedFiles="true" />
     <Message Importance="high" Text="x64 runtime DLLs copied to: $(TargetDir)" />
   </Target>
 </Project>

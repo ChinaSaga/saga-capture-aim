@@ -74,9 +74,9 @@ inline void letterBox(const cv::Mat& image,
         ratio = std::min(ratio, 1.0f);
     }
 
-    // Calculate new dimensions after scaling (use round to match Ultralytics)
-    int newUnpadW = static_cast<int>(std::round(image.cols * ratio));
-    int newUnpadH = static_cast<int>(std::round(image.rows * ratio));
+    // Calculate new dimensions after scaling (Python ties-to-even)
+    int newUnpadW = static_cast<int>(std::nearbyint(image.cols * ratio));
+    int newUnpadH = static_cast<int>(std::nearbyint(image.rows * ratio));
 
     // Calculate padding needed to reach the desired shape
     int dw = newShape.width - newUnpadW;
@@ -141,9 +141,9 @@ inline void letterBoxCentered(const cv::Mat& image,
         ratio = std::min(ratio, 1.0f);
     }
 
-    // Use round to match Ultralytics
-    int newUnpadW = static_cast<int>(std::round(image.cols * ratio));
-    int newUnpadH = static_cast<int>(std::round(image.rows * ratio));
+    // Use nearbyint to match Python ties-to-even
+    int newUnpadW = static_cast<int>(std::nearbyint(image.cols * ratio));
+    int newUnpadH = static_cast<int>(std::nearbyint(image.rows * ratio));
 
     int dw = newShape.width - newUnpadW;
     int dh = newShape.height - newUnpadH;
@@ -169,10 +169,10 @@ inline void letterBoxCentered(const cv::Mat& image,
         outImage = image.clone();
     }
 
-    int top = center ? static_cast<int>(std::round(dh - 0.1f)) : 0;
-    int bottom = static_cast<int>(std::round(dh + 0.1f));
-    int left = center ? static_cast<int>(std::round(dw - 0.1f)) : 0;
-    int right = static_cast<int>(std::round(dw + 0.1f));
+    int top = center ? static_cast<int>(std::nearbyint(dh - 0.1f)) : 0;
+    int bottom = static_cast<int>(std::nearbyint(dh + 0.1f));
+    int left = center ? static_cast<int>(std::nearbyint(dw - 0.1f)) : 0;
+    int right = static_cast<int>(std::nearbyint(dw + 0.1f));
 
     cv::copyMakeBorder(outImage, outImage, top, bottom, left, right,
                        cv::BORDER_CONSTANT, paddingValue);
@@ -289,15 +289,15 @@ inline void letterBoxToBlob(const cv::Mat& image,
     const float scale = std::min(static_cast<float>(dstH) / srcH,
                                   static_cast<float>(dstW) / srcW);
     
-    // Ultralytics uses round() for new dimensions
-    const int newH = static_cast<int>(std::round(srcH * scale));
-    const int newW = static_cast<int>(std::round(srcW * scale));
+    // Ultralytics uses Python round() (ties-to-even) for new dimensions
+    const int newH = static_cast<int>(std::nearbyint(srcH * scale));
+    const int newW = static_cast<int>(std::nearbyint(srcW * scale));
     
     // Ultralytics uses asymmetric padding with -0.1/+0.1 adjustment
     const float dh = (dstH - newH) / 2.0f;
     const float dw = (dstW - newW) / 2.0f;
-    const int padTop = static_cast<int>(std::round(dh - 0.1f));
-    const int padLeft = static_cast<int>(std::round(dw - 0.1f));
+    const int padTop = static_cast<int>(std::nearbyint(dh - 0.1f));
+    const int padLeft = static_cast<int>(std::nearbyint(dw - 0.1f));
     
     actualSize = cv::Size(dstW, dstH);
     
@@ -382,9 +382,9 @@ inline void letterBoxToBlob(const cv::Mat& image,
     const float scale = std::min(static_cast<float>(dstH) / srcH,
                                   static_cast<float>(dstW) / srcW);
     
-    // Ultralytics uses round() for new dimensions
-    int newH = static_cast<int>(std::round(srcH * scale));
-    int newW = static_cast<int>(std::round(srcW * scale));
+    // Ultralytics uses Python round() (ties-to-even) for new dimensions
+    int newH = static_cast<int>(std::nearbyint(srcH * scale));
+    int newW = static_cast<int>(std::nearbyint(srcW * scale));
     
     // For dynamic shape, adjust to stride-aligned minimum size
     if (dynamicShape) {
@@ -399,8 +399,8 @@ inline void letterBoxToBlob(const cv::Mat& image,
     // Ultralytics uses asymmetric padding with -0.1/+0.1 adjustment
     const float dh = (dstH - newH) / 2.0f;
     const float dw = (dstW - newW) / 2.0f;
-    const int padTop = static_cast<int>(std::round(dh - 0.1f));
-    const int padLeft = static_cast<int>(std::round(dw - 0.1f));
+    const int padTop = static_cast<int>(std::nearbyint(dh - 0.1f));
+    const int padLeft = static_cast<int>(std::nearbyint(dw - 0.1f));
     
     // Padding stays unchanged between frames with the same tensor/content layout.
     constexpr float padNorm = 114.0f / 255.0f;
@@ -461,13 +461,15 @@ inline void getScalePad(const cv::Size& originalSize,
     scale = std::min(static_cast<float>(letterboxSize.height) / originalSize.height,
                      static_cast<float>(letterboxSize.width) / originalSize.width);
     
-    // Use round() for new dimensions (matches Ultralytics)
-    int newW = static_cast<int>(std::round(originalSize.width * scale));
-    int newH = static_cast<int>(std::round(originalSize.height * scale));
-    
-    // For descaling, use UNROUNDED padding values (matches Ultralytics behavior)
-    padX = (letterboxSize.width - newW) / 2.0f;
-    padY = (letterboxSize.height - newH) / 2.0f;
+    // YOLOs-CPP v1.1.0: Python round uses ties-to-even. Recover the
+    // integer padding actually written by letterBoxToBlob, rather than the
+    // ideal half-padding (which is wrong when total padding is odd).
+    const int newW = static_cast<int>(std::nearbyint(originalSize.width * scale));
+    const int newH = static_cast<int>(std::nearbyint(originalSize.height * scale));
+    const float dw = (letterboxSize.width - newW) / 2.0f;
+    const float dh = (letterboxSize.height - newH) / 2.0f;
+    padX = std::nearbyint(dw - 0.1f);
+    padY = std::nearbyint(dh - 0.1f);
 }
 
 /// @brief Fast coordinate descaling (batch operation)

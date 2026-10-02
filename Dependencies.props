@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- SDKs live beside this project. See tools/install_dependencies.ps1. -->
+  <PropertyGroup>
+    <SagaDependenciesRoot>$(MSBuildThisFileDirectory).deps\</SagaDependenciesRoot>
+    <SagaNcnnVersion>20260526</SagaNcnnVersion>
+    <SagaNcnnDir>$(SagaDependenciesRoot)ncnn-$(SagaNcnnVersion)\x64</SagaNcnnDir>
+    <SagaOpenCvVersion>5.0.0</SagaOpenCvVersion>
+    <SagaOpenCvDir>$(SagaDependenciesRoot)opencv-$(SagaOpenCvVersion)\opencv\build</SagaOpenCvDir>
+    <SagaOpenCvLibrary>opencv_world500.lib</SagaOpenCvLibrary>
+    <SagaOpenCvRuntime>opencv_world500.dll</SagaOpenCvRuntime>
+    <SagaOrtVersion>1.30.0</SagaOrtVersion>
+    <SagaOrtDir>$(SagaDependenciesRoot)onnxruntime-dml-$(SagaOrtVersion)</SagaOrtDir>
+    <SagaDirectMLVersion>1.15.4</SagaDirectMLVersion>
+    <SagaDirectMLDir>$(SagaDependenciesRoot)directml-$(SagaDirectMLVersion)-x64</SagaDirectMLDir>
+  </PropertyGroup>
+</Project>

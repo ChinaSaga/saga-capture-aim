@@ -5,6 +5,9 @@
 
 #include <cstdlib>
 #include <mmsystem.h>
+#include <opencv2/core/version.hpp>
+
+#define SAGA_OPENCV_RUNTIME_DLL "opencv_world" CVAUX_STR(CV_VERSION_MAJOR) CVAUX_STR(CV_VERSION_MINOR) CVAUX_STR(CV_VERSION_REVISION) ".dll"
 
 // 接口_文件存在提示检测
 static void requireFile(const std::string& name)
@@ -22,7 +25,7 @@ static bool missingDeps()
     // 现在：
     //   · Saga.dll 的源码已并入本 EXE（src\），运行时不再需要它 → 移除
     //   · HPSocket4C.dll 由手写 Winsock 替代 → 不需要
-    static const char* need[] = { "DirectML.dll", "ncnn.dll", "onnxruntime.dll", "opencv_world4120.dll" };
+    static const char* need[] = { "DirectML.dll", "ncnn.dll", "onnxruntime.dll", SAGA_OPENCV_RUNTIME_DLL };
     for (const char* n : need)
         if (!fileExists(g.runDir + "\\" + n)) return true;
     return false;
@@ -73,7 +76,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
     // ---------------- 依赖文件检测（原版：缺文件弹框后 进程_结束）----------------
     if (missingDeps())
     {
-        MessageBoxA(nullptr, "缺少 DirectML.dll / ncnn.dll / onnxruntime.dll / opencv_world4120.dll 中的一项",
+        MessageBoxA(nullptr, "缺少 DirectML.dll / ncnn.dll / onnxruntime.dll / " SAGA_OPENCV_RUNTIME_DLL " 中的一项",
             "系统提示", MB_OK | MB_SETFOREGROUND);
         return 0;
     }

@@ -384,6 +384,11 @@ public:
         // require the snapshot lock. Readers can acquire the last completed
         // frame while the next crop is still being converted.
         Lock producer(producerLock_);
+        // Drivers may submit an empty/truncated sample during a format switch.
+        // Validate once before the SIMD kernels, which deliberately have no
+        // per-row bounds checks; do not publish it as a fresh complete frame.
+        if (!data || !kernel_ || bytes < 0 || static_cast<size_t>(bytes) < layout_.bytes)
+            return S_OK;
         unsigned slot = 0;
         for (; slot < kCaptureSlots; ++slot) if (storage_[slot].use_count() == 1) break;
         if (slot == kCaptureSlots) return S_OK; // Drop rather than queue stale frames.

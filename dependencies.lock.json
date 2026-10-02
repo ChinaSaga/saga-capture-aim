@@ -1,0 +1,46 @@
+{
+  "verified_on": "2026-10-02",
+  "opencv": {
+    "version": "5.0.0",
+    "url": "https://github.com/opencv/opencv/releases/download/5.0.0/opencv-5.0.0-windows.exe",
+    "mirror": "https://sourceforge.net/projects/opencvlibrary/files/5.0.0/opencv-5.0.0-windows.exe/download",
+    "sha256": "9c6c1fcea58acdf06edba13148b2246e00c2658143fa51e61ecd370db8c39f63"
+  },
+  "ncnn": {
+    "version": "20260526",
+    "url": "https://github.com/Tencent/ncnn/releases/download/20260526/ncnn-20260526-windows-vs2022-shared.zip",
+    "sha256": "bd44f73ff210d523368ca77badfc8ae528281cb374185717c03b472d4f5a1754"
+  },
+  "directml": {
+    "version": "1.15.4",
+    "url": "https://api.nuget.org/v3-flatcontainer/microsoft.ai.directml/1.15.4/microsoft.ai.directml.1.15.4.nupkg",
+    "sha256": "4e7cb7ddce8cf837a7a75dc029209b520ca0101470fcdf275c1f49736a3615b9"
+  },
+  "onnxruntime": {
+    "version": "1.30.0",
+    "source": "https://github.com/microsoft/onnxruntime/tree/v1.30.0",
+    "commit": "f2c39fe2f838cf35ce7da92824f5a5e3ee6e88a7",
+    "build": "tools/build_onnxruntime_dml.ps1"
+  },
+  "asio": {
+    "version": "1.38.2",
+    "source": "https://github.com/chriskohlhoff/asio/tree/asio-1-38-2",
+    "commit": "8806a6803cde7054c3049d3666d3ec36786568c5",
+    "vendored": "src/Makcu/cat/asio"
+  },
+  "yolos_cpp": {
+    "upstream_version": "1.1.0",
+    "source": "https://github.com/Geekgineer/YOLOs-CPP/tree/v1.1.0",
+    "commit": "2b3b2f640a085c2be8e62d3566117c84d623cee0",
+    "integration": "maintained fork; latest letterbox geometry corrections merged"
+  },
+  "makcu": {
+    "upstream_version": "1.3.5",
+    "source": "https://github.com/K4HVH/makcu-cpp/tree/v1.3.5",
+    "commit": "9874efa96f58e7a768e0110d765f0fa072e7e25e",
+    "integration": "maintained protocol fork; applicable core protections audited"
+  },
+  "cat": {
+    "integration": "SDK retained at user request; Asio 1.38.2 compatibility migrated"
+  }
+}

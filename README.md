@@ -13,7 +13,11 @@
 
 ## 0. 运行效果
 
-最新更新修复部分 MAKCU 固件在鼠标按键时被误判断开的兼容问题，并将启动、驱动、串口和网络诊断合并为有容量上限的异步日志。详见 [2026-09-30 更新说明](docs/更新说明-2026-09-30.md) 和 [更新日志](CHANGELOG.md)。
+本次更新 OpenCV 5.0.0、ONNX Runtime 1.30.0（保留 CPU / DirectML）和 Asio 1.38.2；NCNN 20260526、DirectML 1.15.4 经核查保持当前稳定版。YOLOs-CPP、MAKCU 保留维护分支并合并或核查适用修正，Cat SDK 按用户要求保留。版本、来源、性能对照和分支状态见 [依赖更新记录](docs/依赖更新-2026-10-02.md)。SDK 统一位于项目 `.deps`。
+
+2026-10-02 已实测采集＋ONNX 约 240 FPS，并提供图片识别平均耗时约降低 10% 的可选 FP16 模型入口和转换工具。模型不随源码入库，原模型及默认配置保留；FP16 有少量检测变化。测试范围、精度差异和排除的实验见 [采集与 YOLO 性能实测](docs/性能实测与优化-2026-10-02.md)。库升级本身未带来明确提速，具体对照见依赖更新记录。
+
+2026-09-30 更新修复部分 MAKCU 固件在鼠标按键时被误判断开的兼容问题，并将启动、驱动、串口和网络诊断合并为有容量上限的异步日志。详见 [2026-09-30 更新说明](docs/更新说明-2026-09-30.md) 和 [更新日志](CHANGELOG.md)。
 
 原生人手数据采集、CPU 训练与模型热加载、局域网网页调参、网络自检及窗口标题实际 IP 的使用方法见 [2026-09-29 更新说明](docs/更新说明-2026-09-29.md)。
 
@@ -34,17 +38,18 @@
 
 ```powershell
 cd D:\C++采集卡源码
-& 'C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/MSBuild.exe' `
-    SagaApp.vcxproj /p:Configuration=Release /p:Platform=x64 /m /v:minimal /nologo
+./tools/build.ps1
 ```
 
 构建后会自动把运行时 DLL 拷到输出目录（`RuntimeDependencies.targets`，仅 x64 生效）：
 NCNN、OpenCV、ONNXRuntime、DirectML 及 VC 运行库。
+许可证同时复制到输出目录 `licenses`；CPU / DirectML 不需要 `onnxruntime_providers_shared.dll`，构建会清理旧输出中的该文件。
 
-MSBuild 被环境策略拦住时的备用方式（Git Bash）：
+首次在另一台机器构建时，先准备依赖（ONNX Runtime 会从官方源码编译，耗时明显长于应用编译）：
 
-```bash
-bash "D:/C++采集卡源码/.workbuddy/build.sh"     # → .workbuddy\build-x64\圣人双机服务端.exe
+```powershell
+./tools/install_dependencies.ps1 -Python 'C:\你的Python目录\python.exe'
+./tools/build.ps1
 ```
 
 细节、依赖版本、排错见 **[docs/构建与部署.md](docs/构建与部署.md)**。
@@ -56,7 +61,7 @@ bash "D:/C++采集卡源码/.workbuddy/build.sh"     # → .workbuddy\build-x64\
 | 文件 | 来源 | 说明 |
 |---|---|---|
 | CH343 串口驱动 | **已打进 EXE 资源** | Makcu 盒子（WCH CH343 USB 转串口）的驱动，检测到没装会自动静默安装，见下 |
-| `DirectML.dll`、`ncnn.dll`、`onnxruntime.dll`、`opencv_world4120.dll` | 随构建复制 | 缺一项启动时弹「缺少 …」并退出 |
+| `DirectML.dll`、`ncnn.dll`、`onnxruntime.dll`、`opencv_world500.dll` | 随构建复制 | 缺一项启动时弹「缺少 …」并退出 |
 | VC 运行库 `msvcp140*.dll`、`vcruntime140*.dll`、`vcomp140.dll` 等 | 随构建复制 | 工程用 `/MD` |
 | `人手数据\mouse.bin`（兼容旧的 `mouse.bin`） | 主界面点击“点我开始记录人手数据”和“点我开始训练人手模型”生成 | 缺失时仍可进入界面采集训练；训练成功后自动替换并加载，无需重启。使用说明见 [人手轨迹\README.md](人手轨迹/README.md) |
 | 红蓝球采集与 CPU 训练 | 已编入 EXE 的原生 C++ 功能 | 两个按钮直接使用，无需安装 Python、PyTorch 或其它训练环境 |
@@ -102,6 +107,8 @@ Makcu 盒子用的是 WCH **CH343** 芯片，Windows 没有内置它的驱动，
 ```
 D:\C++采集卡源码
 ├── Saga.sln / SagaApp.vcxproj         唯一工程（Release|x64、Debug|x64）
+├── Dependencies.props / dependencies.lock.json  SDK 路径、固定版本与来源校验
+├── .deps\                            本地 SDK 与下载缓存（不入库）
 ├── RuntimeDependencies.targets        构建后自动复制第三方 DLL
 ├── .gitignore / .gitattributes        入库规则：排除产物、DLL、模型、私有目录
 ├── 圣人自用.sample.js                 配置模板（入库版本；真实 `圣人自用.js` 被忽略）
@@ -134,6 +141,8 @@ D:\C++采集卡源码
 | 文档 | 看什么 |
 |---|---|
 | [CHANGELOG.md](CHANGELOG.md) | 按日期汇总更新及详细说明入口 |
+| [docs/依赖更新-2026-10-02.md](docs/依赖更新-2026-10-02.md) | 库版本、维护分支、构建部署与新旧依赖对照 |
+| [docs/性能实测与优化-2026-10-02.md](docs/性能实测与优化-2026-10-02.md) | 真实图片、采集卡、可选 FP16 和精度差异 |
 | [docs/更新说明-2026-09-30.md](docs/更新说明-2026-09-30.md) | 最新 MAKCU 按键兼容修复、统一日志与验证结果 |
 | [docs/构建与部署.md](docs/构建与部署.md) | 环境、第三方库路径、编译开关、产物、部署、排错 |
 | [docs/架构与源码索引.md](docs/架构与源码索引.md) | 模块职责、数据流、帧格式、线程表、锁约定 |
@@ -146,14 +155,14 @@ D:\C++采集卡源码
 ## 5. 仓库包含 / 不包含什么（准备上传 GitHub）
 
 **入库**：`README.md`、`CHANGELOG.md`、`docs\`（含 `reference\`）、`src\`、`tools\`（开发测试）、`web\`、`人手轨迹\`（说明与参考脚本，**不含个人采集数据**）、`Saga.sln`、`SagaApp.vcxproj`、
-`RuntimeDependencies.targets`、`圣人自用.sample.js`、`.gitignore`、`.gitattributes`、`LICENSE`。
+`Dependencies.props`、`dependencies.lock.json`、`RuntimeDependencies.targets`、`圣人自用.sample.js`、`.gitignore`、`.gitattributes`、`LICENSE`、`THIRD-PARTY-NOTICES.md`。
 
 **不入库**（见 `.gitignore`）：
 
 | 类别 | 内容 | 原因 |
 |---|---|---|
 | 构建产物 | `x64\Release\`、`*.obj/pdb/tlog/log`、VC 中间目录 | 可由源码重建 |
-| 第三方 DLL | ncnn / OpenCV / ONNXRuntime / DirectML / VC 运行库 | 体积合计约 110 MB，且构建时自动复制 |
+| 第三方 SDK / DLL | `.deps\`、ncnn / OpenCV / ONNXRuntime / DirectML / VC 运行库 | 按锁定版本准备，构建时自动复制 |
 | **模型** | `*.onnx`、`*.param`、`*.bin`（含 NCNN 权重） | 体积大、非本仓库产出、可能涉及第三方授权 |
 | 个人数据 | `mouse.bin`（人手轨迹）、`圣人自用.js`、`主机IP.ini`、`监控双机.ini`、`配置保存*`、`运行日志.txt` | 含个人 IP 与调参结果 |
 | 私有辅助 | `.workbuddy\`（会话记忆、备份、易语言原版源码 19 MB）、`.vs\` | 非项目本体 |
@@ -161,7 +170,7 @@ D:\C++采集卡源码
 克隆后要跑起来：先按 [docs/构建与部署.md](docs/构建与部署.md) 构建，将目标识别模型和网页放到 EXE 同目录。人手模型可通过记录、训练按钮生成，也可使用已有 `mouse.bin`；配置可将 `圣人自用.sample.js` 复制为 `圣人自用.js`，未提供时按默认值生成。
 
 **注意**：第三方代码与数据的授权见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) ——
-其中 `src\Makcu\` 是第三方 SDK 源码，公开前请先确认其原始授权。
+YOLOs-CPP 上游为 AGPL-3.0，MAKCU 上游为 GPL-3.0，参考许可证保留在 `docs/licenses`；Cat SDK 其余代码的原始授权仍未声明，沿用现有源码并记录来源状态。
 
 ---
 

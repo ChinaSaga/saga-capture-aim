@@ -15,6 +15,10 @@
 #include <cstdint>
 
 #include <opencv2/opencv.hpp>
+#if CV_VERSION_MAJOR >= 5
+// OpenCV 5 moved rotated intersections and contour areas to geometry.
+#include <opencv2/geometry.hpp>
+#endif
 
 #include "types.hpp"
 

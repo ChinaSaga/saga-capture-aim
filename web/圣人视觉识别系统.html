@@ -660,6 +660,19 @@
                 box-shadow: 0 0 4px rgba(52, 152, 219, 0.8);
             }
 
+            .radio-item.engine-disabled,
+            .radio-item.engine-disabled label {
+                cursor: not-allowed;
+            }
+
+            .radio-item.engine-disabled label,
+            .radio-item.engine-disabled:hover label {
+                background-color: #eef0f2;
+                color: #a0a5ab;
+                border-color: #d5d8dc;
+                box-shadow: none;
+            }
+
             .radio-group {
                 display: flex;
                 gap: 10px;
@@ -1341,20 +1354,20 @@
                     <button type="button" onclick="刷新模型列表()" style="margin-top:10px;padding:7px 14px;cursor:pointer;">刷新模型</button>
                     <span id="模型列表状态" aria-live="polite" style="margin-left:8px;color:#666;font-size:13px;"></span>
                     <div class="radio-container" style="flex-wrap:wrap;">
-                        <div class="radio-item">
-                            <input type="radio" id="NCNN" name="推理引擎" value="NCNN">
+                        <div class="radio-item engine-disabled">
+                            <input type="radio" id="NCNN" name="推理引擎" value="NCNN" disabled>
                             <label for="NCNN">NCNN</label>
                         </div>
-                        <div class="radio-item">
-                            <input type="radio" id="ONNX" name="推理引擎" value="ONNX">
+                        <div class="radio-item engine-disabled">
+                            <input type="radio" id="ONNX" name="推理引擎" value="ONNX" disabled>
                             <label for="ONNX">ONNX</label>
                         </div>
-                        <div class="radio-item">
-                            <input type="radio" id="TensorRT" name="推理引擎" value="TensorRT">
+                        <div class="radio-item engine-disabled">
+                            <input type="radio" id="TensorRT" name="推理引擎" value="TensorRT" disabled>
                             <label for="TensorRT">N卡专用推理</label>
                         </div>
                     </div>
-                    <p style="margin:12px 0 0;color:#666;font-size:13px;line-height:1.7;">NCNN使用.param/.bin，ONNX使用.onnx，N卡专用使用.trt；模型放在程序同目录。<br>N卡专用模型请先在本机转换，再选择对应的游戏模型。</p>
+                    <p style="margin:12px 0 0;color:#666;font-size:13px;line-height:1.7;">同名模型放在程序同目录：有配对的.param/.bin可选NCNN，有.onnx可选ONNX，有.trt可选N卡专用。缺少对应文件的按钮会变灰。<br>N卡专用模型请先在本机转换；添加或删除文件后点击“刷新模型”。</p>
                     <div class="control-row" style="margin-top:30px;">
                         <span class="control-label">扳机热键1:</span>
                         <div class="select-container">
@@ -1646,35 +1659,52 @@
 
         let 模型列表请求序号 = 0;
         let 当前模型选择 = typeof 模型名称 !== 'undefined' ? 模型名称 : '';
+        let 当前推理引擎 = typeof 推理引擎 !== 'undefined' ? Number(推理引擎) : 1;
+        let 模型引擎目录 = new Map();
+        function 设置引擎按钮(engines) {
+            ['NCNN', 'ONNX', 'TensorRT'].forEach((id, index) => {
+                const radio = document.getElementById(id);
+                radio.disabled = !engines.includes(index + 1);
+                radio.checked = !radio.disabled && 当前推理引擎 === index + 1;
+                radio.parentElement.classList.toggle('engine-disabled', radio.disabled);
+                radio.parentElement.title = radio.disabled ? '当前模型没有对应文件' : '';
+            });
+        }
+        function 更新引擎按钮() {
+            const name = document.getElementById('模型名称').value;
+            const engines = 模型引擎目录.get(name) || [];
+            设置引擎按钮(engines);
+            const status = document.getElementById('模型列表状态');
+            status.textContent = 模型引擎目录.size ? '找到 ' + 模型引擎目录.size + ' 个模型' : 'EXE 同目录没有可用模型，请放入后刷新';
+            if (name && !engines.includes(当前推理引擎)) status.textContent += '，请选择可用的推理引擎';
+        }
         function 模型选项(name, label = name) {
             const option = document.createElement('option');
             option.value = name;
             option.textContent = label;
             return option;
         }
-        async function 刷新模型列表(engine) {
-            if (!engine) {
-                const selected = document.querySelector('input[name="推理引擎"]:checked');
-                engine = selected ? ({NCNN:1, ONNX:2, TensorRT:3}[selected.id])
-                    : (typeof 推理引擎 !== 'undefined' ? Number(推理引擎) : 1);
-            }
-            if (![1,2,3].includes(Number(engine))) engine = 1;
+        async function 刷新模型列表() {
             const requestId = ++模型列表请求序号;
             const status = document.getElementById('模型列表状态');
             const select = document.getElementById('模型名称');
             const current = select.value || 当前模型选择;
             select.disabled = true;
+            设置引擎按钮([]);
             select.replaceChildren(模型选项('', '正在读取模型…'));
             status.textContent = '正在读取模型…';
             try {
-                const response = await fetch('/models.json?engine=' + engine, {cache:'no-store'});
+                const response = await fetch('/model-catalog.json', {cache:'no-store'});
                 if (!response.ok) throw new Error('模型列表读取失败');
                 const data = await response.json();
                 if (requestId !== 模型列表请求序号) return;
-                if (Number(data.engine) !== Number(engine) || !Array.isArray(data.models))
+                if (!Array.isArray(data.models) || data.models.some(model => !model || typeof model.name !== 'string' || !model.name
+                    || !Array.isArray(model.engines) || !model.engines.length || model.engines.some(engine => ![1,2,3].includes(engine))))
                     throw new Error('模型列表格式错误');
-                const names = [...new Set(data.models.filter(name => typeof name === 'string' && name))];
-                const available = names.includes(current);
+                模型引擎目录 = new Map(data.models.map(model => [model.name, model.engines]));
+                const names = [...模型引擎目录.keys()];
+                const selectedName = names.find(name => name.toLowerCase() === String(current).toLowerCase());
+                const available = selectedName !== undefined;
                 const options = names.map(name => 模型选项(name));
                 if (!available) {
                     const placeholder = 模型选项('', names.length ? '请选择模型' : '未找到模型');
@@ -1682,12 +1712,12 @@
                     options.unshift(placeholder);
                 }
                 select.replaceChildren(...options);
-                select.value = available ? current : '';
+                select.value = available ? selectedName : '';
                 select.disabled = !names.length;
-                status.textContent = names.length ? '找到 ' + names.length + ' 个模型'
-                    : 'EXE 同目录没有此引擎的模型，请放入后刷新';
+                更新引擎按钮();
             } catch (error) {
                 if (requestId === 模型列表请求序号) {
+                    模型引擎目录 = new Map();
                     select.replaceChildren(模型选项('', '模型列表读取失败'));
                     status.textContent = '暂时无法读取模型列表，请点击刷新模型重试';
                 }
@@ -1735,7 +1765,7 @@
             document.getElementById('其次锁定').value = 其次锁定;
             document.getElementById('再次锁定').value = 再次锁定;
             document.getElementById('准星类别').value = 准星类别;
-            刷新模型列表(推理引擎);
+            刷新模型列表();
             document.getElementById('优先锁定位置显示').textContent = 优先锁定位置;
             document.getElementById('其次锁定位置显示').textContent = 其次锁定位置;
             document.getElementById('再次锁定位置显示').textContent = 再次锁定位置;
@@ -1753,14 +1783,6 @@
             document.getElementById('自动截图').checked = 自动截图;
             document.getElementById('吸附常驻').checked = 吸附常驻;
             document.getElementById('自瞄连续按下').checked = 自瞄连续按下;
-
-            if (推理引擎 == 1) {
-                document.getElementById('NCNN').checked = true;
-            } else if (推理引擎 == 2) {
-                document.getElementById('ONNX').checked = true;
-            } else if (推理引擎 == 3) {
-                document.getElementById('TensorRT').checked = true;
-            }
 
             // 移动方式初始化
             移动方式 = (typeof window.移动方式 !== 'undefined') ? window.移动方式 : 1;
@@ -2040,21 +2062,24 @@
                 发送消息给服务器("开镜时间", this.value);
             });
             document.getElementById('NCNN').addEventListener('change', function() {
-                if (this.checked) {
+                if (this.checked && !this.disabled) {
+                    当前推理引擎 = 1;
                     发送消息给服务器("推理引擎", "1");
-                    刷新模型列表(1);
+                    更新引擎按钮();
                 }
             });
             document.getElementById('ONNX').addEventListener('change', function() {
-                if (this.checked) {
+                if (this.checked && !this.disabled) {
+                    当前推理引擎 = 2;
                     发送消息给服务器("推理引擎", "2");
-                    刷新模型列表(2);
+                    更新引擎按钮();
                 }
             });
             document.getElementById('TensorRT').addEventListener('change', function() {
-                if (this.checked) {
+                if (this.checked && !this.disabled) {
+                    当前推理引擎 = 3;
                     发送消息给服务器("推理引擎", "3");
-                    刷新模型列表(3);
+                    更新引擎按钮();
                 }
             });
             document.querySelectorAll('input[name="moveDelay"]').forEach(el => {
@@ -2154,6 +2179,7 @@
             document.getElementById('模型名称').addEventListener('change', function() {
                 if (!this.value || this.disabled) return;
                 当前模型选择 = this.value;
+                更新引擎按钮();
                 发送消息给服务器('模型名称', this.value);
             });
         }

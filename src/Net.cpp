@@ -348,6 +348,10 @@ static void handleRequest(SOCKET c, const std::string& req)
         sendResponse(c, 200, webConfigScript(), "application/javascript; charset=utf-8");
         return;
     }
+    if (method == "GET" && path == "/model-catalog.json") {
+        sendResponse(c, 200, model_files::catalogJson(model_files::fromGbk(g.runDir)));
+        return;
+    }
     if (method == "GET" && path == "/models.json") {
         int engine = 0;
         if (!model_files::parseEngine(query, engine)) {

@@ -85,6 +85,16 @@ int main() {
             require(response.find("application/json; charset=utf-8")!=std::string::npos,"Model response content type failed");
             require(response.substr(response.find("\r\n\r\n")+4)==model_files::json(directory,engine),"Model HTTP UTF-8 body differs");
         }
+        auto catalogResponse=request("/model-catalog.json");
+        require(catalogResponse.find("HTTP/1.1 200 ")==0 &&
+            catalogResponse.substr(catalogResponse.find("\r\n\r\n")+4)==model_files::catalogJson(directory), "Catalog HTTP status/UTF-8 body differs");
+        require(catalogResponse.find(model_files::utf8(L"缺bin"))==std::string::npos,"Incomplete NCNN model leaked into catalog");
+        for(const auto name:{L"同时存在.param",L"同时存在.bin",L"同时存在.onnx",L"同时存在.trt"}) std::ofstream(directory/name).put('x');
+        const auto allFormats="{\"name\":\""+model_files::utf8(L"同时存在")+"\",\"engines\":[1,2,3]}";
+        require(request("/model-catalog.json").find(allFormats)!=std::string::npos,"Same model must expose all three engines through HTTP");
+        std::filesystem::remove(directory/L"同时存在.bin");
+        const auto withoutNcnn="{\"name\":\""+model_files::utf8(L"同时存在")+"\",\"engines\":[2,3]}";
+        require(request("/model-catalog.json").find(withoutNcnn)!=std::string::npos,"Catalog HTTP must reflect deleted model files");
         for(const auto path:{"/models.json","/models.json?engine=4","/models.json?engine=3x","/models.json?engine=1&engine=3"})
             require(request(path).find("HTTP/1.1 400 ")==0,"Invalid model query did not return 400");
         require(request("/?ignored=1").find(page)!=std::string::npos,"Existing root page route broken");
@@ -96,6 +106,7 @@ int main() {
         require(request("/unknown").find("HTTP/1.1 404 ")==0,"Unknown route did not return 404");
         std::filesystem::remove(directory/L"圣人视觉识别系统.html");
         require(request("/models.json?engine=3").find("HTTP/1.1 404 ")==0,"Missing panel protection broken");
+        require(request("/model-catalog.json").find("HTTP/1.1 404 ")==0,"Catalog missing-panel protection broken");
         std::filesystem::remove_all(directory);WSACleanup();
         std::cout<<"Production HTTP socket routing passed: engines 1/2/3, UTF-8, invalid queries, root/index/config/API, engine 3 POST, 404 and missing panel protection.\n";
     } catch(const std::exception& error) {

@@ -38,6 +38,28 @@ int main() {
         require(model_files::escapeJson("quote\"slash\\\n\t") == "quote\\\"slash\\\\\\u000a\\u0009", "JSON escaping mismatch");
         const auto response=model_files::json(directory,3);
         require(response=="{\"engine\":3,\"models\":[\"a\",\"z\",\""+model_files::utf8(L"任意名字")+"\"]}", "JSON UTF-8 result mismatch");
+        // Every combination of the four file types, including incomplete NCNN
+        // pairs. Different models must never enable each other's buttons.
+        for (unsigned mask = 0; mask < 16; ++mask) {
+            const auto name = L"combination-" + std::to_wstring(mask);
+            const wchar_t* suffixes[] = {L".param", L".bin", L".onnx", L".trt"};
+            for (unsigned bit = 0; bit < 4; ++bit) if (mask & (1u << bit)) file(name + suffixes[bit]);
+        }
+        file(L"CaseUnified.PARAM"); file(L"caseunified.bin"); file(L"CASEUNIFIED.ONNX"); file(L"Caseunified.TrT");
+        const auto models = model_files::catalog(directory);
+        for (unsigned mask = 0; mask < 16; ++mask) {
+            const auto name = "combination-" + std::to_string(mask);
+            const auto found = std::find_if(models.begin(), models.end(), [&](const auto& model) { return model.name == name; });
+            const bool ncnn = (mask & 3) == 3, onnx = (mask & 4) != 0, trt = (mask & 8) != 0;
+            require((found != models.end()) == (ncnn || onnx || trt), "Catalog includes an incomplete model or omits a valid model");
+            if (found != models.end()) require(!found->engineNames[0].empty() == ncnn &&
+                !found->engineNames[1].empty() == onnx && !found->engineNames[2].empty() == trt, "Catalog engine availability differs from files");
+        }
+        const auto unified = std::find_if(models.begin(), models.end(), [](const auto& model) { return model.name == "CaseUnified"; });
+        require(unified != models.end() && unified->engineNames == std::array<std::string,3>{"CaseUnified","CASEUNIFIED","Caseunified"}, "Cross-format case-insensitive merge failed");
+        require(model_files::catalogJson(directory).find("{\"name\":\"CaseUnified\",\"engines\":[1,2,3]}") != std::string::npos, "Catalog JSON engine flags mismatch");
+        std::filesystem::remove(directory/L"caseunified.bin"); std::filesystem::remove(directory/L"Caseunified.TrT");
+        require(model_files::catalogJson(directory).find("{\"name\":\"CASEUNIFIED\",\"engines\":[2]}") != std::string::npos, "Deleted NCNN weight/TRT file did not disable engines");
         std::filesystem::remove_all(directory);
         std::cout << "Model discovery passed: Unicode, arbitrary names, empty/missing files, case pairing, sorting, directory exclusion, nonrecursive scan, query validation and JSON escaping.\n";
     } catch(const std::exception& error) {

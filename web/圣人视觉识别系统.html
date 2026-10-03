@@ -360,30 +360,296 @@ select:disabled { opacity: .65; }
     html { scroll-behavior: auto; }
     *, *::before, *::after { transition: none !important; }
 }
-.group-title { font-size:15px; font-weight:700; letter-spacing:.2px; }
-.main-title, .control-label { font-weight:600; }
-.precision-control input, input[type="text"] { font-weight:650; }
-button, .btn-group button, .config-entry, .radio-item label, .radio-card, .section-nav a { border-radius:18px; }
-.precision-control { border-radius:18px; background:var(--on-primary); border-color:var(--control-border); }
-.precision-control button { background:var(--soft-bg); color:var(--primary-color); font-weight:500; box-shadow:inset 0 0 0 2px var(--on-primary); }
-.precision-control button:first-child { border-radius:18px 0 0 18px; }
-.precision-control button:last-child { border-radius:0 18px 18px 0; }
-.btn-group button { color:var(--primary-color); background:var(--on-primary); box-shadow:0 2px 4px #0b6fae12; }
-input[type="text"] { border-radius:18px; background:var(--on-primary); }
-.save-config-btn { box-shadow:0 3px 8px #0b6fae26; }
-.mode-tabs, .mode-tab, .checkbox-item label { border-radius:15px; }
-.mode-tab.active { background:var(--primary-color); color:var(--on-primary); }
-.radio-item input:checked + label { background:var(--selected-bg); box-shadow:inset 0 0 0 1px var(--primary-color); }
-.radio-card input:checked + span { background:var(--primary-color); color:var(--on-primary); }
-.config-entry { background:var(--on-primary); }
-.config-actions .delete-config-btn { box-shadow:none; }
-input[type="range"]::-webkit-slider-runnable-track { height:6px; border-radius:20px; }
-input[type="range"]::-webkit-slider-thumb { width:20px; height:20px; margin-top:-7px; border:4px solid var(--on-primary); border-radius:50%; box-shadow:0 0 0 1px var(--primary-color),0 3px 7px #0b6fae26; }
-input[type="range"]::-moz-range-track, input[type="range"]::-moz-range-progress { height:6px; border-radius:20px; }
-input[type="range"]::-moz-range-thumb { width:12px; height:12px; border:4px solid var(--on-primary); box-shadow:0 0 0 1px var(--primary-color),0 3px 7px #0b6fae26; }
-@media (min-width:1500px) and (min-height:900px) { .group-title { font-size:17px; } }
-@media (max-width:600px) { .group-title { font-size:15px; } input[type="range"]::-webkit-slider-thumb { width:24px; height:24px; margin-top:-9px; } input[type="range"]::-moz-range-thumb { width:16px; height:16px; } }
-
+        /* Compact layout: preserve colors, typography, controls and behavior. */
+body { padding: 10px; }
+.app-header { gap: 12px; min-height: 60px; padding: 8px 14px; margin-bottom: 8px; }
+.brand { gap: 9px; }
+.header-tools { gap: 12px; }
+.config-panel { gap: 8px; min-height: 0; align-items: start; }
+.panel-column { gap: 8px; }
+.config-group { flex: 0 0 auto; padding: 10px 12px; }
+.group-title { padding-bottom: 6px; margin-bottom: 7px; gap: 7px; }
+.control-row { gap: 6px; margin-bottom: 4px; }
+.slider-container { gap: 6px; }
+.special-move-row { min-height: 34px; }
+.move-mode-panel { padding: 8px; margin-top: 6px; }
+.mode-header { margin-bottom: 6px; gap: 6px; }
+.param-row { margin-bottom: 4px; }
+#阵营切换面板 { margin-bottom: 7px; }
+.radio-container { margin: 6px 0; }
+#热键文本行 { margin-top: 6px; padding-top: 6px; }
+.model-tools { margin-top: 5px; gap: 5px; }
+.model-help { margin: 3px 0 6px; }
+.config-storage { gap: 6px; min-height: 130px; }
+.config-actions { gap: 5px; }
+.empty-config { padding: 12px 0; }
+@media (min-width: 1101px) {
+    .config-panel { grid-template-rows: max-content max-content; align-content: start; }
+    .target-card { padding-top: 10px; padding-bottom: 10px; }
+    .target-card .control-row:not(:last-child) { margin-bottom: 4px; }
+}
+@media (max-width: 1100px) {
+    .config-storage { min-height: 180px; }
+}
+@media (max-width: 600px) {
+    body { padding: 8px 8px 16px; }
+    .app-header { padding: 9px 10px; }
+    .section-nav { padding: 5px; margin-bottom: 8px; }
+    .config-group { padding: 10px 12px; }
+    .control-row { margin-bottom: 7px; }
+    .slider-container { gap: 8px; }
+}
+/* Narrow centered layout with aligned cards. */
+.container { max-width: 1440px; }
+.config-panel { gap: 10px; }
+.panel-column { gap: 10px; }
+@media (min-width: 1280px) {
+    .config-panel { align-items: stretch; }
+    .control-label { width: 82px; flex-basis: 82px; }
+    .special-move-row .control-label { width: 112px; flex-basis: 112px; }
+}
+@media (min-width: 601px) and (max-width: 1279px) {
+    .container { max-width: 1000px; }
+    .config-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: auto; align-items: start; }
+    .panel-column { display: flex; flex-direction: column; }
+    .panel-column > .config-group { grid-column: auto; grid-row: auto; }
+    .control-label { width: 90px; flex-basis: 90px; }
+    .special-move-row .control-label { width: 112px; flex-basis: 112px; }
+}
+/* Clear off/on states with a continuous, gentle blue light flow. */
+.special-toggle input:not(:checked) + .slider {
+    background: #dce8f0;
+    box-shadow: inset 0 0 0 1px #c5d8e5;
+}
+.special-toggle input:not(:checked) ~ .toggle-text { color: var(--muted); }
+.checkbox-item input:not(:checked) + label,
+.radio-item:not(.engine-disabled) input:not(:checked) + label,
+.radio-card input:not(:checked) + span,
+.mode-tab:not(.active) {
+    background: #f4f8fb;
+    color: var(--muted);
+    border-color: #cfdee9;
+}
+.radio-card:has(input:not(:checked)) { border-color: #cfdee9; }
+.special-toggle input:checked + .slider,
+.checkbox-item input:checked + label,
+.radio-item:not(.engine-disabled) input:checked:not(:disabled) + label,
+.radio-card input:checked:not(:disabled) + span,
+.mode-tab.active:not(:disabled) {
+    background-color: var(--primary-color);
+    background-image: linear-gradient(110deg,
+        var(--primary-color) 0%, var(--primary-color) 35%,
+        #248bc0 46%, #51aed7 50%, #248bc0 54%,
+        var(--primary-color) 65%, var(--primary-color) 100%);
+    background-size: 300% 100%;
+    background-repeat: no-repeat;
+    color: var(--on-primary);
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 1px #0b6fae12, 0 2px 7px #0b6fae20;
+    animation: enabled-light-flow 3.6s linear infinite;
+}
+.special-toggle input:checked ~ .toggle-text { color: var(--primary-color); }
+.radio-card:has(input:checked:not(:disabled)) { border-color: var(--primary-color); }
+@keyframes enabled-light-flow {
+    from { background-position: 150% 50%; }
+    to { background-position: -50% 50%; }
+}
+.special-toggle input:disabled + .slider,
+.checkbox-item input:disabled + label,
+.radio-item input:disabled + label,
+.radio-card input:disabled + span,
+.mode-tab:disabled {
+    animation: none;
+    background: var(--disabled-bg);
+    color: var(--disabled-text);
+    border-color: var(--line);
+    box-shadow: none;
+}
+@media (prefers-reduced-motion: reduce) {
+    .special-toggle input:checked + .slider,
+    .checkbox-item input:checked + label,
+    .radio-item input:checked + label,
+    .radio-card input:checked + span,
+    .mode-tab.active {
+        animation: none;
+        background-image: none;
+    }
+}
+/* Ordered rows and a bounded, independently scrollable configuration list. */
+.group-title::before { content: none; display: none; }
+.config-storage { flex: 0 0 auto; min-height: 0; }
+#配置列表 {
+    flex: 0 0 180px;
+    height: 180px;
+    min-height: 180px;
+    max-height: 180px;
+    overflow-y: scroll;
+    scrollbar-gutter: stable;
+}
+/* Static text emphasis for an assigned hotkey; blank retains its original style. */
+select:has(option[value="0"]):has(option:checked:not([value="0"]):not(:disabled)):not(:disabled) {
+    color: var(--primary-color);
+    font-weight: 700;
+    text-shadow: 0 0 6px #0b6fae30, 0 1px 0 #ffffff;
+}
+select:has(option[value="0"]) option {
+    color: var(--text-color);
+    font-weight: 400;
+    text-shadow: none;
+}
+select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
+/* Keep mobile cards full width without changing the desktop grid. */
+@media (max-width: 600px) {
+    .config-panel { align-items: stretch; }
+}
+/* Fill the available switch-row width and keep both knob positions at the ends. */
+.special-move-row > .special-toggle {
+    flex: 1 1 0;
+    min-width: 0;
+    margin-left: 0;
+    gap: 8px;
+}
+.special-toggle .slider {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 40px;
+    height: 23px;
+}
+.special-toggle .slider::before {
+    width: 17px;
+    height: 17px;
+    left: 3px;
+    transform: none;
+    transition: left .16s ease;
+}
+.special-toggle input:checked + .slider::before {
+    left: calc(100% - 20px);
+    transform: none;
+}
+.special-toggle .toggle-text {
+    flex: 0 0 auto;
+    min-width: 66px;
+    text-align: right;
+    white-space: nowrap;
+    letter-spacing: .3px;
+}
+/* Give the left explanation room to wrap in the narrow two-column layout. */
+@media (min-width: 601px) and (max-width: 700px) {
+    .special-move-row > .control-label { min-width: 0; flex-shrink: 1; }
+    .special-move-row > strong { min-width: 0; flex: 0 1 112px; }
+    .special-move-row > strong .control-label { width: 100%; }
+}
+/* Repeated light bands move exactly one tile per cycle for a seamless flow. */
+.special-toggle input:checked:not(:disabled) + .slider {
+    background-image: linear-gradient(110deg,
+        var(--primary-color) 0%, var(--primary-color) 20%,
+        #1782b8 35%, #52b7df 46%, #9adcf5 50%,
+        #52b7df 54%, #1782b8 65%,
+        var(--primary-color) 80%, var(--primary-color) 100%);
+    background-size: 80px 100%;
+    background-repeat: repeat-x;
+    animation: switch-continuous-flow 2s linear infinite;
+}
+@keyframes switch-continuous-flow {
+    from { background-position: 0 50%; }
+    to { background-position: 80px 50%; }
+}
+.special-toggle input:disabled + .slider {
+    animation: none;
+    background-image: none;
+}
+@media (prefers-reduced-motion: reduce) {
+    .special-toggle input:checked:not(:disabled) + .slider {
+        animation: none;
+        background-image: none;
+    }
+}
+/* Gallery choices: NCNN 305, ONNX 299, TensorRT 221. */
+#NCNN + label {
+    --engine-choice: 305;
+    --engine-a: #214b29;
+    --engine-b: #3e914d;
+    --engine-c: #d0f0aa;
+    --engine-duration: 1.333333s;
+    --engine-soft: #eff7f0;
+}
+#ONNX + label {
+    --engine-choice: 299;
+    --engine-a: #064b79;
+    --engine-b: #0b82c5;
+    --engine-c: #7ad8ff;
+    --engine-duration: .6s;
+    --engine-soft: #edf6fc;
+}
+#TensorRT + label {
+    --engine-choice: 221;
+    --engine-a: #3f246b;
+    --engine-b: #aa4c9c;
+    --engine-c: #61d6d7;
+    --engine-duration: 0.3s;
+    --engine-soft: #f6eef8;
+}
+:is(#NCNN, #ONNX, #TensorRT):not(:checked):not(:disabled) + label {
+    color: var(--engine-a);
+    background: var(--engine-soft);
+    border-color: var(--engine-b);
+}
+:is(#NCNN, #ONNX, #TensorRT):checked:not(:disabled) + label {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    color: var(--on-primary);
+    background: var(--engine-a);
+    border-color: var(--engine-b);
+    animation: none;
+    text-shadow: 0 1px 3px #081623b3;
+    box-shadow: 0 2px 5px #122f4014;
+}
+:is(#NCNN, #ONNX, #TensorRT):checked:not(:disabled) + label::before,
+:is(#NCNN, #ONNX, #TensorRT):checked:not(:disabled) + label::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+}
+:is(#NCNN, #ONNX, #TensorRT):checked:not(:disabled) + label::before { z-index: -2; }
+:is(#NCNN, #ONNX, #TensorRT):checked:not(:disabled) + label::after { z-index: -1; }
+:is(#NCNN, #ONNX):checked:not(:disabled) + label::before {
+    background: linear-gradient(130deg, var(--engine-a), var(--engine-b));
+}
+:is(#NCNN, #ONNX):checked:not(:disabled) + label::after {
+    inset: -60%;
+    background: linear-gradient(110deg, transparent 38%, #ffffff06 42%, #ffffff75 50%, #ffffff06 58%, transparent 62%);
+    animation: engine-picked-sweep var(--engine-duration) linear infinite;
+}
+#TensorRT:checked:not(:disabled) + label::before {
+    background: linear-gradient(90deg, var(--engine-a), var(--engine-b) 25%, var(--engine-c) 50%, var(--engine-b) 75%, var(--engine-a));
+    background-size: 200% 100%;
+    animation: engine-picked-ribbon var(--engine-duration) linear infinite;
+    animation-direction: reverse;
+}
+#TensorRT:checked:not(:disabled) + label::after {
+    background: linear-gradient(180deg, #ffffff14, transparent 60%, #001c2b20);
+}
+@keyframes engine-picked-sweep {
+    from { transform: translateX(-35%); }
+    to { transform: translateX(35%); }
+}
+@keyframes engine-picked-ribbon {
+    from { background-position: 0% 50%; }
+    to { background-position: 200% 50%; }
+}
+@media (prefers-reduced-motion: reduce) {
+    :is(#NCNN, #ONNX, #TensorRT):checked:not(:disabled) + label::before,
+    :is(#NCNN, #ONNX, #TensorRT):checked:not(:disabled) + label::after { animation: none; }
+}
+/* Preserve selected/idle styling, but stop animations on these controls. */
+:is(#tab移动系数, #tabPID移动, #panel-types button, #panel-types .checkbox-item label, #panel-types .radio-card span),
+:is(#tab移动系数, #tabPID移动, #panel-types button, #panel-types .checkbox-item label, #panel-types .radio-card span)::before,
+:is(#tab移动系数, #tabPID移动, #panel-types button, #panel-types .checkbox-item label, #panel-types .radio-card span)::after {
+    animation: none !important;
+}
 </style>
     </head>
 
@@ -397,13 +663,11 @@ input[type="range"]::-moz-range-thumb { width:12px; height:12px; border:4px soli
                 <div class="header-tools"><span class="precision-hint">拖动粗调 · 数字 / ± 精调</span><div id="推理帧率" aria-live="polite">正在读取推理状态…</div></div>
             </header>
             <nav class="section-nav" aria-label="设置分区">
-                <a href="#panel-move">移动</a><a href="#panel-target">锁定</a><a href="#panel-hotkeys">热键</a><a href="#panel-crosshair">追踪</a><a href="#panel-activation">激活</a><a href="#panel-model">模型</a><a href="#panel-types">阵容</a><a href="#panel-storage">配置</a>
+                <a href="#panel-move">移动</a><a href="#panel-target">锁定</a><a href="#panel-hotkeys">热键</a><a href="#panel-crosshair">追踪</a><a href="#panel-activation">激活</a><a href="#panel-storage">配置</a><a href="#panel-model">模型</a><a href="#panel-types">阵容</a>
             </nav>
             <div class="config-panel">
-                <!-- ===================== 移动设置 ===================== -->
-                <div class="panel-column">
 <section class="config-group move-card" id="panel-move" aria-labelledby="heading-move">
-                    <h3 class="group-title" id="heading-move" data-index="01">移动设置</h3>
+                    <h3 class="group-title" id="heading-move">移动设置</h3>
                     <div class="control-item">
                         <!-- 识别精度 -->
                         <div class="control-row">
@@ -497,8 +761,401 @@ input[type="range"]::-moz-range-thumb { width:12px; height:12px; border:4px soli
                         </div>
                     </div>
                 </section>
+<section class="config-group target-card" id="panel-target" aria-labelledby="heading-target">
+                    <h3 class="group-title" id="heading-target">目标锁定</h3>
+                    <div class="control-item">
+                        <div class="control-row">
+                            <div class="control-label multi-label">
+                                <div class="main-title">锁定范围</div>
+                                <div class="sub-text">特殊范围设置0</div>
+                                <div class="sub-text">适合低拉枪游戏</div>
+                            </div>
+                            <div class="slider-container">
+                                <input type="range" id="锁定范围" min="0" max="640" value="256" step="1">
+                                <span class="value-display" id="锁定范围显示">256</span>
+                            </div>
+                        </div>
+                        <div class="control-row">
+                            <div class="control-label multi-label">
+                                <div class="main-title">中心点范围</div>
+								 <div class="sub-text">仅优先锁定生效</div>
+                            </div>
+                            <div class="slider-container">
+                                <input type="range" id="中心点范围" min="1" max="100" value="50" step="1">
+                                <span class="value-display" id="中心点范围显示">50</span>
+                            </div>
+                        </div>
+                        <!-- 特殊移动范围 -->
+                        <div class="control-row special-move-row">
+                            <div class="control-label multi-label">
+                                <div class="main-title">特殊移动范围</div>
+                                <div class="sub-text">需要设置锁定范围0</div>
+                                <div class="sub-text">准星在目标身上才会锁</div>
+                            </div>
+                            <label class="special-toggle">
+                                <input type="checkbox" id="框内移动" name="框内移动">
+                                <span class="slider"></span>
+                                <span class="toggle-text">微范围锁定</span>
+                            </label>
+                        </div>
+                        <div class="control-row">
+                            <span class="control-label">优先锁定:</span>
+                            <input type="text" id="优先锁定" value="0">
+                            <div class="btn-group">
+                                <button type="button" onclick="增加优先锁定数值()">+</button>
+                                <button type="button" onclick="减少优先锁定数值()">-</button>
+                            </div>
+                        </div>
+                        <div class="control-row">
+                            <span class="control-label">位置:</span>
+                            <div class="slider-container">
+                                <input type="range" id="优先锁定位置" min="0" max="100" value="50">
+                                <span class="value-display" id="优先锁定位置显示">50</span>
+                            </div>
+                        </div>
+                        <div class="control-row">
+                            <span class="control-label">其次锁定:</span>
+                            <input type="text" id="其次锁定" value="0">
+                            <div class="btn-group">
+                                <button type="button" onclick="增加其次锁定数值()">+</button>
+                                <button type="button" onclick="减少其次锁定数值()">-</button>
+                            </div>
+                        </div>
+                        <div class="control-row">
+                            <span class="control-label">位置:</span>
+                            <div class="slider-container">
+                                <input type="range" id="其次锁定位置" min="0" max="100" value="50">
+                                <span class="value-display" id="其次锁定位置显示">50</span>
+                            </div>
+                        </div>
+                        <div class="control-row">
+                            <span class="control-label">再次锁定:</span>
+                            <input type="text" id="再次锁定" value="0">
+                            <div class="btn-group">
+                                <button type="button" onclick="增加再次锁定数值()">+</button>
+                                <button type="button" onclick="减少再次锁定数值()">-</button>
+                            </div>
+                        </div>
+                        <div class="control-row">
+                            <span class="control-label">位置:</span>
+                            <div class="slider-container">
+                                <input type="range" id="再次锁定位置" min="0" max="100" value="50">
+                                <span class="value-display" id="再次锁定位置显示">50</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+<section class="config-group hotkeys-card" id="panel-hotkeys" aria-labelledby="heading-hotkeys">
+                    <h3 class="group-title" id="heading-hotkeys">热键设置</h3>
+                    <div class="control-item">
+                        <div class="control-row special-move-row">
+                            <strong>
+                                <div class="control-label multi-label">
+                                    <div class="main-title">吸附常驻</div>
+                                    <div class="sub-text">开启无视下面</div>
+                                </div>
+                            </strong>
+                            <label class="special-toggle">
+                                <input type="checkbox" id="吸附常驻" name="吸附常驻">
+                                <span class="slider"></span>
+                                <span class="toggle-text">自瞄常驻</span>
+                            </label>
+                        </div>
+                        <div class="control-row">
+                            <span class="control-label">自瞄主键:</span>
+                            <div class="select-container">
+                                <select id="自瞄主键" name="自瞄主键">
+                                    <option value="0">空白</option>
+                                    <option value="1">鼠标左键</option>
+                                    <option value="2">鼠标右键</option>
+                                    <option value="3">鼠标中键</option>
+                                    <option value="4" disabled>旧选项（请重新选择）</option>
+                                    <option value="5">鼠标侧键1</option>
+                                    <option value="6">鼠标侧键2</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="control-row">
+                            <span class="control-label">自瞄副键:</span>
+                            <div class="select-container">
+                                <select id="自瞄副键" name="自瞄副键">
+                                    <option value="0">空白</option>
+                                    <option value="1">鼠标左键</option>
+                                    <option value="2">鼠标右键</option>
+                                    <option value="3">鼠标中键</option>
+                                    <option value="4" disabled>旧选项（请重新选择）</option>
+                                    <option value="5">鼠标侧键1</option>
+                                    <option value="6">鼠标侧键2</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="control-row">
+                            <span class="control-label">自瞄副键2:</span>
+                            <div class="select-container">
+                                <select id="自瞄副键2" name="自瞄副键2">
+                                    <option value="0">空白</option>
+                                    <option value="1">鼠标左键</option>
+                                    <option value="2">鼠标右键</option>
+                                    <option value="3">鼠标中键</option>
+                                    <option value="4" disabled>旧选项（请重新选择）</option>
+                                    <option value="5">鼠标侧键1</option>
+                                    <option value="6">鼠标侧键2</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="control-row">
+                            <span class="control-label">自瞄副键3:</span>
+                            <div class="select-container">
+                                <select id="自瞄副键3" name="自瞄副键3">
+                                    <option value="0">空白</option>
+                                    <option value="1">鼠标左键</option>
+                                    <option value="2">鼠标右键</option>
+                                    <option value="3">鼠标中键</option>
+                                    <option value="4" disabled>旧选项（请重新选择）</option>
+                                    <option value="5">鼠标侧键1</option>
+                                    <option value="6">鼠标侧键2</option>
+                                </select>
+                            </div>
+                        </div>
+                        <!-- ★★★ 新增：热键文本显示区（自瞄副键3下方，居中，红色） ★★★ -->
+                        <div class="control-row" id="热键文本行">
+                            <span id="热键文本显示">—</span>
+                        </div>
+                    </div>
+                </section>
+<section class="config-group crosshair-card" id="panel-crosshair" aria-labelledby="heading-crosshair">
+                    <h3 class="group-title" id="heading-crosshair">准星追踪</h3>
+                    <div class="control-item">
+                        <div class="control-row">
+                            <span class="control-label">准星类别:</span>
+                            <input type="text" id="准星类别" value="0">
+                            <div class="btn-group">
+                                <button type="button" onclick="增加准星类别数值()">+</button>
+                                <button type="button" onclick="减少准星类别数值()">-</button>
+                            </div>
+                        </div>
+                        <div class="control-row">
+                            <span class="control-label">准星绑定1:</span>
+                            <div class="select-container">
+                                <select id="准星绑定1" name="准星绑定1">
+                                    <option value="0">空白</option>
+                                    <option value="1">鼠标左键</option>
+                                    <option value="2">鼠标右键</option>
+                                    <option value="3">鼠标中键</option>
+                                    <option value="4" disabled>旧选项（请重新选择）</option>
+                                    <option value="5">鼠标侧键1</option>
+                                    <option value="6">鼠标侧键2</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="control-row">
+                            <span class="control-label">准星绑定2:</span>
+                            <div class="select-container">
+                                <select id="准星绑定2" name="准星绑定2">
+                                    <option value="0">空白</option>
+                                    <option value="1">鼠标左键</option>
+                                    <option value="2">鼠标右键</option>
+                                    <option value="3">鼠标中键</option>
+                                    <option value="4" disabled>旧选项（请重新选择）</option>
+                                    <option value="5">鼠标侧键1</option>
+                                    <option value="6">鼠标侧键2</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="control-row">
+                            <span class="control-label">准星绑定3:</span>
+                            <div class="select-container">
+                                <select id="准星绑定3" name="准星绑定3">
+                                    <option value="0">空白</option>
+                                    <option value="1">鼠标左键</option>
+                                    <option value="2">鼠标右键</option>
+                                    <option value="3">鼠标中键</option>
+                                    <option value="4" disabled>旧选项（请重新选择）</option>
+                                    <option value="5">鼠标侧键1</option>
+                                    <option value="6">鼠标侧键2</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="control-row">
+                            <span class="control-label">准星绑定4:</span>
+                            <div class="select-container">
+                                <select id="准星绑定4" name="准星绑定4">
+                                    <option value="0">空白</option>
+                                    <option value="1">鼠标左键</option>
+                                    <option value="2">鼠标右键</option>
+                                    <option value="3">鼠标中键</option>
+                                    <option value="4" disabled>旧选项（请重新选择）</option>
+                                    <option value="5">鼠标侧键1</option>
+                                    <option value="6">鼠标侧键2</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+<section class="config-group activation-card" id="panel-activation" aria-labelledby="heading-activation">
+                    <h3 class="group-title" id="heading-activation">按下激活</h3>
+                    <div class="control-item">
+                        <div class="control-row special-move-row">
+                            <div class="control-label multi-label">
+                                <div class="main-title">自瞄连续按下</div>
+                                <div class="sub-text">不设置准星绑定</div>
+                                <div class="sub-text">以自瞄按下为准</div>
+                            </div>
+                            <label class="special-toggle">
+                                <input type="checkbox" id="自瞄连续按下" name="自瞄连续按下">
+                                <span class="slider"></span>
+                                <span class="toggle-text">中心为准星</span>
+                            </label>
+                        </div>
+                        <div class="control-row">
+                            <span class="control-label">开镜时间:</span>
+                            <div class="slider-container">
+                                <input type="range" id="开镜时间" min="100" max="1000" value="350">
+                                <span class="value-display" id="开镜时间显示">350ms</span>
+                            </div>
+                        </div>
+                        <div class="control-row special-move-row">
+                            <div class="control-label multi-label">
+                                <div class="main-title">按下自瞄截图</div>
+                                <div class="sub-text">不会打标别开</div>
+                                <div class="sub-text">十分占用性能</div>
+                            </div>
+                            <label class="special-toggle">
+                                <input type="checkbox" id="自动截图" name="自动截图">
+                                <span class="slider"></span>
+                                <span class="toggle-text">自动截图</span>
+                            </label>
+                        </div>
+                        <div class="control-row special-move-row">
+                            <div class="control-label multi-label">
+                                <div class="main-title">准星扳机</div>
+                                <div class="sub-text">开启准星识别才有效</div>
+                                <div class="sub-text">子弹落点准星的游戏</div>
+                            </div>
+                            <label class="special-toggle">
+                                <input type="checkbox" id="准星扳机" name="准星扳机">
+                                <span class="slider"></span>
+                                <span class="toggle-text">准星扳机</span>
+                            </label>
+                        </div>
+                        <div class="control-row special-move-row">
+                            <div class="control-label multi-label">
+                                <div class="main-title">中心扳机</div>
+                                <div class="sub-text">屏幕固定中心的游戏</div>
+                            </div>
+                            <label class="special-toggle">
+                                <input type="checkbox" id="中心扳机" name="中心扳机">
+                                <span class="slider"></span>
+                                <span class="toggle-text">中心扳机</span>
+                            </label>
+                        </div>
+                        <div class="control-row">
+                            <span class="control-label">扳机范围:</span>
+                            <div class="slider-container">
+                                <input type="range" id="扳机范围" min="30" max="99" value="66">
+                                <span class="value-display" id="扳机范围显示">60</span>
+                            </div>
+                        </div>
+                        <div class="control-row">
+                            <span class="control-label">开枪间隔:</span>
+                            <div class="slider-container">
+                                <input type="range" id="开枪间隔" min="50" max="1000" value="80">
+                                <span class="value-display" id="开枪间隔显示">80ms</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+<section class="config-group storage-card" id="panel-storage" aria-labelledby="heading-storage">
+                    <h3 class="group-title" id="heading-storage">配置保存</h3>
+                    <div class="config-storage">
+                        <button class="save-config-btn" onclick="保存配置()">保存配置</button>
+                        <div id="配置列表" aria-label="已保存的配置"><p class="empty-config">暂无保存配置</p></div>
+                        <div class="config-actions"><button type="button" onclick="导入选中配置()">载入选中配置</button><button type="button" class="delete-config-btn" onclick="删除配置()">删除</button></div>
+                        <p class="storage-hint">先选配置，再载入 · 双击也可载入</p>
+                    </div>
+                </section>
+<section class="config-group model-card" id="panel-model" aria-labelledby="heading-model">
+                    <h3 class="group-title" id="heading-model">游戏模型</h3>
+                    <div class="select-container">
+                        <select id="模型名称" name="模型名称" disabled>
+                            <option value="">正在读取模型…</option>
+                        </select>
+                    </div>
+                    <div class="model-tools"><button type="button" onclick="刷新模型列表()">刷新模型</button><span id="模型列表状态" aria-live="polite"></span></div>
+                    <div class="radio-container">
+                        <div class="radio-item engine-disabled">
+                            <input type="radio" id="NCNN" name="推理引擎" value="NCNN" disabled>
+                            <label for="NCNN">NCNN</label>
+                        </div>
+                        <div class="radio-item engine-disabled">
+                            <input type="radio" id="ONNX" name="推理引擎" value="ONNX" disabled>
+                            <label for="ONNX">ONNX</label>
+                        </div>
+                        <div class="radio-item engine-disabled">
+                            <input type="radio" id="TensorRT" name="推理引擎" value="TensorRT" disabled>
+                            <label for="TensorRT" title="TensorRT（N卡专用推理）">TensorRT</label>
+                        </div>
+                    </div>
+                    <details class="model-help"><summary>模型文件与引擎说明</summary><p>同名模型放在程序旁的“模型数据”文件夹：有配对的.param/.bin可选NCNN，有.onnx可选ONNX，有.trt可选TensorRT（N卡专用）。缺少对应文件的按钮会变灰。<br>TensorRT模型请先在本机转换；添加或删除文件后点击“刷新模型”。</p></details>
+                    <div class="control-row">
+                        <span class="control-label">扳机热键1:</span>
+                        <div class="select-container">
+                            <select id="扳机热键1" name="扳机热键1">
+                                <option value="0">空白</option>
+                                <option value="1">鼠标左键</option>
+                                <option value="2">鼠标右键</option>
+                                <option value="3">鼠标中键</option>
+                                <option value="4" disabled>旧选项（请重新选择）</option>
+                                <option value="5">鼠标侧键1</option>
+                                <option value="6">鼠标侧键2</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="control-row">
+                        <span class="control-label">扳机热键2:</span>
+                        <div class="select-container">
+                            <select id="扳机热键2" name="扳机热键2">
+                                <option value="0">空白</option>
+                                <option value="1">鼠标左键</option>
+                                <option value="2">鼠标右键</option>
+                                <option value="3">鼠标中键</option>
+                                <option value="4" disabled>旧选项（请重新选择）</option>
+                                <option value="5">鼠标侧键1</option>
+                                <option value="6">鼠标侧键2</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="control-row">
+                        <span class="control-label">扳机热键3:</span>
+                        <div class="select-container">
+                            <select id="扳机热键3" name="扳机热键3">
+                                <option value="0">空白</option>
+                                <option value="1">鼠标左键</option>
+                                <option value="2">鼠标右键</option>
+                                <option value="3">鼠标中键</option>
+                                <option value="4" disabled>旧选项（请重新选择）</option>
+                                <option value="5">鼠标侧键1</option>
+                                <option value="6">鼠标侧键2</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="control-row">
+                        <span class="control-label">扳机热键4:</span>
+                        <div class="select-container">
+                            <select id="扳机热键4" name="扳机热键4">
+                                <option value="0">空白</option>
+                                <option value="1">鼠标左键</option>
+                                <option value="2">鼠标右键</option>
+                                <option value="3">鼠标中键</option>
+                                <option value="4" disabled>旧选项（请重新选择）</option>
+                                <option value="5">鼠标侧键1</option>
+                                <option value="6">鼠标侧键2</option>
+                            </select>
+                        </div>
+                    </div>
+                </section>
 <section class="config-group types-card" id="panel-types" aria-labelledby="heading-types">
-                    <h3 class="group-title" id="heading-types" data-index="02">锁定类型</h3>
+                    <h3 class="group-title" id="heading-types">锁定类型</h3>
                     <div class="move-mode-panel" id="阵营切换面板">
                         <div class="mode-header">
                             <span class="mode-label">目前阵容</span>
@@ -590,406 +1247,6 @@ input[type="range"]::-moz-range-thumb { width:12px; height:12px; border:4px soli
                         </div>
                     </div>
                 </section>
-                </div>
-                <div class="panel-column">
-<section class="config-group target-card" id="panel-target" aria-labelledby="heading-target">
-                    <h3 class="group-title" id="heading-target" data-index="03">目标锁定</h3>
-                    <div class="control-item">
-                        <div class="control-row">
-                            <div class="control-label multi-label">
-                                <div class="main-title">锁定范围</div>
-                                <div class="sub-text">特殊范围设置0</div>
-                                <div class="sub-text">适合低拉枪游戏</div>
-                            </div>
-                            <div class="slider-container">
-                                <input type="range" id="锁定范围" min="0" max="640" value="256" step="1">
-                                <span class="value-display" id="锁定范围显示">256</span>
-                            </div>
-                        </div>
-                        <div class="control-row">
-                            <div class="control-label multi-label">
-                                <div class="main-title">中心点范围</div>
-								 <div class="sub-text">仅优先锁定生效</div>
-                            </div>
-                            <div class="slider-container">
-                                <input type="range" id="中心点范围" min="1" max="100" value="50" step="1">
-                                <span class="value-display" id="中心点范围显示">50</span>
-                            </div>
-                        </div>
-                        <!-- 特殊移动范围 -->
-                        <div class="control-row special-move-row">
-                            <div class="control-label multi-label">
-                                <div class="main-title">特殊移动范围</div>
-                                <div class="sub-text">需要设置锁定范围0</div>
-                                <div class="sub-text">准星在目标身上才会锁</div>
-                            </div>
-                            <label class="special-toggle">
-                                <input type="checkbox" id="框内移动" name="框内移动">
-                                <span class="slider"></span>
-                                <span class="toggle-text">微范围锁定</span>
-                            </label>
-                        </div>
-                        <div class="control-row">
-                            <span class="control-label">优先锁定:</span>
-                            <input type="text" id="优先锁定" value="0">
-                            <div class="btn-group">
-                                <button type="button" onclick="增加优先锁定数值()">+</button>
-                                <button type="button" onclick="减少优先锁定数值()">-</button>
-                            </div>
-                        </div>
-                        <div class="control-row">
-                            <span class="control-label">位置:</span>
-                            <div class="slider-container">
-                                <input type="range" id="优先锁定位置" min="0" max="100" value="50">
-                                <span class="value-display" id="优先锁定位置显示">50</span>
-                            </div>
-                        </div>
-                        <div class="control-row">
-                            <span class="control-label">其次锁定:</span>
-                            <input type="text" id="其次锁定" value="0">
-                            <div class="btn-group">
-                                <button type="button" onclick="增加其次锁定数值()">+</button>
-                                <button type="button" onclick="减少其次锁定数值()">-</button>
-                            </div>
-                        </div>
-                        <div class="control-row">
-                            <span class="control-label">位置:</span>
-                            <div class="slider-container">
-                                <input type="range" id="其次锁定位置" min="0" max="100" value="50">
-                                <span class="value-display" id="其次锁定位置显示">50</span>
-                            </div>
-                        </div>
-                        <div class="control-row">
-                            <span class="control-label">再次锁定:</span>
-                            <input type="text" id="再次锁定" value="0">
-                            <div class="btn-group">
-                                <button type="button" onclick="增加再次锁定数值()">+</button>
-                                <button type="button" onclick="减少再次锁定数值()">-</button>
-                            </div>
-                        </div>
-                        <div class="control-row">
-                            <span class="control-label">位置:</span>
-                            <div class="slider-container">
-                                <input type="range" id="再次锁定位置" min="0" max="100" value="50">
-                                <span class="value-display" id="再次锁定位置显示">50</span>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-<section class="config-group storage-card" id="panel-storage" aria-labelledby="heading-storage">
-                    <h3 class="group-title" id="heading-storage" data-index="04">配置保存</h3>
-                    <div class="config-storage">
-                        <button class="save-config-btn" onclick="保存配置()">保存配置</button>
-                        <div id="配置列表" aria-label="已保存的配置"><p class="empty-config">暂无保存配置</p></div>
-                        <div class="config-actions"><button type="button" onclick="导入选中配置()">载入选中配置</button><button type="button" class="delete-config-btn" onclick="删除配置()">删除</button></div>
-                        <p class="storage-hint">先选配置，再载入 · 双击也可载入</p>
-                    </div>
-                </section>
-                </div>
-                <div class="panel-column">
-<section class="config-group model-card" id="panel-model" aria-labelledby="heading-model">
-                    <h3 class="group-title" id="heading-model" data-index="05">游戏模型</h3>
-                    <div class="select-container">
-                        <select id="模型名称" name="模型名称" disabled>
-                            <option value="">正在读取模型…</option>
-                        </select>
-                    </div>
-                    <div class="model-tools"><button type="button" onclick="刷新模型列表()">刷新模型</button><span id="模型列表状态" aria-live="polite"></span></div>
-                    <div class="radio-container">
-                        <div class="radio-item engine-disabled">
-                            <input type="radio" id="NCNN" name="推理引擎" value="NCNN" disabled>
-                            <label for="NCNN">NCNN</label>
-                        </div>
-                        <div class="radio-item engine-disabled">
-                            <input type="radio" id="ONNX" name="推理引擎" value="ONNX" disabled>
-                            <label for="ONNX">ONNX</label>
-                        </div>
-                        <div class="radio-item engine-disabled">
-                            <input type="radio" id="TensorRT" name="推理引擎" value="TensorRT" disabled>
-                            <label for="TensorRT" title="TensorRT（N卡专用推理）">TensorRT</label>
-                        </div>
-                    </div>
-                    <details class="model-help"><summary>模型文件与引擎说明</summary><p>同名模型放在程序旁的“模型数据”文件夹：有配对的.param/.bin可选NCNN，有.onnx可选ONNX，有.trt可选TensorRT（N卡专用）。缺少对应文件的按钮会变灰。<br>TensorRT模型请先在本机转换；添加或删除文件后点击“刷新模型”。</p></details>
-                    <div class="control-row">
-                        <span class="control-label">扳机热键1:</span>
-                        <div class="select-container">
-                            <select id="扳机热键1" name="扳机热键1">
-                                <option value="0">空白</option>
-                                <option value="1">鼠标左键</option>
-                                <option value="2">鼠标右键</option>
-                                <option value="3">鼠标中键</option>
-                                <option value="4" disabled>旧选项（请重新选择）</option>
-                                <option value="5">鼠标侧键1</option>
-                                <option value="6">鼠标侧键2</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="control-row">
-                        <span class="control-label">扳机热键2:</span>
-                        <div class="select-container">
-                            <select id="扳机热键2" name="扳机热键2">
-                                <option value="0">空白</option>
-                                <option value="1">鼠标左键</option>
-                                <option value="2">鼠标右键</option>
-                                <option value="3">鼠标中键</option>
-                                <option value="4" disabled>旧选项（请重新选择）</option>
-                                <option value="5">鼠标侧键1</option>
-                                <option value="6">鼠标侧键2</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="control-row">
-                        <span class="control-label">扳机热键3:</span>
-                        <div class="select-container">
-                            <select id="扳机热键3" name="扳机热键3">
-                                <option value="0">空白</option>
-                                <option value="1">鼠标左键</option>
-                                <option value="2">鼠标右键</option>
-                                <option value="3">鼠标中键</option>
-                                <option value="4" disabled>旧选项（请重新选择）</option>
-                                <option value="5">鼠标侧键1</option>
-                                <option value="6">鼠标侧键2</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="control-row">
-                        <span class="control-label">扳机热键4:</span>
-                        <div class="select-container">
-                            <select id="扳机热键4" name="扳机热键4">
-                                <option value="0">空白</option>
-                                <option value="1">鼠标左键</option>
-                                <option value="2">鼠标右键</option>
-                                <option value="3">鼠标中键</option>
-                                <option value="4" disabled>旧选项（请重新选择）</option>
-                                <option value="5">鼠标侧键1</option>
-                                <option value="6">鼠标侧键2</option>
-                            </select>
-                        </div>
-                    </div>
-                </section>
-<section class="config-group crosshair-card" id="panel-crosshair" aria-labelledby="heading-crosshair">
-                    <h3 class="group-title" id="heading-crosshair" data-index="06">准星追踪</h3>
-                    <div class="control-item">
-                        <div class="control-row">
-                            <span class="control-label">准星类别:</span>
-                            <input type="text" id="准星类别" value="0">
-                            <div class="btn-group">
-                                <button type="button" onclick="增加准星类别数值()">+</button>
-                                <button type="button" onclick="减少准星类别数值()">-</button>
-                            </div>
-                        </div>
-                        <div class="control-row">
-                            <span class="control-label">准星绑定1:</span>
-                            <div class="select-container">
-                                <select id="准星绑定1" name="准星绑定1">
-                                    <option value="0">空白</option>
-                                    <option value="1">鼠标左键</option>
-                                    <option value="2">鼠标右键</option>
-                                    <option value="3">鼠标中键</option>
-                                    <option value="4" disabled>旧选项（请重新选择）</option>
-                                    <option value="5">鼠标侧键1</option>
-                                    <option value="6">鼠标侧键2</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="control-row">
-                            <span class="control-label">准星绑定2:</span>
-                            <div class="select-container">
-                                <select id="准星绑定2" name="准星绑定2">
-                                    <option value="0">空白</option>
-                                    <option value="1">鼠标左键</option>
-                                    <option value="2">鼠标右键</option>
-                                    <option value="3">鼠标中键</option>
-                                    <option value="4" disabled>旧选项（请重新选择）</option>
-                                    <option value="5">鼠标侧键1</option>
-                                    <option value="6">鼠标侧键2</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="control-row">
-                            <span class="control-label">准星绑定3:</span>
-                            <div class="select-container">
-                                <select id="准星绑定3" name="准星绑定3">
-                                    <option value="0">空白</option>
-                                    <option value="1">鼠标左键</option>
-                                    <option value="2">鼠标右键</option>
-                                    <option value="3">鼠标中键</option>
-                                    <option value="4" disabled>旧选项（请重新选择）</option>
-                                    <option value="5">鼠标侧键1</option>
-                                    <option value="6">鼠标侧键2</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="control-row">
-                            <span class="control-label">准星绑定4:</span>
-                            <div class="select-container">
-                                <select id="准星绑定4" name="准星绑定4">
-                                    <option value="0">空白</option>
-                                    <option value="1">鼠标左键</option>
-                                    <option value="2">鼠标右键</option>
-                                    <option value="3">鼠标中键</option>
-                                    <option value="4" disabled>旧选项（请重新选择）</option>
-                                    <option value="5">鼠标侧键1</option>
-                                    <option value="6">鼠标侧键2</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-                </div>
-                <div class="panel-column">
-<section class="config-group activation-card" id="panel-activation" aria-labelledby="heading-activation">
-                    <h3 class="group-title" id="heading-activation" data-index="07">按下激活</h3>
-                    <div class="control-item">
-                        <div class="control-row special-move-row">
-                            <div class="control-label multi-label">
-                                <div class="main-title">自瞄连续按下</div>
-                                <div class="sub-text">不设置准星绑定</div>
-                                <div class="sub-text">以自瞄按下为准</div>
-                            </div>
-                            <label class="special-toggle">
-                                <input type="checkbox" id="自瞄连续按下" name="自瞄连续按下">
-                                <span class="slider"></span>
-                                <span class="toggle-text">中心为准星</span>
-                            </label>
-                        </div>
-                        <div class="control-row">
-                            <span class="control-label">开镜时间:</span>
-                            <div class="slider-container">
-                                <input type="range" id="开镜时间" min="100" max="1000" value="350">
-                                <span class="value-display" id="开镜时间显示">350ms</span>
-                            </div>
-                        </div>
-                        <div class="control-row special-move-row">
-                            <div class="control-label multi-label">
-                                <div class="main-title">按下自瞄截图</div>
-                                <div class="sub-text">不会打标别开</div>
-                                <div class="sub-text">十分占用性能</div>
-                            </div>
-                            <label class="special-toggle">
-                                <input type="checkbox" id="自动截图" name="自动截图">
-                                <span class="slider"></span>
-                                <span class="toggle-text">自动截图</span>
-                            </label>
-                        </div>
-                        <div class="control-row special-move-row">
-                            <div class="control-label multi-label">
-                                <div class="main-title">准星扳机</div>
-                                <div class="sub-text">开启准星识别才有效</div>
-                                <div class="sub-text">子弹落点准星的游戏</div>
-                            </div>
-                            <label class="special-toggle">
-                                <input type="checkbox" id="准星扳机" name="准星扳机">
-                                <span class="slider"></span>
-                                <span class="toggle-text">准星扳机</span>
-                            </label>
-                        </div>
-                        <div class="control-row special-move-row">
-                            <div class="control-label multi-label">
-                                <div class="main-title">中心扳机</div>
-                                <div class="sub-text">屏幕固定中心的游戏</div>
-                            </div>
-                            <label class="special-toggle">
-                                <input type="checkbox" id="中心扳机" name="中心扳机">
-                                <span class="slider"></span>
-                                <span class="toggle-text">中心扳机</span>
-                            </label>
-                        </div>
-                        <div class="control-row">
-                            <span class="control-label">扳机范围:</span>
-                            <div class="slider-container">
-                                <input type="range" id="扳机范围" min="30" max="99" value="66">
-                                <span class="value-display" id="扳机范围显示">60</span>
-                            </div>
-                        </div>
-                        <div class="control-row">
-                            <span class="control-label">开枪间隔:</span>
-                            <div class="slider-container">
-                                <input type="range" id="开枪间隔" min="50" max="1000" value="80">
-                                <span class="value-display" id="开枪间隔显示">80ms</span>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-<section class="config-group hotkeys-card" id="panel-hotkeys" aria-labelledby="heading-hotkeys">
-                    <h3 class="group-title" id="heading-hotkeys" data-index="08">热键设置</h3>
-                    <div class="control-item">
-                        <div class="control-row special-move-row">
-                            <strong>
-                                <div class="control-label multi-label">
-                                    <div class="main-title">吸附常驻</div>
-                                    <div class="sub-text">开启无视下面</div>
-                                </div>
-                            </strong>
-                            <label class="special-toggle">
-                                <input type="checkbox" id="吸附常驻" name="吸附常驻">
-                                <span class="slider"></span>
-                                <span class="toggle-text">自瞄常驻</span>
-                            </label>
-                        </div>
-                        <div class="control-row">
-                            <span class="control-label">自瞄主键:</span>
-                            <div class="select-container">
-                                <select id="自瞄主键" name="自瞄主键">
-                                    <option value="0">空白</option>
-                                    <option value="1">鼠标左键</option>
-                                    <option value="2">鼠标右键</option>
-                                    <option value="3">鼠标中键</option>
-                                    <option value="4" disabled>旧选项（请重新选择）</option>
-                                    <option value="5">鼠标侧键1</option>
-                                    <option value="6">鼠标侧键2</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="control-row">
-                            <span class="control-label">自瞄副键:</span>
-                            <div class="select-container">
-                                <select id="自瞄副键" name="自瞄副键">
-                                    <option value="0">空白</option>
-                                    <option value="1">鼠标左键</option>
-                                    <option value="2">鼠标右键</option>
-                                    <option value="3">鼠标中键</option>
-                                    <option value="4" disabled>旧选项（请重新选择）</option>
-                                    <option value="5">鼠标侧键1</option>
-                                    <option value="6">鼠标侧键2</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="control-row">
-                            <span class="control-label">自瞄副键2:</span>
-                            <div class="select-container">
-                                <select id="自瞄副键2" name="自瞄副键2">
-                                    <option value="0">空白</option>
-                                    <option value="1">鼠标左键</option>
-                                    <option value="2">鼠标右键</option>
-                                    <option value="3">鼠标中键</option>
-                                    <option value="4" disabled>旧选项（请重新选择）</option>
-                                    <option value="5">鼠标侧键1</option>
-                                    <option value="6">鼠标侧键2</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="control-row">
-                            <span class="control-label">自瞄副键3:</span>
-                            <div class="select-container">
-                                <select id="自瞄副键3" name="自瞄副键3">
-                                    <option value="0">空白</option>
-                                    <option value="1">鼠标左键</option>
-                                    <option value="2">鼠标右键</option>
-                                    <option value="3">鼠标中键</option>
-                                    <option value="4" disabled>旧选项（请重新选择）</option>
-                                    <option value="5">鼠标侧键1</option>
-                                    <option value="6">鼠标侧键2</option>
-                                </select>
-                            </div>
-                        </div>
-                        <!-- ★★★ 新增：热键文本显示区（自瞄副键3下方，居中，红色） ★★★ -->
-                        <div class="control-row" id="热键文本行">
-                            <span id="热键文本显示">—</span>
-                        </div>
-                    </div>
-                </section>
-                </div>
             </div>
         </div>
 

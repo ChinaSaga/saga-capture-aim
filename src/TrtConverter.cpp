@@ -11,6 +11,7 @@
 #include <thread>
 #include <vector>
 #include "TrtBuild.h"
+#include "ModelPaths.h"
 #pragma comment(lib, "comdlg32.lib")
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "shell32.lib")
@@ -169,7 +170,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wParam, LPARAM lPar
         SendMessageW(ui->size, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(L"例如 416x416"));
         control(window, *ui, L"STATIC", L"静态模型留空；默认 FP16。", 0, 0, 334, 153, 360, 24);
         control(window, *ui, L"STATIC", L"推理精度：FP16。自动转换 ONNX，生成半精度 TRT 模型。", 0, 0, 24, 190, 704, 28);
-        control(window, *ui, L"STATIC", L"转换结果用于这台电脑的 NVIDIA 显卡。原始 ONNX 文件会保留。", 0, 0, 24, 230, 700, 24);
+        control(window, *ui, L"STATIC", L"默认保存到程序旁的“模型数据”文件夹。原始 ONNX 文件会保留。", 0, 0, 24, 230, 700, 24);
         ui->start = control(window, *ui, L"BUTTON", L"开始转换", BS_DEFPUSHBUTTON | WS_TABSTOP, kStart, 24, 270, 150, 38);
         ui->status = control(window, *ui, L"STATIC", L"选择模型后开始转换。", 0, 0, 192, 278, 520, 24);
         ui->progress = control(window, *ui, PROGRESS_CLASSW, L"", PBS_MARQUEE, 0, 24, 323, 704, 18);
@@ -203,7 +204,19 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wParam, LPARAM lPar
             auto path = text(ui->input);
             if (pick(window, false, path)) {
                 SetWindowTextW(ui->input, path.c_str());
-                auto output = std::filesystem::path(path); output.replace_extension(L".trt");
+                wchar_t executable[32768]{};
+                const DWORD length = GetModuleFileNameW(nullptr, executable, 32768);
+                if (!length || length >= 32768) {
+                    MessageBoxW(window, L"无法定位转换工具目录，请手动选择保存位置。", L"保存位置", MB_OK | MB_ICONERROR);
+                    return 0;
+                }
+                const auto output = model_paths::defaultTrtOutput(std::filesystem::path(executable).parent_path(), path);
+                std::error_code error;
+                std::filesystem::create_directories(output.parent_path(), error);
+                if (error) {
+                    MessageBoxW(window, L"无法创建模型数据文件夹，请手动选择保存位置。", L"保存位置", MB_OK | MB_ICONERROR);
+                    return 0;
+                }
                 SetWindowTextW(ui->output, output.c_str());
             }
             return 0;

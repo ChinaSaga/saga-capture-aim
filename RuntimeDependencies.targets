@@ -45,7 +45,7 @@
     <Error Condition="!Exists('%(SagaRuntimeDll.Identity)')"
            Text="Required x64 runtime DLL is missing: %(SagaRuntimeDll.Identity)" />
     <MakeDir Directories="$(TargetDir);$(TargetDir)licenses\DirectML;$(TargetDir)licenses\OpenCV;$(TargetDir)licenses\NCNN;$(TargetDir)licenses\ONNXRuntime" />
-    <MakeDir Directories="$(TargetDir)licenses\TensorRT;$(TargetDir)licenses\CUDA" />
+    <MakeDir Directories="$(TargetDir)licenses\TensorRT;$(TargetDir)licenses\CUDA;$(TargetDir)模型数据" />
     <Delete Files="$(TargetDir)onnxruntime_providers_shared.dll" />
     <Copy SourceFiles="@(SagaRuntimeDll)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(SagaDirectMLLicense)" DestinationFolder="$(TargetDir)licenses\DirectML" SkipUnchangedFiles="true" />

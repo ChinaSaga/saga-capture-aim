@@ -1367,7 +1367,7 @@
                             <label for="TensorRT">N卡专用推理</label>
                         </div>
                     </div>
-                    <p style="margin:12px 0 0;color:#666;font-size:13px;line-height:1.7;">同名模型放在程序同目录：有配对的.param/.bin可选NCNN，有.onnx可选ONNX，有.trt可选N卡专用。缺少对应文件的按钮会变灰。<br>N卡专用模型请先在本机转换；添加或删除文件后点击“刷新模型”。</p>
+                    <p style="margin:12px 0 0;color:#666;font-size:13px;line-height:1.7;">同名模型放在程序旁的“模型数据”文件夹：有配对的.param/.bin可选NCNN，有.onnx可选ONNX，有.trt可选N卡专用。缺少对应文件的按钮会变灰。<br>N卡专用模型请先在本机转换；添加或删除文件后点击“刷新模型”。</p>
                     <div class="control-row" style="margin-top:30px;">
                         <span class="control-label">扳机热键1:</span>
                         <div class="select-container">
@@ -1675,7 +1675,7 @@
             const engines = 模型引擎目录.get(name) || [];
             设置引擎按钮(engines);
             const status = document.getElementById('模型列表状态');
-            status.textContent = 模型引擎目录.size ? '找到 ' + 模型引擎目录.size + ' 个模型' : 'EXE 同目录没有可用模型，请放入后刷新';
+            status.textContent = 模型引擎目录.size ? '找到 ' + 模型引擎目录.size + ' 个模型' : '“模型数据”文件夹没有可用模型，请放入后刷新';
             if (name && !engines.includes(当前推理引擎)) status.textContent += '，请选择可用的推理引擎';
         }
         function 模型选项(name, label = name) {

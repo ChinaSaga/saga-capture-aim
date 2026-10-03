@@ -1,4 +1,5 @@
 #include "ModelFiles.h"
+#include "ModelPaths.h"
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -16,6 +17,10 @@ int main() {
         char gbkBytes[64]{};
         const int gbkCount=WideCharToMultiByte(936,0,gbkName.data(),static_cast<int>(gbkName.size()),gbkBytes,sizeof(gbkBytes),nullptr,nullptr);
         require(gbkCount>0 && model_files::fromGbk(std::string(gbkBytes,gbkCount))==gbkName, "GBK runtime directory decoding mismatch");
+        require(std::filesystem::path(model_files::fromGbk(model_paths::gbkDirectory(std::string(gbkBytes,gbkCount)))) ==
+            model_paths::directory(std::filesystem::path(gbkName)), "GBK application and Unicode converter model directories differ");
+        require(model_paths::defaultTrtOutput(directory, L"D:/external/任意模型.onnx") ==
+            model_paths::directory(directory)/L"任意模型.trt", "Converter must save model beside the EXE in the model data folder");
         require(model_files::list(directory,3).empty(), "Empty directory must have no models");
         const auto file = [&](const std::wstring& name) { std::ofstream(directory/name).put('x'); };
         file(L"三角洲行动.onnx"); file(L"任意名字.TRT"); file(L"a.trt"); file(L"z.TrT");

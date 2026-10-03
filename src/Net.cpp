@@ -349,7 +349,7 @@ static void handleRequest(SOCKET c, const std::string& req)
         return;
     }
     if (method == "GET" && path == "/model-catalog.json") {
-        sendResponse(c, 200, model_files::catalogJson(model_files::fromGbk(g.runDir)));
+        sendResponse(c, 200, model_files::catalogJson(model_files::fromGbk(g.modelDirectory())));
         return;
     }
     if (method == "GET" && path == "/models.json") {
@@ -358,7 +358,7 @@ static void handleRequest(SOCKET c, const std::string& req)
             sendResponse(c, 400, "{\"error\":\"Invalid engine; expected 1, 2 or 3\"}");
             return;
         }
-        sendResponse(c, 200, model_files::json(model_files::fromGbk(g.runDir), engine));
+        sendResponse(c, 200, model_files::json(model_files::fromGbk(g.modelDirectory()), engine));
         return;
     }
     if (method == "GET" && (path == "/" || path == "/index.html") &&

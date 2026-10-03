@@ -194,6 +194,7 @@
     <ClInclude Include="src\WebAccess.h" />
     <ClInclude Include="src\RuntimeLog.h" />
     <ClInclude Include="src\ModelFiles.h" />
+    <ClInclude Include="src\ModelPaths.h" />
   </ItemGroup>
   <ItemGroup>
     <!-- Makcu（WCH CH343）驱动：打进 EXE 资源，缺驱动时自动静默安装 -->

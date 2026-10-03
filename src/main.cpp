@@ -72,6 +72,8 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
     }
 
     CreateDirectoryA((g.runDir + "\\配置保存").c_str(), nullptr);
+    if (!CreateDirectoryA(g.modelDirectory().c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS)
+        LOG("[model] Cannot create model directory, error=%lu", GetLastError());
 
     // ---------------- 依赖文件检测（原版：缺文件弹框后 进程_结束）----------------
     if (missingDeps())

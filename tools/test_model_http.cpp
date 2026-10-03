@@ -77,22 +77,31 @@ int main() {
         g.runDir=encode(directory.wstring(),936);g.cfgPath=g.runDir+"\\fixture.js";
         const std::string page="<!doctype html><title>fixture</title>";
         writeFileAll(g.runDir+"\\圣人视觉识别系统.html",page);
-        for(const auto name:{L"任意模型.onnx",L"其他模型.TRT",L"配对.PARAM",L"配对.BIN",L"缺bin.param"})
+        // Models in the EXE root must neither appear nor enable an engine.
+        for(const auto name:{L"根目录模型.onnx",L"根目录模型.trt",L"任意模型.param",L"任意模型.bin"})
             std::ofstream(directory/name).put('x');
+        require(request("/model-catalog.json").find("{\"models\":[]}")!=std::string::npos,"Missing model data folder must not fall back to EXE root");
+        const auto modelDirectory = model_paths::directory(directory);
+        require(model_files::fromGbk(g.modelDirectory())==modelDirectory.wstring(),"Runtime model directory differs from scanner directory");
+        require(std::filesystem::create_directory(modelDirectory),"Cannot create dedicated model fixture folder");
+        for(const auto name:{L"任意模型.onnx",L"其他模型.TRT",L"配对.PARAM",L"配对.BIN",L"缺bin.param"})
+            std::ofstream(modelDirectory/name).put('x');
         for(int engine=1;engine<=3;++engine) {
             const auto response=request("/models.json?engine="+std::to_string(engine));
             require(response.find("HTTP/1.1 200 ")==0,"Model list HTTP status failed");
             require(response.find("application/json; charset=utf-8")!=std::string::npos,"Model response content type failed");
-            require(response.substr(response.find("\r\n\r\n")+4)==model_files::json(directory,engine),"Model HTTP UTF-8 body differs");
+            require(response.substr(response.find("\r\n\r\n")+4)==model_files::json(modelDirectory,engine),"Model HTTP UTF-8 body differs");
         }
         auto catalogResponse=request("/model-catalog.json");
         require(catalogResponse.find("HTTP/1.1 200 ")==0 &&
-            catalogResponse.substr(catalogResponse.find("\r\n\r\n")+4)==model_files::catalogJson(directory), "Catalog HTTP status/UTF-8 body differs");
+            catalogResponse.substr(catalogResponse.find("\r\n\r\n")+4)==model_files::catalogJson(modelDirectory), "Catalog HTTP status/UTF-8 body differs");
         require(catalogResponse.find(model_files::utf8(L"缺bin"))==std::string::npos,"Incomplete NCNN model leaked into catalog");
-        for(const auto name:{L"同时存在.param",L"同时存在.bin",L"同时存在.onnx",L"同时存在.trt"}) std::ofstream(directory/name).put('x');
+        require(catalogResponse.find(model_files::utf8(L"根目录模型"))==std::string::npos,"EXE root models leaked into model data catalog");
+        require(catalogResponse.find("{\"name\":\""+model_files::utf8(L"任意模型")+"\",\"engines\":[2]}")!=std::string::npos,"Root NCNN files must not pair with ONNX in model data folder");
+        for(const auto name:{L"同时存在.param",L"同时存在.bin",L"同时存在.onnx",L"同时存在.trt"}) std::ofstream(modelDirectory/name).put('x');
         const auto allFormats="{\"name\":\""+model_files::utf8(L"同时存在")+"\",\"engines\":[1,2,3]}";
         require(request("/model-catalog.json").find(allFormats)!=std::string::npos,"Same model must expose all three engines through HTTP");
-        std::filesystem::remove(directory/L"同时存在.bin");
+        std::filesystem::remove(modelDirectory/L"同时存在.bin");
         const auto withoutNcnn="{\"name\":\""+model_files::utf8(L"同时存在")+"\",\"engines\":[2,3]}";
         require(request("/model-catalog.json").find(withoutNcnn)!=std::string::npos,"Catalog HTTP must reflect deleted model files");
         for(const auto path:{"/models.json","/models.json?engine=4","/models.json?engine=3x","/models.json?engine=1&engine=3"})

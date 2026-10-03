@@ -54,6 +54,7 @@
     <ClCompile Include="src\TrtRuntime.cpp" />
     <ClInclude Include="src\TrtBuild.h" />
     <ClInclude Include="src\OnnxFp16.h" />
+    <ClInclude Include="src\ModelPaths.h" />
     <ClInclude Include="src\TrtRuntime.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

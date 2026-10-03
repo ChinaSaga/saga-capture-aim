@@ -23,6 +23,7 @@
 // ============================================================================
 // Shared detection result.
 #include "Inference.h"
+#include "ModelPaths.h"
 
 
 // ============================================================================
@@ -62,6 +63,7 @@ struct AppState
     std::atomic<bool> running{ false };        // 全_死循环
     std::atomic<bool> inferPaused{ false };    // 切换识别范围期间暂停推理（等新画面到位）
     std::string       runDir;                  // 全_运行目录
+    std::string modelDirectory() const { return model_paths::gbkDirectory(runDir); }
     std::string       cfgPath;                 // 全_配置文件
     std::string       hostIp = "127.0.0.1";    // 文本_推理机ip
     int               shotPort = 6666;         // 整数_截图端口

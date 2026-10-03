@@ -249,8 +249,8 @@ void aimThread(int engineWanted)
             modelReady = false;
             if (engineWanted == 1)
             {
-                std::string par = g.runDir + "\\" + req + ".param";
-                std::string bin = g.runDir + "\\" + req + ".bin";
+                std::string par = g.modelDirectory() + "\\" + req + ".param";
+                std::string bin = g.modelDirectory() + "\\" + req + ".bin";
                 if (fileExists(bin) && fileExists(par))
                 {
                     // 原版先用模型名"上锁"再加载：加载失败也不会反复重试
@@ -266,17 +266,17 @@ void aimThread(int engineWanted)
                 }
                 else
                 {
-                    msgBox("模型:" + req + "的param或bin文件不存在!请导入后点击确定");
+                    msgBox("模型:" + req + "的param或bin文件不存在!请放入程序同目录的模型数据文件夹后点击确定");
                     continue;
                 }
             }
             else if (engineWanted == 2)
             {
-                std::string onnx = g.runDir + "\\" + req + ".onnx";
+                std::string onnx = g.modelDirectory() + "\\" + req + ".onnx";
                 if (fileExists(onnx))
                 {
-                    // x64 wrapper supports Chinese paths; load beside the EXE directly.
-                    std::string txt = g.runDir + "\\空类别.txt";
+                    // The model and labels share the dedicated model directory.
+                    std::string txt = g.modelDirectory() + "\\空类别.txt";
                     if (!fileExists(txt)) writeFileAll(txt, "");
 
                     loadedModel = req;                                // 同上，先上锁
@@ -291,15 +291,15 @@ void aimThread(int engineWanted)
                 }
                 else
                 {
-                    msgBox("模型:" + req + "的onnx文件不存在!请导入后点击确定");
+                    msgBox("模型:" + req + "的onnx文件不存在!请放入程序同目录的模型数据文件夹后点击确定");
                     continue;
                 }
             }
             else if (engineWanted == 3)
             {
-                const std::string enginePath = g.runDir + "\\" + req + ".trt";
+                const std::string enginePath = g.modelDirectory() + "\\" + req + ".trt";
                 if (!fileExists(enginePath)) {
-                    msgBox("模型:" + req + "的trt文件不存在!请先用ONNX转TRT工具转换，再放入程序同目录。");
+                    msgBox("模型:" + req + "的trt文件不存在!请先用ONNX转TRT工具转换，再放入程序同目录的模型数据文件夹。");
                     continue;
                 }
                 loadedModel = req;

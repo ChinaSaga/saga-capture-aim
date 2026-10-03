@@ -8,7 +8,7 @@
   </PropertyGroup>
   <Target Name="ValidateSagaTensorRtSdk" BeforeTargets="ClCompile" Condition="'$(DesignTimeBuild)' != 'true'">
     <Error Condition="!Exists('$(SagaTensorRtDir)\include\NvInfer.h')" Text="TensorRT SDK is missing. Run tools/install_tensorrt.ps1." />
-    <Error Condition="!Exists('$(SagaCudaDir)\include\cuda_runtime_api.h')" Text="CUDA 13.4 headers are missing. Install the CUDA 13.4 Toolkit and set CUDA_PATH, or specify SagaCudaDir." />
+    <Error Condition="!Exists('$(SagaCudaDir)\include\cuda_runtime_api.h')" Text="CUDA API headers are missing. Install the CUDA Toolkit and set CUDA_PATH, or run tools/prepare_cuda_headers.ps1." />
   </Target>
   <Target Name="CopySagaRuntimeDependencies" AfterTargets="Build"
           Condition="'$(Platform)' == 'x64' and '$(DesignTimeBuild)' != 'true'">
@@ -21,7 +21,7 @@
       <!-- TensorRT is loaded only when selected. Ship its builder resources too
            so the converter can target any supported NVIDIA GPU. -->
       <SagaRuntimeDll Include="$(SagaTensorRtDir)\bin\*.dll" Condition="Exists('$(SagaTensorRtDir)\bin\nvinfer_11.dll')" />
-      <SagaRuntimeDll Include="$(SagaCudaDir)\bin\x64\cudart64_13.dll;$(SagaCudaDir)\bin\x64\cublas64_13.dll;$(SagaCudaDir)\bin\x64\cublasLt64_13.dll;$(SagaCudaDir)\bin\x64\nvrtc64_130_0.dll;$(SagaCudaDir)\bin\x64\nvrtc-builtins64_134.dll;$(SagaCudaDir)\bin\x64\nvJitLink_130_0.dll" Condition="Exists('$(SagaTensorRtDir)\bin\nvinfer_11.dll')" />
+      <SagaRuntimeDll Include="$(SagaCudaRuntimeDir)\cudart64_13.dll;$(SagaCudaRuntimeDir)\cublas64_13.dll;$(SagaCudaRuntimeDir)\cublasLt64_13.dll;$(SagaCudaRuntimeDir)\nvrtc64_130_0.dll;$(SagaCudaRuntimeDir)\nvrtc-builtins64_134.dll;$(SagaCudaRuntimeDir)\nvJitLink_130_0.dll" Condition="Exists('$(SagaTensorRtDir)\bin\nvinfer_11.dll')" />
       <!-- Both application configurations use /MD and release third-party libraries. -->
       <SagaRuntimeDll Include="$(SagaVCRedistX64)\Microsoft.VC145.CRT\concrt140.dll" />
       <SagaRuntimeDll Include="$(SagaVCRedistX64)\Microsoft.VC145.CRT\msvcp140.dll" />
@@ -39,6 +39,7 @@
       <SagaOrtLicense Include="$(SagaOrtDir)\LICENSE;$(SagaOrtDir)\ThirdPartyNotices.txt" Condition="Exists('$(SagaOrtDir)\LICENSE')" />
       <SagaTensorRtLicense Include="$(SagaTensorRtDir)\LICENSE*;$(SagaTensorRtDir)\TensorRT*EULA*;$(SagaTensorRtDir)\doc\*LICENSE*;$(SagaTensorRtDir)\doc\*EULA*;$(SagaTensorRtDir)\doc\Acknowledgements.txt;$(SagaTensorRtDir)\doc\README.txt" />
       <SagaCudaLicense Include="$(SagaCudaDir)\EULA.txt" Condition="Exists('$(SagaCudaDir)\EULA.txt')" />
+      <SagaCudaLicense Include="$(SagaCudaDir)\LICENSE" Condition="Exists('$(SagaCudaDir)\LICENSE')" />
     </ItemGroup>
     <Error Condition="!Exists('$(SagaOrtDir)\lib\onnxruntime.dll')"
            Text="Required ONNX Runtime SDK is missing. Run tools/install_dependencies.ps1." />

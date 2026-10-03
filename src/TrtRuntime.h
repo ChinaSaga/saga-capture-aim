@@ -40,6 +40,7 @@ public:
     decltype(&::cudaEventRecord) cudaEventRecord = nullptr;
     decltype(&::cudaEventSynchronize) cudaEventSynchronize = nullptr;
     decltype(&::cudaEventDestroy) cudaEventDestroy = nullptr;
+    decltype(&::cudaEventElapsedTime) cudaEventElapsedTime = nullptr;
 private:
     std::mutex lock_;
     HMODULE cuda_ = nullptr, infer_ = nullptr, parser_ = nullptr, plugin_ = nullptr;

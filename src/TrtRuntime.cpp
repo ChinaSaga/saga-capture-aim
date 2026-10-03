@@ -58,6 +58,7 @@ void RuntimeLibrary::ensure(bool parser) {
         TRT_CUDA_BIND(cudaStreamBeginCapture); TRT_CUDA_BIND(cudaStreamEndCapture); TRT_CUDA_BIND(cudaGraphInstantiate);
         TRT_CUDA_BIND(cudaGraphLaunch); TRT_CUDA_BIND(cudaGraphDestroy); TRT_CUDA_BIND(cudaGraphExecDestroy);
         TRT_CUDA_BIND(cudaEventCreateWithFlags); TRT_CUDA_BIND(cudaEventRecord); TRT_CUDA_BIND(cudaEventSynchronize); TRT_CUDA_BIND(cudaEventDestroy);
+        TRT_CUDA_BIND(cudaEventElapsedTime);
 #undef TRT_CUDA_BIND
     }
     if (!runtimeFactory_ || !builderFactory_) {

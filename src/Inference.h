@@ -66,3 +66,12 @@ void canvasDrawCapture(const CaptureFrame& frame);
 int ncnnDetectBgr(const unsigned char*, int, int, size_t, float, float, DetectObject*);
 int onnxDetectBgr(const unsigned char*, int, int, size_t, float, float, DetectObject*);
 int trtDetectBgr(const unsigned char*, int, int, size_t, float, float, DetectObject*);
+
+// Optional diagnostics, enabled only by SAGA_TRT_PROFILE=1. Read on the
+// inference thread after detect; never concurrently with engine teardown.
+struct TrtTiming {
+    double preprocessMs = 0, submitMs = 0, waitMs = 0, postprocessMs = 0;
+    float gpuMs = 0;
+    bool graphActive = false, blockingSync = false;
+};
+TrtTiming trtLastTiming();

@@ -7,6 +7,19 @@ function Get-ProjectDependencies {
     if (!$values.CUDA_PATH) { $values.CUDA_PATH = '' }
     foreach ($node in $props.Project.PropertyGroup.ChildNodes) {
         if ($node.NodeType -ne [System.Xml.XmlNodeType]::Element) { continue }
+        # These property defaults use only an empty-value check and optional
+        # Exists() clauses. Honor them without evaluating arbitrary code.
+        $condition = $node.GetAttribute('Condition')
+        if ($condition) {
+            $emptyCheck = "'`$($($node.Name))' == ''"
+            if ($condition.Contains($emptyCheck) -and $values[$node.Name]) { continue }
+            foreach ($key in @($values.Keys)) { $condition = $condition.Replace('$(' + $key + ')', $values[$key]) }
+            $missing = $false
+            foreach ($exists in [regex]::Matches($condition,"Exists\('([^']*)'\)")) {
+                if (!(Test-Path -LiteralPath $exists.Groups[1].Value)) { $missing = $true; break }
+            }
+            if ($missing) { continue }
+        }
         $value = $node.InnerText
         foreach ($key in @($values.Keys)) { $value = $value.Replace('$(' + $key + ')', $values[$key]) }
         $values[$node.Name] = $value

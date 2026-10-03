@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations"><ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration></ItemGroup>
+  <PropertyGroup Label="Globals"><ProjectGuid>{9DEDF138-1CC2-4658-9BEF-C3643B22A149}</ProjectGuid><WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion></PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration"><ConfigurationType>Application</ConfigurationType><PlatformToolset>v145</PlatformToolset><UseDebugLibraries>false</UseDebugLibraries><CharacterSet>MultiByte</CharacterSet></PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" /><Import Project="Dependencies.props" />
+  <PropertyGroup><IntDir>$(Platform)\$(Configuration)\InferenceBench\</IntDir></PropertyGroup>
+  <ItemDefinitionGroup><ClCompile><LanguageStandard>stdcpp20</LanguageStandard><RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary><ExceptionHandling>Sync</ExceptionHandling><Optimization>MaxSpeed</Optimization><FloatingPointModel>Fast</FloatingPointModel><EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet><PreprocessorDefinitions>NOMINMAX;_CRT_SECURE_NO_WARNINGS;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions><AdditionalIncludeDirectories>$(ProjectDir)src;$(SagaTensorRtDir)\include;$(SagaCudaDir)\include;$(SagaOpenCvDir)\include;$(SagaOrtDir)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories><AdditionalOptions>/source-charset:utf-8 /execution-charset:.936 /Ob3 %(AdditionalOptions)</AdditionalOptions></ClCompile><Link><SubSystem>Console</SubSystem><AdditionalLibraryDirectories>$(SagaOpenCvDir)\x64\vc16\lib;$(SagaOrtDir)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories><AdditionalDependencies>opencv_world500.lib;onnxruntime.lib;winmm.lib;%(AdditionalDependencies)</AdditionalDependencies></Link></ItemDefinitionGroup>
+  <ItemGroup><ClCompile Include="tools\InferenceBench.cpp" /><ClCompile Include="src\TensorRT.cpp" /><ClCompile Include="src\TrtRuntime.cpp" /><ClCompile Include="src\ONNX.cpp" /><ClCompile Include="src\OpnecvCapture.cpp" /></ItemGroup>
+  <ItemDefinitionGroup><Link><AdditionalDependencies>d3d11.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies></Link></ItemDefinitionGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

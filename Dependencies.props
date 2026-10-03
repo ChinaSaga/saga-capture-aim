@@ -17,5 +17,9 @@
     <SagaTensorRtDir>$(SagaDependenciesRoot)tensorrt-$(SagaTensorRtVersion)</SagaTensorRtDir>
     <SagaCudaVersion>13.4</SagaCudaVersion>
     <SagaCudaDir Condition="'$(SagaCudaDir)' == ''">$(CUDA_PATH)</SagaCudaDir>
+    <SagaCudaDir Condition="'$(SagaCudaDir)' == ''">$(SagaDependenciesRoot)cuda-headers-13.0\cuda_cudart-windows-x86_64-13.0.96-archive</SagaCudaDir>
+    <SagaCudaRuntimeDir Condition="'$(SagaCudaRuntimeDir)' == '' and Exists('$(SagaCudaDir)\bin\x64\cudart64_13.dll') and Exists('$(SagaCudaDir)\bin\x64\cublas64_13.dll')">$(SagaCudaDir)\bin\x64</SagaCudaRuntimeDir>
+    <SagaCudaRuntimeDir Condition="'$(SagaCudaRuntimeDir)' == '' and Exists('$(SagaCudaDir)\bin\cudart64_13.dll') and Exists('$(SagaCudaDir)\bin\cublas64_13.dll')">$(SagaCudaDir)\bin</SagaCudaRuntimeDir>
+    <SagaCudaRuntimeDir Condition="'$(SagaCudaRuntimeDir)' == ''">$(SagaDependenciesRoot)cuda-runtime-13.4</SagaCudaRuntimeDir>
   </PropertyGroup>
 </Project>

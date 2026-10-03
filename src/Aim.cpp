@@ -188,6 +188,14 @@ void aimThread(int engineWanted)
 
     RunTimer runTimer, inferTimer;
     runTimer.start();
+    char profileSetting[16]{};
+    const bool profileTrt = engineWanted == 3 &&
+        GetEnvironmentVariableA("SAGA_TRT_PROFILE", profileSetting, sizeof(profileSetting)) &&
+        !strcmp(profileSetting, "1");
+    ULONGLONG profileTick = GetTickCount64();
+    unsigned profileFrames = 0;
+    double profileTotal = 0, profilePre = 0, profileSubmit = 0,
+        profileWait = 0, profilePost = 0, profileGpu = 0;
 
     std::vector<unsigned char> localFrame;
     long long localSeq = -1;
@@ -353,6 +361,23 @@ void aimThread(int engineWanted)
         }
         captureFrame = {};
         const double inferCost = inferTimer.ms();      // 亚毫秒精度，界面换算显示用帧率
+        if (profileTrt && n >= 0) {
+            const auto timing = trtLastTiming();
+            ++profileFrames; profileTotal += inferCost;
+            profilePre += timing.preprocessMs; profileSubmit += timing.submitMs;
+            profileWait += timing.waitMs; profilePost += timing.postprocessMs;
+            profileGpu += timing.gpuMs;
+            const auto tick = GetTickCount64();
+            if (tick - profileTick >= 5000) {
+                const double count = double(profileFrames);
+                runtime_log::write("[trt-perf] frames=%u total=%.3f pre=%.3f submit=%.3f wait=%.3f post=%.3f gpu=%.3f ms graph=%d blocking=%d",
+                    profileFrames, profileTotal/count, profilePre/count, profileSubmit/count,
+                    profileWait/count, profilePost/count, profileGpu/count,
+                    int(timing.graphActive), int(timing.blockingSync));
+                profileFrames = 0; profileTotal = profilePre = profileSubmit =
+                    profileWait = profilePost = profileGpu = 0; profileTick = tick;
+            }
+        }
         // A model/engine change during inference must not publish the old result.
         if (g.engine != engineWanted || g.inferPaused.load() || g.selectedModelName() != req) continue;
         g.inferMs = (int)inferCost;

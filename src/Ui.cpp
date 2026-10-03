@@ -755,7 +755,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         snprintf(head, sizeof(head), "中心 %d × %d    采集 %d FPS    推理 %d FPS",
             g.imgSize, g.imgSize, g.frameFps, displayInferFps());
         char tail[48];
-        snprintf(tail, sizeof(tail), "    %d ms", g.inferMs);
+        snprintf(tail, sizeof(tail), "    %.3f ms", g.inferMsPrecise);
 
         const RECT statusRect{ 24, 65, 676, 94 };
         std::string line = head;

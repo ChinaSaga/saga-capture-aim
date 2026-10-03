@@ -8,6 +8,12 @@
 #include <stdexcept>
 #include <cstring>
 #include <immintrin.h>
+#include <chrono>
+#include <d3d11.h>
+#include <dxgi.h>
+#include <wrl/client.h>
+#pragma comment(lib, "d3d11.lib")
+#pragma comment(lib, "dxgi.lib")
 
 namespace {
 class TrtLogger : public nvinfer1::ILogger {
@@ -47,6 +53,47 @@ public:
     cudaGraphExec_t graphExec = nullptr;
     bool graphAttempted = false;
     cudaEvent_t completion = nullptr;
+    cudaEvent_t profileStart = nullptr, profileEnd = nullptr;
+    TrtTiming timing;
+    bool blockingSync = false;
+    Microsoft::WRL::ComPtr<ID3D11Device> powerDevice;
+
+    void attachPowerProfile(int device) noexcept {
+        // On this WDDM laptop the driver's per-application power policy is
+        // ignored by a pure CUDA process. A D3D device on the SAME adapter lets
+        // the driver recognize its graphics application profile. It submits no
+        // draws, owns no swap chain and never changes global clocks/settings.
+        // A profile must be configured separately; this does not force P0 on
+        // other users' machines. Failure must not disable TensorRT inference.
+        try {
+            char disabled[16]{};
+            if (GetEnvironmentVariableA("SAGA_TRT_POWER_PROFILE", disabled, sizeof(disabled)) && !strcmp(disabled,"0")) return;
+            // Public CUDA driver API: CUdevice/CUresult are integers. CUDA has
+            // already loaded nvcuda.dll through cudaSetDevice; do not load an
+            // extra driver module or require a CUDA Toolkit driver import lib.
+            const auto driver = GetModuleHandleW(L"nvcuda.dll");
+            if (!driver) return;
+            using GetDevice = int (WINAPI*)(int*, int);
+            using GetLuid = int (WINAPI*)(char*, unsigned*, int);
+            const auto getDevice = reinterpret_cast<GetDevice>(GetProcAddress(driver, "cuDeviceGet"));
+            const auto getLuid = reinterpret_cast<GetLuid>(GetProcAddress(driver, "cuDeviceGetLuid"));
+            if (!getDevice || !getLuid) return;
+            char luid[8]{}; unsigned nodeMask = 0;
+            int cudaDevice = 0;
+            if (getDevice(&cudaDevice, device) != 0 || getLuid(luid, &nodeMask, cudaDevice) != 0) return;
+            Microsoft::WRL::ComPtr<IDXGIFactory1> factory;
+            if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) return;
+            for (UINT i = 0;; ++i) {
+                Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
+                if (FAILED(factory->EnumAdapters1(i, &adapter))) break;
+                DXGI_ADAPTER_DESC1 desc{};
+                if (FAILED(adapter->GetDesc1(&desc)) || memcmp(&desc.AdapterLuid, luid, sizeof(luid))) continue;
+                D3D11CreateDevice(adapter.Get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr, 0,
+                    nullptr, 0, D3D11_SDK_VERSION, &powerDevice, nullptr, nullptr);
+                break;
+            }
+        } catch (...) {}
+    }
     nvinfer1::DataType inputType{}, outputType{};
     size_t inputCount = 0, outputCount = 0, inputBytes = 0, outputBytes = 0;
     cv::Size shape;
@@ -64,6 +111,8 @@ public:
         if (graphExec) api.cudaGraphExecDestroy(graphExec);
         if (graph) api.cudaGraphDestroy(graph);
         if (completion) api.cudaEventDestroy(completion);
+        if (profileStart) api.cudaEventDestroy(profileStart);
+        if (profileEnd) api.cudaEventDestroy(profileEnd);
         context.reset(); engine.reset(); runtime.reset();
         if (gpuInput) api.cudaFree(gpuInput);
         if (gpuOutput) api.cudaFree(gpuOutput);
@@ -82,6 +131,7 @@ public:
         int devices = 0; trt::checkCuda(api.cudaGetDeviceCount(&devices), "CUDA device discovery");
         if (!devices) throw std::runtime_error("TensorRT requires a supported NVIDIA GPU");
         trt::checkCuda(api.cudaSetDevice(0), "Select NVIDIA GPU");
+        attachPowerProfile(0);
         runtime.reset(api.createRuntime(logger));
         if (!runtime) throw std::runtime_error("Cannot create TensorRT runtime: " + logger.error());
         engine.reset(runtime->deserializeCudaEngine(data.data(), data.size()));
@@ -120,8 +170,16 @@ public:
         char graphSetting[16]{};
         graphAttempted = GetEnvironmentVariableA("SAGA_TRT_CUDA_GRAPH", graphSetting, sizeof(graphSetting)) && !strcmp(graphSetting, "0");
         char blockingSetting[16]{};
-        if (!(GetEnvironmentVariableA("SAGA_TRT_BLOCKING_SYNC", blockingSetting, sizeof(blockingSetting)) && !strcmp(blockingSetting, "0")))
-            trt::checkCuda(api.cudaEventCreateWithFlags(&completion, cudaEventBlockingSync | cudaEventDisableTiming), "Create blocking inference completion event");
+        blockingSync = GetEnvironmentVariableA("SAGA_TRT_BLOCKING_SYNC", blockingSetting, sizeof(blockingSetting)) && !strcmp(blockingSetting, "1");
+        // Default event synchronization spins for short, latency-sensitive
+        // inference. Explicit =1 preserves the lower-CPU blocking option.
+        const unsigned completionFlags = cudaEventDisableTiming | (blockingSync ? cudaEventBlockingSync : 0);
+        trt::checkCuda(api.cudaEventCreateWithFlags(&completion, completionFlags), "Create inference completion event");
+        char profileSetting[16]{};
+        if (GetEnvironmentVariableA("SAGA_TRT_PROFILE", profileSetting, sizeof(profileSetting)) && !strcmp(profileSetting, "1")) {
+            trt::checkCuda(api.cudaEventCreateWithFlags(&profileStart, cudaEventDefault), "Create profiling start event");
+            trt::checkCuda(api.cudaEventCreateWithFlags(&profileEnd, cudaEventDefault), "Create profiling end event");
+        }
     }
     void enqueueCopies() {
         auto& api = trt::library();
@@ -151,6 +209,9 @@ public:
         }
     }
     int detect(const cv::Mat& image, float conf, float iou, DetectObject* out) {
+        using Clock = std::chrono::steady_clock;
+        const bool profiling = profileStart != nullptr;
+        const auto t0 = profiling ? Clock::now() : Clock::time_point{};
         cv::Size actual;
         yolos::preprocessing::letterBoxToBlob(image, preprocessing, 3, shape, actual, false);
         if (inputType == nvinfer1::DataType::kFLOAT) memcpy(cpuInput, preprocessing.blob.data(), inputBytes);
@@ -158,14 +219,19 @@ public:
             for (; i + 8 <= inputCount; i += 8) _mm_storeu_si128(reinterpret_cast<__m128i*>(p + i), _mm256_cvtps_ph(_mm256_loadu_ps(preprocessing.blob.data() + i), 0));
             for (; i < inputCount; ++i) p[i] = static_cast<uint16_t>(_mm_extract_epi16(_mm_cvtps_ph(_mm_set_ss(preprocessing.blob[i]), 0), 0)); }
         auto& api = trt::library();
+        const auto t1 = profiling ? Clock::now() : Clock::time_point{};
+        if (profiling) trt::checkCuda(api.cudaEventRecord(profileStart, stream), "Record profiling start");
         if (graphExec) trt::checkCuda(api.cudaGraphLaunch(graphExec, stream), "Launch YOLO CUDA graph");
         else enqueueCopies();
+        if (profiling) trt::checkCuda(api.cudaEventRecord(profileEnd, stream), "Record profiling end");
+        const auto t2 = profiling ? Clock::now() : Clock::time_point{};
         if (completion) {
             // Record outside capture, after all copies/kernels (or graph replay).
-            // The blocking event sleeps this CPU thread without device-wide flags.
+            // Event flags select spin or blocking without device-wide flags.
             trt::checkCuda(api.cudaEventRecord(completion, stream), "Record YOLO inference completion");
-            trt::checkCuda(api.cudaEventSynchronize(completion), "Wait for YOLO blocking completion");
+            trt::checkCuda(api.cudaEventSynchronize(completion), "Wait for YOLO completion");
         } else trt::checkCuda(api.cudaStreamSynchronize(stream), "Wait for YOLO inference");
+        const auto t3 = profiling ? Clock::now() : Clock::time_point{};
         if (!graphAttempted) captureGraph();
         const float* values = static_cast<const float*>(cpuOutput);
         if (outputType == nvinfer1::DataType::kHALF) { const auto p = static_cast<const unsigned short*>(cpuOutput); size_t i = 0;
@@ -190,12 +256,21 @@ public:
         }
         yolos::nms::NMSBoxesBatched(boxes, scores, labels, conf, iou, indices, nms, 99);
         int count = 0; for (int i : indices) { if (count == 99) break; const auto& box = boxes[i]; out[count++] = {float(box.x), float(box.y), float(box.width), float(box.height), labels[i], scores[i]}; }
+        if (profiling) {
+            const auto t4 = Clock::now();
+            auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b-a).count(); };
+            timing.preprocessMs = ms(t0,t1); timing.submitMs = ms(t1,t2);
+            timing.waitMs = ms(t2,t3); timing.postprocessMs = ms(t3,t4);
+            timing.graphActive = graphExec != nullptr; timing.blockingSync = blockingSync;
+            trt::checkCuda(api.cudaEventElapsedTime(&timing.gpuMs, profileStart, profileEnd), "Read GPU profiling time");
+        }
         return count;
     }
 };
 std::unique_ptr<Detector> detector;
 std::string lastError;
 }
+TrtTiming trtLastTiming() { return detector ? detector->timing : TrtTiming{}; }
 namespace saga {
 int trt_create(const char* path) { detector.reset(); try { auto value = std::make_unique<Detector>(); value->load(trt::widePath(path)); detector = std::move(value); lastError.clear(); return 0; } catch (const std::exception& e) { lastError = e.what(); return -1; } }
 void trt_destroy() { detector.reset(); }

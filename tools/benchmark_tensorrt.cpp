@@ -132,7 +132,9 @@ int wmain(int argc, wchar_t** argv) {
         std::cout << "load_ms=" << elapsed(loadStart, Clock::now()) << '\n';
         for (int i = 0; i < 50; ++i) detector.detectBorrowed(images[i % images.size()], 0.25f, 0.45f);
         std::cout << "cuda_graph=" << bool(::detector->graphExec)
-                  << " blocking_sync=" << bool(::detector->completion) << '\n';
+                  << " blocking_sync=" << ::detector->blockingSync
+                  << " input_bytes=" << ::detector->inputBytes
+                  << " scratch_bytes=" << ::detector->preprocessing.blob.capacity() * sizeof(float) << '\n';
         std::ofstream csv(std::filesystem::path(std::wstring(argv[6]) + L".csv"));
         std::ofstream output(std::filesystem::path(std::wstring(argv[6]) + L".detections.bin"), std::ios::binary);
         csv << "round,image,preprocess_ms,inference_ms,postprocess_ms,total_ms,detections\n" << std::setprecision(10);

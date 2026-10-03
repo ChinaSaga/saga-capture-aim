@@ -73,8 +73,12 @@ async function load(models) {
     assert.deepEqual(posts.at(-1), ['模型名称', '仅TRT']);
     get('TensorRT').checked = true; get('TensorRT').change();
     assert.deepEqual(posts.at(-1), ['推理引擎', '3']);
+    const missingModelPosts = posts.length;
     await load([{name: '新模型', engines: [1]}]);
     assert.deepEqual(names(), ['新模型']); assert.equal(select.value, ''); check([]);
+    assert(get('模型列表状态').textContent.includes('重新选择模型'), 'Missing saved model must explain how to enable engines');
+    assert(ids.every(id => get(id).parentElement.title === '请先选择模型'));
+    assert.equal(posts.length, missingModelPosts, 'Missing saved model must not overwrite configuration');
     await load([]); check([]); assert(select.disabled); assert.deepEqual(names(), []);
     let old = refresh(), oldRequest = pending.shift(), fresh = refresh(), newRequest = pending.shift();
     respond(newRequest, [{name: '最新模型', engines: [3]}]); await fresh;
@@ -84,5 +88,5 @@ async function load(models) {
     assert(select.disabled); check([]); assert.deepEqual(names(), []);
     await load([{name: '恢复模型', engines: [1, 2]}]);
     select.value = '恢复模型'; select.change(); check([1, 2]);
-    console.log('PASS page syntax, same-name engine switching, gray/disabled states, unrelated models, deletion, empty directory, refresh races and recovery');
+    console.log('PASS page syntax, same-name engine switching, gray/disabled states, missing model guidance, unrelated models, deletion, empty directory, refresh races and recovery');
 })().catch(error => { console.error(error); process.exitCode = 1; });

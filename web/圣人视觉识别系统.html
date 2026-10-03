@@ -2,930 +2,408 @@
 <html lang="zh-CN">
     <head>
         <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
         <script src="/config.js"></script>
         <script>
             // Connect to the computer serving this page, including on the LAN.
             const apiEndpoint = location.origin + '/api';
         </script>
-        <title>视觉识别系统 - 专业配置面板</title>
+        <title>视觉识别系统 · 调参面板</title>
         <style>
-            :root {
-                --primary-color: #3498db;
-                --secondary-color: #2ecc71;
-                --accent-color: #e74c3c;
-                --dark-bg: #2c3e50;
-                --light-bg: #ecf0f1;
-                --card-bg: #ffffff;
-                --text-color: #34495e;
-                --border-radius: 8px;
-                --shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-                --transition: all 0.3s ease;
-                --selected-color: #9b59b6;
-            }
-
-            * {
-                margin: 0;
-                padding: 0;
-                box-sizing: border-box;
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            }
-
-            body {
-                background: linear-gradient(135deg, var(--dark-bg), #1a2530);
-                color: var(--text-color);
-                padding: 20px;
-                min-height: 100vh;
-                display: flex;
-                justify-content: center;
-                align-items: center;
-            }
-
-            .container {
-                max-width: 1400px;
-                width: 100%;
-                display: grid;
-                grid-template-columns: 1fr;
-                gap: 10px;
-            }
-
-            header {
-                text-align: center;
-                padding: 8px 12px;
-                background: rgba(0, 0, 0, 0.25);
-                border-radius: var(--border-radius);
-                margin-bottom: 0;
-            }
-
-            header h1 {
-                color: white;
-                font-size: 1.6rem;
-                margin-bottom: 4px;
-                line-height: 1.2;
-            }
-
-            header p {
-                color: #bdc3c7;
-                font-size: 0.85rem;
-                margin: 2px 0;
-                line-height: 1.2;
-            }
-
-            #推理帧率 {
-                font-size: 1.2rem;
-                font-weight: bold;
-                color: var(--secondary-color);
-                margin-top: 4px;
-            }
-
-            .config-panel {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-                gap: 12px;
-                padding: 10px;
-            }
-
-            .config-group {
-                background: var(--card-bg);
-                border-radius: var(--border-radius);
-                box-shadow: var(--shadow);
-                padding: 14px;
-                margin-bottom: 0;
-                transition: var(--transition);
-            }
-
-            .config-group:hover {
-                transform: translateY(-5px);
-                box-shadow: 0 8px 15px rgba(0, 0, 0, 0.2);
-            }
-
-            .group-title {
-                color: var(--primary-color);
-                font-size: 1.3rem;
-                margin-bottom: 15px;
-                padding-bottom: 10px;
-                border-bottom: 2px solid #f0f0f0;
-                font-weight: 600;
-            }
-
-            .control-item {
-                margin-bottom: 5px;
-            }
-
-            .control-row {
-                display: flex;
-                align-items: center;
-                margin-bottom: 8px;
-            }
-
-            .control-label {
-                width: 130px;
-                font-weight: 600;
-                color: var(--dark-bg);
-                font-size: 0.9rem;
-            }
-
-            .slider-container {
-                display: flex;
-                align-items: center;
-                width: 100%;
-            }
-
-            input[type="range"] {
-                flex: 1;
-                height: 6px;
-                border-radius: 3px;
-                background: #e0e0e0;
-                outline: none;
-                margin: 0 12px;
-            }
-
-            input[type="range"]::-webkit-slider-thumb {
-                -webkit-appearance: none;
-                width: 18px;
-                height: 18px;
-                border-radius: 50%;
-                background: var(--primary-color);
-                cursor: pointer;
-                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-            }
-
-            .value-display {
-                min-width: 45px;
-                text-align: center;
-                font-weight: bold;
-                font-size: 0.9rem;
-                color: var(--primary-color);
-            }
-
-            input[type="text"] {
-                width: 70px;
-                padding: 6px 10px;
-                border: 1px solid #ddd;
-                border-radius: 4px;
-                text-align: center;
-                font-weight: bold;
-                font-size: 0.9rem;
-            }
-
-            .btn-group {
-                display: flex;
-                gap: 6px;
-                margin-left: 8px;
-            }
-
-            button {
-                padding: 6px 12px;
-                background: var(--primary-color);
-                color: white;
-                border: none;
-                border-radius: 4px;
-                cursor: pointer;
-                font-weight: 600;
-                font-size: 0.9rem;
-                transition: var(--transition);
-                box-shadow: var(--shadow);
-            }
-
-            button:hover {
-                background: #2980b9;
-                transform: translateY(-2px);
-            }
-
-            button:active {
-                transform: translateY(0);
-            }
-
-            button:disabled {
-                background: #95a5a6;
-                cursor: not-allowed;
-                transform: none;
-                box-shadow: none;
-            }
-
-            .checkbox-group {
-                display: flex;
-                gap: 15px;
-                margin-top: 6px;
-                flex-wrap: wrap;
-            }
-
-            .checkbox-item {
-                display: flex;
-                align-items: center;
-                gap: 5px;
-                font-size: 0.9rem;
-            }
-
-            .quick-configs {
-                display: flex;
-                justify-content: center;
-                gap: 12px;
-                margin-bottom: 20px;
-            }
-
-            .quick-config-btn {
-                padding: 10px 20px;
-                background: linear-gradient(to right, var(--primary-color), var(--secondary-color));
-                color: white;
-                border: none;
-                border-radius: 6px;
-                cursor: pointer;
-                font-weight: 600;
-                font-size: 1rem;
-                transition: var(--transition);
-                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-                flex: 1;
-                max-width: 220px;
-                text-align: center;
-            }
-
-            .quick-config-btn:hover {
-                transform: translateY(-3px);
-                box-shadow: 0 6px 12px rgba(0, 0, 0, 0.25);
-            }
-
-            .status-indicator {
-                text-align: center;
-                padding: 20px;
-                background: rgba(255, 255, 255, 0.1);
-                border-radius: var(--border-radius);
-                margin-top: 15px;
-                color: white;
-                display: flex;
-                flex-direction: column;
-                gap: 15px;
-            }
-
-            .status-label {
-                font-size: 1rem;
-                margin-bottom: 6px;
-            }
-
-            #推理帧率 {
-                font-size: 1.6rem;
-                font-weight: bold;
-                color: var(--secondary-color);
-            }
-
-            .modal {
-                display: none;
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                background: rgba(0, 0, 0, 0.7);
-                z-index: 1000;
-                justify-content: center;
-                align-items: center;
-            }
-
-            .modal-content {
-                background: white;
-                padding: 25px;
-                border-radius: var(--border-radius);
-                text-align: center;
-                max-width: 380px;
-                width: 90%;
-                box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
-            }
-
-            .modal h3 {
-                color: var(--primary-color);
-                font-size: 1.4rem;
-                margin-bottom: 15px;
-            }
-
-            .modal p {
-                margin-bottom: 20px;
-                font-size: 1rem;
-                line-height: 1.5;
-            }
-
-            .modal-btn {
-                padding: 8px 25px;
-                background: var(--primary-color);
-                color: white;
-                border: none;
-                border-radius: 4px;
-                cursor: pointer;
-                font-size: 1rem;
-                transition: var(--transition);
-            }
-
-            .modal-btn:hover {
-                background: #2980b9;
-            }
-
-            .save-config-btn {
-                padding: 12px 16px;
-                background: linear-gradient(to right, #4a5568, #2d3748);
-                color: white;
-                border: none;
-                border-radius: 6px;
-                cursor: pointer;
-                font-weight: 600;
-                font-size: 1rem;
-                transition: all 0.3s ease;
-                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-                text-align: center;
-                position: relative;
-                overflow: hidden;
-            }
-
-            .save-config-btn:hover {
-                transform: translateY(-3px);
-                box-shadow: 0 6px 12px rgba(0, 0, 0, 0.2);
-            }
-
-            .save-config-btn.selected {
-                background: linear-gradient(to right, var(--selected-color), #8e44ad);
-                box-shadow: 0 0 15px rgba(155, 89, 182, 0.5);
-            }
-
-            .save-config-btn::before {
-                content: '';
-                position: absolute;
-                top: 0;
-                left: -100%;
-                width: 100%;
-                height: 100%;
-                background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-                transition: 0.5s;
-            }
-
-            .save-config-btn:hover::before {
-                left: 100%;
-            }
-
-            .save-config-btn.selected::after {
-                content: '✓';
-                position: absolute;
-                right: 12px;
-                top: 50%;
-                transform: translateY(-50%);
-                font-size: 1.1rem;
-            }
-
-            select {
-                appearance: none;
-                -webkit-appearance: none;
-                -moz-appearance: none;
-                width: 100%;
-                padding: 8px 12px;
-                border: 1px solid #ddd;
-                border-radius: 4px;
-                background-color: white;
-                background-image: linear-gradient(45deg, transparent 50%, var(--primary-color) 50%), linear-gradient(135deg, var(--primary-color) 50%, transparent 50%);
-                background-position: calc(100% - 18px) center, calc(100% - 13px) center;
-                background-size: 5px 5px, 5px 5px;
-                background-repeat: no-repeat;
-                font-size: 0.9rem;
-                color: var(--text-color);
-                box-shadow: var(--shadow);
-                transition: all 0.3s ease;
-            }
-
-            select:hover {
-                border-color: var(--primary-color);
-                box-shadow: 0 0 8px rgba(52, 152, 219, 0.3);
-            }
-
-            select:focus {
-                outline: none;
-                border-color: var(--primary-color);
-                box-shadow: 0 0 8px rgba(52, 152, 219, 0.6);
-            }
-
-            .select-container {
-                position: relative;
-                width: 100%;
-            }
-
-            @media (max-width: 1200px) {
-                .config-panel {
-                    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-                }
-            }
-
-            @media (max-width: 992px) {
-                .container {
-                    max-width: 100%;
-                }
-                .config-panel {
-                    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-                    gap: 15px;
-                }
-            }
-
-            @media (max-width: 768px) {
-                .config-panel {
-                    grid-template-columns: 1fr;
-                }
-                .quick-configs {
-                    flex-direction: column;
-                    align-items: center;
-                }
-                .control-row {
-                    flex-direction: column;
-                    align-items: flex-start;
-                }
-                .control-label {
-                    margin-bottom: 6px;
-                    width: 100%;
-                }
-                .btn-group {
-                    margin-left: 0;
-                    margin-top: 8px;
-                }
-                .quick-config-btn {
-                    max-width: 100%;
-                }
-            }
-
-            /* 锁定类型选择框样式 */
-            .checkbox-container {
-                display: flex;
-                flex-direction: column;
-                gap: 15px;
-                margin-top: 10px;
-            }
-
-            .checkbox-row {
-                display: flex;
-                justify-content: space-between;
-                gap: 10px;
-            }
-
-            .checkbox-item {
-                position: relative;
-                flex: 1;
-                min-width: 0;
-            }
-
-            .checkbox-item input[type="checkbox"] {
-                position: absolute;
-                opacity: 0;
-                width: 100%;
-                height: 100%;
-                cursor: pointer;
-                z-index: 2;
-            }
-
-            .checkbox-item label {
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                width: 100%;
-                height: 40px;
-                background: #f8f9fa;
-                border-radius: 6px;
-                border: 1px solid #e9ecef;
-                transition: all 0.3s ease;
-                font-weight: 600;
-                color: #495057;
-                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-                cursor: pointer;
-                position: relative;
-            }
-
-            .checkbox-item input[type="checkbox"]:hover+label {
-                background: #e9ecef;
-                transform: translateY(-2px);
-                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-            }
-
-            .checkbox-item input[type="checkbox"]:checked+label {
-                background: #4dabf7;
-                color: white;
-                border-color: #339af0;
-                box-shadow: 0 4px 8px rgba(77, 171, 247, 0.3);
-            }
-
-            .checkbox-item input[type="checkbox"]:checked+label::before {
-                content: "✓";
-                position: absolute;
-                font-size: 16px;
-                font-weight: bold;
-                color: white;
-                animation: checkAppear 0.3s ease;
-            }
-
-            @keyframes checkAppear {
-                from {
-                    opacity: 0;
-                    transform: scale(0.5);
-                }
-                to {
-                    opacity: 1;
-                    transform: scale(1);
-                }
-            }
-
-            @media (max-width: 768px) {
-                .checkbox-row {
-                    flex-wrap: wrap;
-                    gap: 8px;
-                }
-                .checkbox-item {
-                    flex: 0 0 calc(20% - 8px);
-                }
-            }
-
-            .special-move-row {
-                display: flex;
-                align-items: center;
-                margin-top: 10px;
-            }
-
-            /* 滑动开关 */
-            .special-toggle {
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                cursor: pointer;
-                user-select: none;
-            }
-
-            .special-toggle input[type="checkbox"] {
-                display: none;
-            }
-
-            .special-toggle .slider {
-                width: 44px;
-                height: 22px;
-                background: #cfd4da;
-                border-radius: 22px;
-                position: relative;
-                transition: all 0.3s ease;
-                box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.2);
-            }
-
-            .special-toggle .slider::before {
-                content: "";
-                position: absolute;
-                width: 18px;
-                height: 18px;
-                top: 2px;
-                left: 2px;
-                background: white;
-                border-radius: 50%;
-                transition: all 0.3s ease;
-                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-            }
-
-            .special-toggle input:checked+.slider {
-                background: var(--primary-color);
-            }
-
-            .special-toggle input:checked+.slider::before {
-                transform: translateX(22px);
-            }
-
-            .special-toggle .toggle-text {
-                font-size: 0.9rem;
-                font-weight: 600;
-                color: var(--primary-color);
-                transition: color 0.3s ease;
-            }
-
-            .config-group {
-                margin-bottom: 30px;
-                background-color: var(--card-bg);
-                padding: 20px;
-                border-radius: 8px;
-                box-shadow: var(--shadow);
-            }
-
-            .group-title {
-                font-size: 1.5rem;
-                font-weight: bold;
-                color: var(--primary-color);
-                margin-bottom: 15px;
-            }
-
-            /* 单选框容器 */
-            .radio-container {
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                gap: 20px;
-                margin-top: 25px;
-            }
-
-            .radio-item {
-                position: relative;
-                display: inline-block;
-                width: 120px;
-                padding: 8px 10px;
-                background-color: var(--card-bg);
-                border-radius: 6px;
-                box-shadow: var(--shadow);
-                text-align: center;
-                transition: all 0.3s ease;
-                cursor: pointer;
-                padding-top: 10px;
-            }
-
-            .radio-item input[type="radio"] {
-                display: none;
-            }
-
-            .radio-item label {
-                display: block;
-                font-size: 1rem;
-                font-weight: 600;
-                color: var(--text-color);
-                cursor: pointer;
-                padding: 8px 0;
-                border: 2px solid transparent;
-                border-radius: 6px;
-                transition: all 0.3s ease;
-            }
-
-            .radio-item input[type="radio"]:checked+label {
-                background-color: var(--primary-color);
-                color: white;
-                border-color: var(--primary-color);
-            }
-
-            .radio-item:hover label {
-                background-color: #ecf0f1;
-                color: var(--primary-color);
-                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-            }
-
-            .radio-item input[type="radio"]:focus+label {
-                outline: none;
-                box-shadow: 0 0 4px rgba(52, 152, 219, 0.8);
-            }
-
-            .radio-item.engine-disabled,
-            .radio-item.engine-disabled label {
-                cursor: not-allowed;
-            }
-
-            .radio-item.engine-disabled label,
-            .radio-item.engine-disabled:hover label {
-                background-color: #eef0f2;
-                color: #a0a5ab;
-                border-color: #d5d8dc;
-                box-shadow: none;
-            }
-
-            .radio-group {
-                display: flex;
-                gap: 10px;
-            }
-
-            .radio-card {
-                display: flex;
-                align-items: center;
-                padding: 8px 16px;
-                border: 2px solid #ccc;
-                border-radius: 10px;
-                cursor: pointer;
-                transition: 0.25s;
-                user-select: none;
-                font-size: 14px;
-            }
-
-            .radio-card:hover {
-                border-color: var(--primary-color);
-                background: rgba(52, 152, 219, 0.08);
-            }
-
-            .radio-card input[type="radio"] {
-                display: none;
-            }
-
-            .radio-card input[type="radio"]:checked+span {
-                font-weight: bold;
-                color: white;
-            }
-
-            .radio-card input[type="radio"]:checked+span,
-            .radio-card input[type="radio"]:checked~span {
-                color: white;
-            }
-
-            .radio-card input[type="radio"]:checked~span,
-            .radio-card input[type="radio"]:checked {
-                background: var(--primary-color);
-            }
-
-            .radio-card input[type="radio"]:checked {
-                border-color: var(--primary-color);
-            }
-
-            .radio-card input[type="radio"]:checked~span,
-            .radio-card input[type="radio"]:checked {
-                background-color: var(--primary-color);
-            }
-
-            .radio-card input[type="radio"]:checked {
-                border-color: var(--primary-color);
-            }
-
-            .radio-card input[type="radio"]:checked~span {
-                background: var(--primary-color);
-                padding: 8px 16px;
-                border-radius: 10px;
-            }
-
-            .multi-label {
-                display: flex;
-                flex-direction: column;
-                line-height: 1.1;
-                width: 150px;
-            }
-
-            .main-title {
-                font-weight: 700;
-                font-size: 0.95rem;
-                color: var(--dark-bg);
-            }
-
-            .sub-text {
-                font-size: 0.75rem;
-                color: #7f8c8d;
-            }
-
-            /* ========== 新增：移动方式切换面板 ========== */
-            .move-mode-panel {
-                border: 1px solid #d0d7de;
-                border-radius: 10px;
-                padding: 14px 16px 16px 16px;
-                margin-top: 16px;
-                background: #f6f8fa;
-                box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.04);
-                transition: var(--transition);
-            }
-
-            .move-mode-panel .mode-header {
-                display: flex;
-                align-items: center;
-                gap: 16px;
-                margin-bottom: 12px;
-                flex-wrap: wrap;
-            }
-
-            .move-mode-panel .mode-header .mode-label {
-                font-weight: 700;
-                font-size: 0.95rem;
-                color: var(--dark-bg);
-                min-width: 70px;
-            }
-
-            .move-mode-panel .mode-tabs {
-                display: flex;
-                gap: 8px;
-                flex: 1;
-            }
-
-            .move-mode-panel .mode-tab {
-                flex: 1;
-                max-width: 140px;
-                padding: 6px 0;
-                text-align: center;
-                font-weight: 600;
-                font-size: 0.9rem;
-                border-radius: 6px;
-                border: 2px solid #d0d7de;
-                background: white;
-                color: #555;
-                cursor: pointer;
-                transition: all 0.25s ease;
-                user-select: none;
-            }
-
-            .move-mode-panel .mode-tab:hover {
-                border-color: var(--primary-color);
-                background: #eef4ff;
-            }
-
-            .move-mode-panel .mode-tab.active {
-                border-color: var(--primary-color);
-                background: var(--primary-color);
-                color: white;
-                box-shadow: 0 2px 8px rgba(52, 152, 219, 0.25);
-            }
-
-            .move-mode-panel .mode-body {
-                padding-top: 6px;
-                min-height: 52px;
-            }
-
-            .move-mode-panel .mode-body .param-row {
-                display: flex;
-                align-items: center;
-                margin-bottom: 8px;
-                flex-wrap: wrap;
-                gap: 6px;
-            }
-
-            .move-mode-panel .mode-body .param-row:last-child {
-                margin-bottom: 0;
-            }
-
-            .move-mode-panel .mode-body .param-label {
-                font-weight: 600;
-                font-size: 0.9rem;
-                color: var(--dark-bg);
-                min-width: 48px;
-            }
-
-            .move-mode-panel .mode-body input[type="text"] {
-                width: 72px;
-                padding: 5px 8px;
-                border: 1px solid #d0d7de;
-                border-radius: 4px;
-                text-align: center;
-                font-weight: 700;
-                font-size: 0.9rem;
-                background: white;
-                transition: border-color 0.2s;
-            }
-
-            .move-mode-panel .mode-body input[type="text"]:focus {
-                border-color: var(--primary-color);
-                outline: none;
-                box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.15);
-            }
-
-            .move-mode-panel .mode-body .btn-group {
-                display: flex;
-                gap: 4px;
-                margin-left: 4px;
-            }
-
-            .move-mode-panel .mode-body .btn-group button {
-                padding: 4px 10px;
-                font-size: 0.85rem;
-                min-width: 28px;
-            }
-
-            /* 隐藏区域 */
-            .mode-body .hidden-params {
-                display: none;
-            }
-
-            .mode-body .visible-params {
-                display: block;
-            }
-
-            @media (max-width: 500px) {
-                .move-mode-panel .mode-header {
-                    flex-direction: column;
-                    align-items: stretch;
-                }
-                .move-mode-panel .mode-tabs {
-                    width: 100%;
-                }
-                .move-mode-panel .mode-tab {
-                    max-width: none;
-                    flex: 1;
-                }
-            }
-            /* ===== 锁定类型 – 阵容面板内复选框行间距优化 ===== */
-            .camp-checks .checkbox-row+.checkbox-row {
-                margin-top: 10px;
-            }
-
-            /* ===== 热键文本样式：在自瞄副键3下方居中显示，红色 ===== */
-            #热键文本行 {
-                display: flex;
-                justify-content: center;
-                margin-top: 12px;
-                padding-top: 8px;
-                border-top: 1px dashed #e0e0e0;
-            }
-            #热键文本显示 {
-                color: #e74c3c;
-                font-weight: 700;
-                font-size: 1.05rem;
-                text-align: center;
-                letter-spacing: 0.5px;
-                text-shadow: 0 0 6px rgba(231, 76, 60, 0.15);
-                transition: all 0.3s ease;
-                padding: 2px 12px;
-                border-radius: 4px;
-                background: rgba(231, 76, 60, 0.04);
-            }
-        </style>
+:root {
+    color-scheme: light;
+    --primary-color: #0b6fae;
+    --secondary-color: #9adcf5;
+    --accent-color: #c33b47;
+    --dark-bg: #062b46;
+    --card-bg: #fcfeff;
+    --text-color: #163c56;
+    --muted: #526f83;
+    --line: #d8e7f1;
+    --track: #d6e8f5;
+    --border-radius: 14px;
+    --shadow: 0 3px 16px #0c4d760d;
+    --transition: background .16s ease, border-color .16s ease, box-shadow .16s ease;
+
+    --page-bg: #eaf5fc;
+    --on-primary: #ffffff;
+    --heading-color: #123d5b;
+    --control-bg: #f2f8fc;
+    --control-border: #7090a8;
+    --card-border: #c7ddeb;
+    --soft-bg: #e1f1fb;
+    --selected-bg: #dff0fb;
+    --hover-color: #07598d;
+    --focus-color: #0b6fae;
+    --header-muted: #b5d9eb;
+    --header-light: #9adcf5;
+    --toggle-off: #7090a8;
+    --disabled-bg: #edf3f7;
+    --disabled-text: #91a8b8;
+    --delete-bg: #fff1f2;
+    --header-gradient: linear-gradient(115deg, #062b46 0%, #083d60 56%, #0b4f79 100%);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 70px; }
+body {
+    margin: 0; padding: 18px; min-height: 100vh; min-height: 100dvh;
+    background: var(--page-bg); color: var(--text-color);
+    font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    font-size: 13px; line-height: 1.45;
+}
+button, input, select { font: inherit; }
+button, a, input, select, label { -webkit-tap-highlight-color: transparent; }
+button, select { touch-action: manipulation; }
+button { cursor: pointer; }
+:focus-visible { outline: 3px solid var(--focus-color); outline-offset: 3px; }
+.container { width: 100%; max-width: 1920px; margin: 0 auto; }
+.app-header {
+    display: flex; align-items: center; justify-content: space-between; gap: 20px;
+    min-height: 72px; padding: 14px 20px; margin-bottom: 14px;
+    background: var(--header-gradient); border: 1px solid #9adcf533; border-radius: 16px; color: var(--on-primary);
+}
+.brand { display: flex; align-items: center; gap: 13px; }
+.brand-mark {
+    width: 38px; height: 38px; border-radius: 11px; flex: 0 0 auto;
+    display: grid; place-items: center; background: #9adcf51f; color: var(--header-light);
+}
+.brand-mark svg { width: 24px; height: 24px; }
+.eyebrow { color: var(--header-muted); font-size: 9px; font-weight: 700; letter-spacing: 2px; }
+header h1 { font-size: 19px; font-weight: 650; letter-spacing: .5px; line-height: 1.4; }
+.header-tools { display: flex; align-items: center; gap: 20px; }
+.precision-hint { color: var(--header-muted); font-size: 12px; }
+#推理帧率 {
+    padding: 8px 13px; color: var(--header-light); background: #9adcf51a;
+    border: 1px solid #9adcf54a; border-radius: 8px; font-weight: 600;
+    font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.section-nav { display: none; }
+.config-panel {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px;
+    min-height: calc(100vh - 122px); min-height: calc(100dvh - 122px);
+}
+.panel-column { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.config-group {
+    min-width: 0; flex: 1 1 auto; padding: 15px 16px; background: var(--card-bg);
+    border: 1px solid var(--card-border); border-radius: var(--border-radius); box-shadow: var(--shadow);
+    display: flex; flex-direction: column; scroll-margin-top: 72px;
+}
+.group-title {
+    color: var(--heading-color); font-size: 14px; font-weight: 650; line-height: 22px;
+    padding-bottom: 11px; margin-bottom: 12px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 9px;
+}
+.group-title::before {
+    content: attr(data-index); display: grid; place-items: center; width: 22px; height: 22px;
+    border-radius: 6px; background: var(--soft-bg); color: var(--primary-color);
+    font-size: 10px; font-variant-numeric: tabular-nums; font-weight: 700;
+}
+.control-item { min-width: 0; }
+.control-row { display: flex; align-items: center; gap: 8px; min-width: 0; margin-bottom: 9px; min-height: 30px; }
+.control-row:last-child { margin-bottom: 0; }
+.control-label { flex: 0 0 82px; width: 82px; color: var(--text-color); font-weight: 500; font-size: 12px; }
+.multi-label { line-height: 1.35; }
+.main-title { color: var(--heading-color); font-size: 12px; font-weight: 600; }
+.sub-text { color: var(--muted); font-size: 10px; line-height: 1.5; }
+.control-unit { margin-left: 4px; font-size: 9px; color: var(--muted); font-weight: 400; }
+.slider-container { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+input[type="range"] { -webkit-appearance: none; appearance: none; min-width: 28px; width: 100%; flex: 1; height: 30px; background: transparent; border: 0; cursor: pointer; padding: 0; }
+input[type="range"]::-webkit-slider-runnable-track {
+    height: 4px; border-radius: 20px;
+    background: linear-gradient(to right, var(--primary-color) 0 var(--range-progress, 50%), var(--track) var(--range-progress, 50%) 100%);
+}
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 16px; height: 16px; margin-top: -6px;
+    border: 3px solid var(--on-primary); border-radius: 50%; background: var(--primary-color);
+    box-shadow: 0 0 0 1px #0b6fae55, 0 2px 4px #0b6fae26;
+}
+input[type="range"]::-moz-range-track { height: 4px; background: var(--track); border-radius: 20px; }
+input[type="range"]::-moz-range-progress { height: 4px; background: var(--primary-color); }
+input[type="range"]::-moz-range-thumb { width: 12px; height: 12px; border: 3px solid var(--on-primary); border-radius: 50%; background: var(--primary-color); box-shadow: 0 0 0 1px #0b6fae55; }
+.value-display { display: none; }
+.precision-control { display: grid; grid-template-columns: 24px 45px 24px; flex: 0 0 auto; border: 1px solid var(--control-border); border-radius: 7px; overflow: hidden; background: var(--control-bg); }
+.precision-control:focus-within { border-color: var(--primary-color); box-shadow: 0 0 0 2px #0b6fae24; }
+.precision-control button { border: 0; border-radius: 0; background: transparent; color: var(--muted); padding: 0; min-height: 28px; font-size: 15px; font-weight: 400; box-shadow: none; }
+.precision-control button:hover { color: var(--primary-color); background: var(--soft-bg); }
+.precision-control input { min-width: 0; width: 100%; padding: 0; border: 0; outline: none; text-align: center; color: var(--text-color); background: transparent; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; appearance: textfield; }
+input::-webkit-inner-spin-button, input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="text"] { width: 66px; min-width: 0; height: 30px; padding: 4px 7px; border: 1px solid var(--control-border); border-radius: 7px; background: var(--control-bg); color: var(--text-color); text-align: center; font-weight: 600; font-variant-numeric: tabular-nums; }
+input[type="text"]:focus { border-color: var(--primary-color); }
+.btn-group { display: flex; gap: 4px; flex: 0 0 auto; }
+.btn-group button { width: 29px; min-height: 30px; padding: 0; background: var(--soft-bg); color: var(--muted); border: 1px solid var(--control-border); font-size: 15px; font-weight: 400; }
+button { border: 1px solid transparent; border-radius: 7px; background: var(--primary-color); color: var(--on-primary); padding: 7px 12px; font-weight: 600; transition: var(--transition); }
+button:hover { background: var(--hover-color); }
+button:disabled { cursor: not-allowed; opacity: .5; }
+.btn-group button:hover { background: var(--selected-bg); color: var(--primary-color); border-color: var(--primary-color); }
+.select-container { min-width: 0; }
+.control-row .select-container { flex: 1; }
+select {
+    appearance: none; -webkit-appearance: none; width: 100%; min-width: 0; height: 32px;
+    padding: 5px 26px 5px 10px; color: var(--text-color); border: 1px solid var(--control-border);
+    border-radius: 7px; background-color: var(--control-bg);
+    background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+    background-position: calc(100% - 13px) 14px, calc(100% - 9px) 14px;
+    background-size: 4px 4px; background-repeat: no-repeat;
+}
+select:disabled { opacity: .65; }
+.special-move-row { margin-top: 0; min-height: 42px; }
+.special-toggle { position: relative; display: inline-flex; align-items: center; gap: 6px; min-height: 30px; cursor: pointer; user-select: none; flex: 1; }
+.special-toggle input[type="checkbox"] { position: absolute; display: block; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.special-toggle .slider { width: 33px; height: 19px; flex: 0 0 auto; border-radius: 20px; background: var(--toggle-off); position: relative; transition: var(--transition); }
+.special-toggle .slider::before { content: ""; width: 13px; height: 13px; position: absolute; top: 3px; left: 3px; background: var(--on-primary); border-radius: 50%; box-shadow: 0 1px 3px #083c6526; transition: transform .16s ease; }
+.special-toggle input:checked + .slider { background: var(--primary-color); }
+.special-toggle input:checked + .slider::before { transform: translateX(14px); }
+.special-toggle input:focus-visible + .slider { outline: 3px solid var(--focus-color); outline-offset: 3px; }
+.toggle-text { font-size: 11px; color: var(--muted); }
+.move-mode-panel { border: 1px solid var(--card-border); border-radius: 9px; padding: 11px; margin-top: 12px; background: var(--control-bg); }
+.mode-header { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+.mode-label { font-size: 11px; color: var(--muted); flex: 0 0 auto; }
+.mode-tabs { display: flex; flex: 1; min-width: 0; padding: 2px; background: var(--soft-bg); border-radius: 7px; gap: 2px; }
+.mode-tab { flex: 1; min-width: 0; background: transparent; color: var(--muted); padding: 5px 4px; font-size: 11px; border-radius: 5px; border: 0; white-space: nowrap; }
+.mode-tab:hover { background: var(--selected-bg); }
+.mode-tab.active { background: var(--on-primary); color: var(--primary-color); box-shadow: 0 1px 4px #083c650a; }
+.param-row { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; }
+.param-row:last-child { margin-bottom: 0; }
+.param-label { flex: 0 0 40px; color: var(--muted); font-size: 12px; }
+.param-row input[type="text"] { flex: 1; width: 70px; }
+.hidden-params { display: none; }
+.visible-params { display: block; }
+.checkbox-container { margin-top: 2px; }
+.checkbox-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; }
+.checkbox-row + .checkbox-row { margin-top: 5px; }
+.checkbox-item { position: relative; min-width: 0; }
+.checkbox-item input[type="checkbox"] { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+.checkbox-item label { display: grid; place-items: center; height: 29px; background: var(--on-primary); border: 1px solid var(--control-border); border-radius: 6px; font-size: 12px; color: var(--muted); font-weight: 600; }
+.checkbox-item input:checked + label { background: var(--primary-color); color: var(--on-primary); border-color: var(--primary-color); }
+.checkbox-item input:focus-visible + label { outline: 3px solid var(--focus-color); outline-offset: 2px; }
+#阵营切换面板 { margin-top: 0; margin-bottom: 12px; }
+.radio-container { display: flex; gap: 5px; margin: 11px 0 8px; }
+.radio-item { flex: 1; min-width: 0; position: relative; }
+.radio-item input { position: absolute; opacity: 0; inset: 0; width: 100%; height: 100%; cursor: pointer; }
+.radio-item label { display: flex; align-items: center; justify-content: center; min-height: 31px; padding: 4px; border: 1px solid var(--control-border); border-radius: 7px; color: var(--muted); font-size: 11px; font-weight: 600; white-space: nowrap; }
+.radio-item input:checked + label { background: var(--selected-bg); border-color: var(--primary-color); color: var(--primary-color); }
+.radio-item input:focus-visible + label { outline: 3px solid var(--focus-color); outline-offset: 2px; }
+.radio-item.engine-disabled label { background: var(--disabled-bg); border-color: var(--line); color: var(--disabled-text); }
+.radio-item.engine-disabled input { cursor: not-allowed; }
+.radio-group { display: flex; gap: 4px; min-width: 0; flex: 1; }
+.radio-card { min-width: 0; flex: 1; position: relative; cursor: pointer; overflow: hidden; border: 1px solid var(--control-border); border-radius: 6px; }
+.radio-card input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+.radio-card span { display: grid; place-items: center; min-height: 30px; padding: 5px 3px; color: var(--muted); font-size: 10px; font-weight: 500; white-space: nowrap; }
+.radio-card input:checked + span { background: var(--selected-bg); color: var(--primary-color); font-weight: 600; }
+.radio-card:focus-within { outline: 3px solid var(--focus-color); outline-offset: 2px; }
+#热键文本行 { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
+#热键文本显示 { display: block; width: 100%; padding: 6px 8px; border-radius: 6px; color: var(--primary-color); background: var(--soft-bg); font-size: 10px; line-height: 1.5; text-align: center; overflow-wrap: anywhere; }
+.model-tools { display: flex; align-items: center; gap: 7px; margin-top: 8px; }
+.model-tools button { flex: 0 0 auto; background: var(--soft-bg); color: var(--primary-color); padding: 5px 9px; font-size: 11px; }
+#模型列表状态 { color: var(--muted); font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
+.model-help { color: var(--muted); font-size: 10px; margin: 4px 0 10px; }
+.model-help summary { cursor: pointer; padding: 4px 0; }
+.model-help p { line-height: 1.7; padding: 5px 0; }
+.config-storage { display: flex; flex-direction: column; gap: 9px; flex: 1; min-height: 150px; }
+.save-config-btn { width: 100%; min-height: 32px; font-size: 12px; }
+#配置列表 { flex: 1; min-height: 82px; max-height: 260px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--control-bg); padding: 6px; scrollbar-width: thin; }
+.config-entry { display: block; width: 100%; padding: 7px 9px; margin-bottom: 5px; text-align: left; background: var(--on-primary); color: var(--muted); font-size: 12px; border: 1px solid var(--card-border); overflow-wrap: anywhere; }
+.config-entry:last-child { margin-bottom: 0; }
+.config-entry:hover { color: var(--primary-color); background: var(--control-bg); }
+.config-entry.selected { color: var(--primary-color); background: var(--selected-bg); border-color: var(--primary-color); }
+.empty-config { padding: 18px 0; text-align: center; font-size: 11px; color: var(--muted); }
+.config-actions { display: flex; gap: 7px; }
+.config-actions button { flex: 1; background: var(--soft-bg); color: var(--primary-color); min-height: 32px; font-size: 11px; }
+.config-actions .delete-config-btn { background: var(--delete-bg); color: var(--accent-color); }
+.storage-hint { font-size: 10px; color: var(--muted); text-align: center; }
+@media (min-width: 1101px) {
+    .config-panel { grid-template-rows: auto auto; align-content: stretch; }
+    .panel-column { display: contents; }
+    .panel-column:nth-child(1) > .config-group { grid-column: 1; }
+    .panel-column:nth-child(2) > .config-group { grid-column: 2; }
+    .panel-column:nth-child(3) > .config-group { grid-column: 3; }
+    .panel-column:nth-child(4) > .config-group { grid-column: 4; }
+    .panel-column > .config-group:first-child { grid-row: 1; }
+    .panel-column > .config-group:last-child { grid-row: 2; }
+    .target-card .control-row:last-child { margin-bottom: 0; }
+}
+@media (min-width: 1500px) and (min-height: 900px) {
+    body { padding: 22px; font-size: 14px; }
+    .config-panel { min-height: calc(100dvh - 130px); }
+    .config-group { padding: 20px; }
+    .group-title { font-size: 16px; padding-bottom: 14px; margin-bottom: 17px; }
+    .control-row { min-height: 36px; margin-bottom: 13px; }
+    .control-label { width: 104px; flex-basis: 104px; font-size: 13px; }
+    .main-title { font-size: 13px; }
+    .sub-text { font-size: 11px; }
+    .precision-control { grid-template-columns: 28px 51px 28px; }
+    .precision-control button { min-height: 33px; }
+    .precision-control input { font-size: 13px; }
+    input[type="text"], select, .btn-group button { height: 35px; }
+    .move-mode-panel { padding: 14px; }
+    .mode-tab { padding: 7px 5px; font-size: 12px; }
+    .checkbox-item label { height: 35px; }
+    .radio-item label { min-height: 36px; font-size: 12px; }
+    #配置列表 { max-height: none; }
+    .target-card .control-row { margin-bottom: 11px; }
+}
+@media (min-width: 1101px) and (max-height: 780px) {
+    body { padding: 12px; }
+    .app-header { min-height: 61px; padding: 10px 16px; margin-bottom: 10px; }
+    .config-panel { gap: 10px; min-height: calc(100dvh - 96px); }
+    .panel-column { gap: 10px; }
+    .config-group { padding: 12px; }
+    .group-title { padding-bottom: 8px; margin-bottom: 9px; }
+    .control-row { margin-bottom: 5px; }
+    .special-move-row { min-height: 39px; }
+    .move-mode-panel { margin-top: 8px; padding: 9px; }
+    .sub-text { font-size: 9px; }
+    .control-label { width: 77px; flex-basis: 77px; }
+    .special-move-row .control-label { width: 112px; flex-basis: 112px; }
+    .slider-container { gap: 6px; }
+    .target-card { padding-top: 12px; padding-bottom: 10px; }
+    .target-card .control-row { margin-bottom: 1px; }
+}
+@media (min-width: 1101px) and (max-height: 730px) {
+    body { padding: 10px; }
+    .app-header { min-height: 57px; padding: 8px 14px; margin-bottom: 8px; }
+    .config-panel { gap: 8px; min-height: calc(100dvh - 86px); }
+    .panel-column { gap: 8px; }
+    .config-group { padding: 10px; }
+    .group-title { padding-bottom: 7px; margin-bottom: 7px; }
+    .control-row { margin-bottom: 4px; }
+    .special-move-row { min-height: 36px; }
+    .move-mode-panel { margin-top: 6px; padding: 8px; }
+    .config-storage { gap: 7px; min-height: 130px; }
+    #配置列表 { min-height: 64px; }
+    .target-card { padding-top: 10px; padding-bottom: 6px; }
+}
+@media (max-width: 1100px) {
+    .config-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); min-height: 0; }
+    .panel-column { height: auto; }
+    .config-group { flex: 0 0 auto; }
+    .control-row { margin-bottom: 11px; }
+    .control-label { width: 105px; flex-basis: 105px; }
+    .config-storage { min-height: 240px; }
+}
+@media (max-width: 600px) {
+    html { scroll-padding-top: 78px; }
+    body { padding: 12px 10px 24px; }
+    .app-header { padding: 13px 14px; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; border-radius: 13px; }
+    .brand-mark { width: 32px; height: 32px; border-radius: 9px; }
+    .brand { gap: 9px; }
+    .eyebrow { font-size: 8px; }
+    header h1 { font-size: 17px; }
+    .header-tools { gap: 0; }
+    .precision-hint { display: none; }
+    #推理帧率 { font-size: 10px; padding: 6px 8px; }
+    .section-nav {
+        display: flex; position: sticky; top: 8px; z-index: 20; gap: 5px;
+        padding: 7px; margin-bottom: 12px; border: 1px solid var(--card-border);
+        border-radius: 11px; background: #f0f8fef2; backdrop-filter: blur(12px);
+        overflow-x: auto; scrollbar-width: none;
+    }
+    .section-nav::-webkit-scrollbar { display: none; }
+    .section-nav a { flex: 0 0 auto; text-decoration: none; padding: 9px 11px; border-radius: 7px; background: var(--on-primary); color: var(--muted); font-size: 12px; }
+    .section-nav a:focus, .section-nav a:hover { background: var(--selected-bg); color: var(--primary-color); }
+    .config-panel { display: flex; flex-direction: column; gap: 12px; }
+    .panel-column { display: contents; }
+    .config-group { padding: 16px; border-radius: 12px; }
+    .group-title { font-size: 15px; margin-bottom: 15px; }
+    .control-row { margin-bottom: 14px; min-height: 44px; gap: 8px; }
+    .control-label { flex-basis: 101px; width: 101px; font-size: 13px; }
+    .main-title { font-size: 13px; }
+    .sub-text { font-size: 11px; }
+    .control-unit { font-size: 11px; }
+    .control-row:has(.slider-container) { display: block; }
+    .control-row:has(.slider-container) .control-label { display: block; width: 100%; margin-bottom: 3px; }
+    .control-row:has(.slider-container) .multi-label .sub-text { display: inline; margin-right: 7px; }
+    .slider-container { gap: 12px; width: 100%; }
+    input[type="range"] { height: 44px; }
+    input[type="range"]::-webkit-slider-thumb { width: 22px; height: 22px; margin-top: -9px; }
+    input[type="range"]::-moz-range-thumb { width: 18px; height: 18px; }
+    .precision-control { grid-template-columns: 44px 58px 44px; }
+    .precision-control button { min-height: 44px; font-size: 20px; }
+    .precision-control input, input[type="text"], select { font-size: 16px; }
+    input[type="text"] { width: 64px; height: 44px; }
+    select { height: 44px; background-position: calc(100% - 13px) 20px, calc(100% - 9px) 20px; padding-left: 9px; }
+    .btn-group button { width: 44px; min-height: 44px; font-size: 20px; }
+    .control-row:has(> input[type="text"]) .control-label { flex: 1; min-width: 0; }
+    .special-toggle { min-height: 44px; gap: 8px; }
+    .special-toggle .slider { width: 39px; height: 23px; }
+    .special-toggle .slider::before { width: 17px; height: 17px; }
+    .special-toggle input:checked + .slider::before { transform: translateX(16px); }
+    .toggle-text { font-size: 12px; }
+    .move-mode-panel { padding: 12px; margin-top: 15px; }
+    .mode-header { flex-wrap: wrap; }
+    .mode-label { width: 100%; font-size: 12px; }
+    .mode-tabs { flex-basis: 100%; }
+    .mode-tab { min-height: 42px; font-size: 13px; }
+    .param-label { flex-basis: 39px; }
+    .param-row input[type="text"] { width: 66px; }
+    .param-row { margin-bottom: 9px; }
+    .checkbox-row { gap: 7px; }
+    .checkbox-row + .checkbox-row { margin-top: 7px; }
+    .checkbox-item label { height: 44px; font-size: 14px; }
+    .radio-container { gap: 6px; }
+    .radio-item label { min-height: 44px; font-size: 12px; }
+    .radio-card span { min-height: 44px; font-size: 11px; }
+    .control-row:has(.radio-group) { display: block; }
+    .control-row:has(.radio-group) .control-label { display: block; width: 100%; margin-bottom: 7px; }
+    .model-tools { gap: 10px; }
+    .model-tools button { min-height: 44px; font-size: 13px; padding: 7px 12px; }
+    #模型列表状态 { font-size: 11px; }
+    .model-help { font-size: 12px; }
+    .model-help summary { padding: 11px 0; }
+    #热键文本显示 { min-height: 34px; font-size: 11px; }
+    .save-config-btn, .config-actions button, .config-entry { min-height: 44px; font-size: 13px; }
+    .config-storage { min-height: 270px; }
+    #配置列表 { max-height: 240px; }
+    .storage-hint { font-size: 11px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { transition: none !important; }
+}
+.group-title { font-size:15px; font-weight:700; letter-spacing:.2px; }
+.main-title, .control-label { font-weight:600; }
+.precision-control input, input[type="text"] { font-weight:650; }
+button, .btn-group button, .config-entry, .radio-item label, .radio-card, .section-nav a { border-radius:18px; }
+.precision-control { border-radius:18px; background:var(--on-primary); border-color:var(--control-border); }
+.precision-control button { background:var(--soft-bg); color:var(--primary-color); font-weight:500; box-shadow:inset 0 0 0 2px var(--on-primary); }
+.precision-control button:first-child { border-radius:18px 0 0 18px; }
+.precision-control button:last-child { border-radius:0 18px 18px 0; }
+.btn-group button { color:var(--primary-color); background:var(--on-primary); box-shadow:0 2px 4px #0b6fae12; }
+input[type="text"] { border-radius:18px; background:var(--on-primary); }
+.save-config-btn { box-shadow:0 3px 8px #0b6fae26; }
+.mode-tabs, .mode-tab, .checkbox-item label { border-radius:15px; }
+.mode-tab.active { background:var(--primary-color); color:var(--on-primary); }
+.radio-item input:checked + label { background:var(--selected-bg); box-shadow:inset 0 0 0 1px var(--primary-color); }
+.radio-card input:checked + span { background:var(--primary-color); color:var(--on-primary); }
+.config-entry { background:var(--on-primary); }
+.config-actions .delete-config-btn { box-shadow:none; }
+input[type="range"]::-webkit-slider-runnable-track { height:6px; border-radius:20px; }
+input[type="range"]::-webkit-slider-thumb { width:20px; height:20px; margin-top:-7px; border:4px solid var(--on-primary); border-radius:50%; box-shadow:0 0 0 1px var(--primary-color),0 3px 7px #0b6fae26; }
+input[type="range"]::-moz-range-track, input[type="range"]::-moz-range-progress { height:6px; border-radius:20px; }
+input[type="range"]::-moz-range-thumb { width:12px; height:12px; border:4px solid var(--on-primary); box-shadow:0 0 0 1px var(--primary-color),0 3px 7px #0b6fae26; }
+@media (min-width:1500px) and (min-height:900px) { .group-title { font-size:17px; } }
+@media (max-width:600px) { .group-title { font-size:15px; } input[type="range"]::-webkit-slider-thumb { width:24px; height:24px; margin-top:-9px; } input[type="range"]::-moz-range-thumb { width:16px; height:16px; } }
+
+</style>
     </head>
 
     <body>
         <div class="container">
-            <header>
-                <h1>视觉识别系统</h1>
-                <p>高级配置面板 - 专业级游戏视觉辅助解决方案</p>
-                <div id="推理帧率">当前推理速度 -1 FPS</div>
+            <header class="app-header">
+                <div class="brand">
+                    <div class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 3H4a1 1 0 0 0-1 1v4m13-5h4a1 1 0 0 1 1 1v4M3 16v4a1 1 0 0 0 1 1h4m8 0h4a1 1 0 0 0 1-1v-4"/><circle cx="12" cy="12" r="4"/><path d="M12 6v3m0 6v3M6 12h3m6 0h3"/></svg></div>
+                    <div><div class="eyebrow">SAGA / CONTROL PANEL</div><h1>视觉识别系统</h1></div>
+                </div>
+                <div class="header-tools"><span class="precision-hint">拖动粗调 · 数字 / ± 精调</span><div id="推理帧率" aria-live="polite">正在读取推理状态…</div></div>
             </header>
+            <nav class="section-nav" aria-label="设置分区">
+                <a href="#panel-move">移动</a><a href="#panel-target">锁定</a><a href="#panel-hotkeys">热键</a><a href="#panel-crosshair">追踪</a><a href="#panel-activation">激活</a><a href="#panel-model">模型</a><a href="#panel-types">阵容</a><a href="#panel-storage">配置</a>
+            </nav>
             <div class="config-panel">
                 <!-- ===================== 移动设置 ===================== -->
-                <div class="config-group">
-                    <h3 class="group-title">移动设置</h3>
+                <div class="panel-column">
+<section class="config-group move-card" id="panel-move" aria-labelledby="heading-move">
+                    <h3 class="group-title" id="heading-move" data-index="01">移动设置</h3>
                     <div class="control-item">
                         <!-- 识别精度 -->
                         <div class="control-row">
@@ -982,8 +460,8 @@
                             <div class="mode-header">
                                 <span class="mode-label">移动方式</span>
                                 <div class="mode-tabs">
-                                    <div class="mode-tab active" data-mode="1" id="tab移动系数">移动系数</div>
-                                    <div class="mode-tab" data-mode="2" id="tabPID移动">PID移动</div>
+                                    <button type="button" class="mode-tab active" data-mode="1" id="tab移动系数">移动系数</button>
+                                    <button type="button" class="mode-tab" data-mode="2" id="tabPID移动">PID移动</button>
                                 </div>
                             </div>
                             <div class="mode-body" id="移动方式参数体">
@@ -1018,11 +496,104 @@
                             </div>
                         </div>
                     </div>
+                </section>
+<section class="config-group types-card" id="panel-types" aria-labelledby="heading-types">
+                    <h3 class="group-title" id="heading-types" data-index="02">锁定类型</h3>
+                    <div class="move-mode-panel" id="阵营切换面板">
+                        <div class="mode-header">
+                            <span class="mode-label">目前阵容</span>
+                            <div class="mode-tabs">
+                                <button type="button" class="mode-tab active" data-camp="0" id="tab默认">默认</button>
+                                <button type="button" class="mode-tab" data-camp="1" id="tab阵营1">阵营1</button>
+                                <button type="button" class="mode-tab" data-camp="2" id="tab阵营2">阵营2</button>
+                            </div>
+                        </div>
+                        <div class="mode-body">
+                            <div class="checkbox-container" id="阵营复选框容器">
+                                <div id="camp0_checks" class="camp-checks" style="display:block;">
+                                    <div class="checkbox-row">
+                                        <div class="checkbox-item"><input type="checkbox" id="defaultType0" value="0"><label for="defaultType0">0</label></div>
+                                        <div class="checkbox-item"><input type="checkbox" id="defaultType1" value="1"><label for="defaultType1">1</label></div>
+                                        <div class="checkbox-item"><input type="checkbox" id="defaultType2" value="2"><label for="defaultType2">2</label></div>
+                                        <div class="checkbox-item"><input type="checkbox" id="defaultType3" value="3"><label for="defaultType3">3</label></div>
+                                        <div class="checkbox-item"><input type="checkbox" id="defaultType4" value="4"><label for="defaultType4">4</label></div>
+                                    </div>
+                                    <div class="checkbox-row">
+                                        <div class="checkbox-item"><input type="checkbox" id="defaultType5" value="5"><label for="defaultType5">5</label></div>
+                                        <div class="checkbox-item"><input type="checkbox" id="defaultType6" value="6"><label for="defaultType6">6</label></div>
+                                        <div class="checkbox-item"><input type="checkbox" id="defaultType7" value="7"><label for="defaultType7">7</label></div>
+                                        <div class="checkbox-item"><input type="checkbox" id="defaultType8" value="8"><label for="defaultType8">8</label></div>
+                                        <div class="checkbox-item"><input type="checkbox" id="defaultType9" value="9"><label for="defaultType9">9</label></div>
+                                    </div>
+                                </div>
+                                <div id="camp1_checks" class="camp-checks" style="display:none;">
+                                    <div class="checkbox-row">
+                                        <div class="checkbox-item"><input type="checkbox" id="team1Type0" value="0"><label for="team1Type0">0</label></div>
+                                        <div class="checkbox-item"><input type="checkbox" id="team1Type1" value="1"><label for="team1Type1">1</label></div>
+                                        <div class="checkbox-item"><input type="checkbox" id="team1Type2" value="2"><label for="team1Type2">2</label></div>
+                                        <div class="checkbox-item"><input type="checkbox" id="team1Type3" value="3"><label for="team1Type3">3</label></div>
+                                        <div class="checkbox-item"><input type="checkbox" id="team1Type4" value="4"><label for="team1Type4">4</label></div>
+                                    </div>
+                                    <div class="checkbox-row">
+                                        <div class="checkbox-item"><input type="checkbox" id="team1Type5" value="5"><label for="team1Type5">5</label></div>
+                                        <div class="checkbox-item"><input type="checkbox" id="team1Type6" value="6"><label for="team1Type6">6</label></div>
+                                        <div class="checkbox-item"><input type="checkbox" id="team1Type7" value="7"><label for="team1Type7">7</label></div>
+                                        <div class="checkbox-item"><input type="checkbox" id="team1Type8" value="8"><label for="team1Type8">8</label></div>
+                                        <div class="checkbox-item"><input type="checkbox" id="team1Type9" value="9"><label for="team1Type9">9</label></div>
+                                    </div>
+                                </div>
+                                <div id="camp2_checks" class="camp-checks" style="display:none;">
+                                    <div class="checkbox-row">
+                                        <div class="checkbox-item"><input type="checkbox" id="team2Type0" value="0"><label for="team2Type0">0</label></div>
+                                        <div class="checkbox-item"><input type="checkbox" id="team2Type1" value="1"><label for="team2Type1">1</label></div>
+                                        <div class="checkbox-item"><input type="checkbox" id="team2Type2" value="2"><label for="team2Type2">2</label></div>
+                                        <div class="checkbox-item"><input type="checkbox" id="team2Type3" value="3"><label for="team2Type3">3</label></div>
+                                        <div class="checkbox-item"><input type="checkbox" id="team2Type4" value="4"><label for="team2Type4">4</label></div>
+                                    </div>
+                                    <div class="checkbox-row">
+                                        <div class="checkbox-item"><input type="checkbox" id="team2Type5" value="5"><label for="team2Type5">5</label></div>
+                                        <div class="checkbox-item"><input type="checkbox" id="team2Type6" value="6"><label for="team2Type6">6</label></div>
+                                        <div class="checkbox-item"><input type="checkbox" id="team2Type7" value="7"><label for="team2Type7">7</label></div>
+                                        <div class="checkbox-item"><input type="checkbox" id="team2Type8" value="8"><label for="team2Type8">8</label></div>
+                                        <div class="checkbox-item"><input type="checkbox" id="team2Type9" value="9"><label for="team2Type9">9</label></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="control-item">
+                        <div class="control-row">
+                            <span class="control-label">锁定频率:</span>
+                            <div class="slider-container">
+                                <input type="range" id="锁定频率" min="50" max="1000" value="100" step="1">
+                                <span class="value-display" id="锁定频率显示">100ms</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="control-item">
+                        <div class="control-row">
+                            <span class="control-label">延时频率:</span>
+                            <div class="slider-container">
+                                <input type="range" id="延时频率" min="0" max="3000" value="200" step="1">
+                                <span class="value-display" id="延时频率显示">200ms</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="control-item">
+                        <div class="control-row">
+                            <span class="control-label">移动延时:</span>
+                            <div class="radio-group" id="移动延时">
+                                <label class="radio-card"><input type="radio" name="moveDelay" value="5"><span>人类极限</span></label>
+                                <label class="radio-card"><input type="radio" name="moveDelay" value="3"><span>光速移动</span></label>
+                                <label class="radio-card"><input type="radio" name="moveDelay" value="1"><span>一帧拉枪</span></label>
+                            </div>
+                        </div>
+                    </div>
+                </section>
                 </div>
-
-                <!-- ===================== 目标锁定 ===================== -->
-                <div class="config-group">
-                    <h3 class="group-title">目标锁定</h3>
+                <div class="panel-column">
+<section class="config-group target-card" id="panel-target" aria-labelledby="heading-target">
+                    <h3 class="group-title" id="heading-target" data-index="03">目标锁定</h3>
                     <div class="control-item">
                         <div class="control-row">
                             <div class="control-label multi-label">
@@ -1104,11 +675,244 @@
                             </div>
                         </div>
                     </div>
+                </section>
+<section class="config-group storage-card" id="panel-storage" aria-labelledby="heading-storage">
+                    <h3 class="group-title" id="heading-storage" data-index="04">配置保存</h3>
+                    <div class="config-storage">
+                        <button class="save-config-btn" onclick="保存配置()">保存配置</button>
+                        <div id="配置列表" aria-label="已保存的配置"><p class="empty-config">暂无保存配置</p></div>
+                        <div class="config-actions"><button type="button" onclick="导入选中配置()">载入选中配置</button><button type="button" class="delete-config-btn" onclick="删除配置()">删除</button></div>
+                        <p class="storage-hint">先选配置，再载入 · 双击也可载入</p>
+                    </div>
+                </section>
                 </div>
-
-                <!-- ===================== 热键设置 ===================== -->
-                <div class="config-group">
-                    <h3 class="group-title">热键设置</h3>
+                <div class="panel-column">
+<section class="config-group model-card" id="panel-model" aria-labelledby="heading-model">
+                    <h3 class="group-title" id="heading-model" data-index="05">游戏模型</h3>
+                    <div class="select-container">
+                        <select id="模型名称" name="模型名称" disabled>
+                            <option value="">正在读取模型…</option>
+                        </select>
+                    </div>
+                    <div class="model-tools"><button type="button" onclick="刷新模型列表()">刷新模型</button><span id="模型列表状态" aria-live="polite"></span></div>
+                    <div class="radio-container">
+                        <div class="radio-item engine-disabled">
+                            <input type="radio" id="NCNN" name="推理引擎" value="NCNN" disabled>
+                            <label for="NCNN">NCNN</label>
+                        </div>
+                        <div class="radio-item engine-disabled">
+                            <input type="radio" id="ONNX" name="推理引擎" value="ONNX" disabled>
+                            <label for="ONNX">ONNX</label>
+                        </div>
+                        <div class="radio-item engine-disabled">
+                            <input type="radio" id="TensorRT" name="推理引擎" value="TensorRT" disabled>
+                            <label for="TensorRT" title="TensorRT（N卡专用推理）">TensorRT</label>
+                        </div>
+                    </div>
+                    <details class="model-help"><summary>模型文件与引擎说明</summary><p>同名模型放在程序旁的“模型数据”文件夹：有配对的.param/.bin可选NCNN，有.onnx可选ONNX，有.trt可选TensorRT（N卡专用）。缺少对应文件的按钮会变灰。<br>TensorRT模型请先在本机转换；添加或删除文件后点击“刷新模型”。</p></details>
+                    <div class="control-row">
+                        <span class="control-label">扳机热键1:</span>
+                        <div class="select-container">
+                            <select id="扳机热键1" name="扳机热键1">
+                                <option value="0">空白</option>
+                                <option value="1">鼠标左键</option>
+                                <option value="2">鼠标右键</option>
+                                <option value="3">鼠标中键</option>
+                                <option value="4" disabled>旧选项（请重新选择）</option>
+                                <option value="5">鼠标侧键1</option>
+                                <option value="6">鼠标侧键2</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="control-row">
+                        <span class="control-label">扳机热键2:</span>
+                        <div class="select-container">
+                            <select id="扳机热键2" name="扳机热键2">
+                                <option value="0">空白</option>
+                                <option value="1">鼠标左键</option>
+                                <option value="2">鼠标右键</option>
+                                <option value="3">鼠标中键</option>
+                                <option value="4" disabled>旧选项（请重新选择）</option>
+                                <option value="5">鼠标侧键1</option>
+                                <option value="6">鼠标侧键2</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="control-row">
+                        <span class="control-label">扳机热键3:</span>
+                        <div class="select-container">
+                            <select id="扳机热键3" name="扳机热键3">
+                                <option value="0">空白</option>
+                                <option value="1">鼠标左键</option>
+                                <option value="2">鼠标右键</option>
+                                <option value="3">鼠标中键</option>
+                                <option value="4" disabled>旧选项（请重新选择）</option>
+                                <option value="5">鼠标侧键1</option>
+                                <option value="6">鼠标侧键2</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="control-row">
+                        <span class="control-label">扳机热键4:</span>
+                        <div class="select-container">
+                            <select id="扳机热键4" name="扳机热键4">
+                                <option value="0">空白</option>
+                                <option value="1">鼠标左键</option>
+                                <option value="2">鼠标右键</option>
+                                <option value="3">鼠标中键</option>
+                                <option value="4" disabled>旧选项（请重新选择）</option>
+                                <option value="5">鼠标侧键1</option>
+                                <option value="6">鼠标侧键2</option>
+                            </select>
+                        </div>
+                    </div>
+                </section>
+<section class="config-group crosshair-card" id="panel-crosshair" aria-labelledby="heading-crosshair">
+                    <h3 class="group-title" id="heading-crosshair" data-index="06">准星追踪</h3>
+                    <div class="control-item">
+                        <div class="control-row">
+                            <span class="control-label">准星类别:</span>
+                            <input type="text" id="准星类别" value="0">
+                            <div class="btn-group">
+                                <button type="button" onclick="增加准星类别数值()">+</button>
+                                <button type="button" onclick="减少准星类别数值()">-</button>
+                            </div>
+                        </div>
+                        <div class="control-row">
+                            <span class="control-label">准星绑定1:</span>
+                            <div class="select-container">
+                                <select id="准星绑定1" name="准星绑定1">
+                                    <option value="0">空白</option>
+                                    <option value="1">鼠标左键</option>
+                                    <option value="2">鼠标右键</option>
+                                    <option value="3">鼠标中键</option>
+                                    <option value="4" disabled>旧选项（请重新选择）</option>
+                                    <option value="5">鼠标侧键1</option>
+                                    <option value="6">鼠标侧键2</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="control-row">
+                            <span class="control-label">准星绑定2:</span>
+                            <div class="select-container">
+                                <select id="准星绑定2" name="准星绑定2">
+                                    <option value="0">空白</option>
+                                    <option value="1">鼠标左键</option>
+                                    <option value="2">鼠标右键</option>
+                                    <option value="3">鼠标中键</option>
+                                    <option value="4" disabled>旧选项（请重新选择）</option>
+                                    <option value="5">鼠标侧键1</option>
+                                    <option value="6">鼠标侧键2</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="control-row">
+                            <span class="control-label">准星绑定3:</span>
+                            <div class="select-container">
+                                <select id="准星绑定3" name="准星绑定3">
+                                    <option value="0">空白</option>
+                                    <option value="1">鼠标左键</option>
+                                    <option value="2">鼠标右键</option>
+                                    <option value="3">鼠标中键</option>
+                                    <option value="4" disabled>旧选项（请重新选择）</option>
+                                    <option value="5">鼠标侧键1</option>
+                                    <option value="6">鼠标侧键2</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="control-row">
+                            <span class="control-label">准星绑定4:</span>
+                            <div class="select-container">
+                                <select id="准星绑定4" name="准星绑定4">
+                                    <option value="0">空白</option>
+                                    <option value="1">鼠标左键</option>
+                                    <option value="2">鼠标右键</option>
+                                    <option value="3">鼠标中键</option>
+                                    <option value="4" disabled>旧选项（请重新选择）</option>
+                                    <option value="5">鼠标侧键1</option>
+                                    <option value="6">鼠标侧键2</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+                </div>
+                <div class="panel-column">
+<section class="config-group activation-card" id="panel-activation" aria-labelledby="heading-activation">
+                    <h3 class="group-title" id="heading-activation" data-index="07">按下激活</h3>
+                    <div class="control-item">
+                        <div class="control-row special-move-row">
+                            <div class="control-label multi-label">
+                                <div class="main-title">自瞄连续按下</div>
+                                <div class="sub-text">不设置准星绑定</div>
+                                <div class="sub-text">以自瞄按下为准</div>
+                            </div>
+                            <label class="special-toggle">
+                                <input type="checkbox" id="自瞄连续按下" name="自瞄连续按下">
+                                <span class="slider"></span>
+                                <span class="toggle-text">中心为准星</span>
+                            </label>
+                        </div>
+                        <div class="control-row">
+                            <span class="control-label">开镜时间:</span>
+                            <div class="slider-container">
+                                <input type="range" id="开镜时间" min="100" max="1000" value="350">
+                                <span class="value-display" id="开镜时间显示">350ms</span>
+                            </div>
+                        </div>
+                        <div class="control-row special-move-row">
+                            <div class="control-label multi-label">
+                                <div class="main-title">按下自瞄截图</div>
+                                <div class="sub-text">不会打标别开</div>
+                                <div class="sub-text">十分占用性能</div>
+                            </div>
+                            <label class="special-toggle">
+                                <input type="checkbox" id="自动截图" name="自动截图">
+                                <span class="slider"></span>
+                                <span class="toggle-text">自动截图</span>
+                            </label>
+                        </div>
+                        <div class="control-row special-move-row">
+                            <div class="control-label multi-label">
+                                <div class="main-title">准星扳机</div>
+                                <div class="sub-text">开启准星识别才有效</div>
+                                <div class="sub-text">子弹落点准星的游戏</div>
+                            </div>
+                            <label class="special-toggle">
+                                <input type="checkbox" id="准星扳机" name="准星扳机">
+                                <span class="slider"></span>
+                                <span class="toggle-text">准星扳机</span>
+                            </label>
+                        </div>
+                        <div class="control-row special-move-row">
+                            <div class="control-label multi-label">
+                                <div class="main-title">中心扳机</div>
+                                <div class="sub-text">屏幕固定中心的游戏</div>
+                            </div>
+                            <label class="special-toggle">
+                                <input type="checkbox" id="中心扳机" name="中心扳机">
+                                <span class="slider"></span>
+                                <span class="toggle-text">中心扳机</span>
+                            </label>
+                        </div>
+                        <div class="control-row">
+                            <span class="control-label">扳机范围:</span>
+                            <div class="slider-container">
+                                <input type="range" id="扳机范围" min="30" max="99" value="66">
+                                <span class="value-display" id="扳机范围显示">60</span>
+                            </div>
+                        </div>
+                        <div class="control-row">
+                            <span class="control-label">开枪间隔:</span>
+                            <div class="slider-container">
+                                <input type="range" id="开枪间隔" min="50" max="1000" value="80">
+                                <span class="value-display" id="开枪间隔显示">80ms</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+<section class="config-group hotkeys-card" id="panel-hotkeys" aria-labelledby="heading-hotkeys">
+                    <h3 class="group-title" id="heading-hotkeys" data-index="08">热键设置</h3>
                     <div class="control-item">
                         <div class="control-row special-move-row">
                             <strong>
@@ -1184,344 +988,10 @@
                             <span id="热键文本显示">—</span>
                         </div>
                     </div>
-                </div>
-
-                <!-- ===================== 准星追踪 ===================== -->
-                <div class="config-group">
-                    <h3 class="group-title">准星追踪</h3>
-                    <div class="control-item">
-                        <div class="control-row">
-                            <span class="control-label">准星类别:</span>
-                            <input type="text" id="准星类别" value="0">
-                            <div class="btn-group">
-                                <button type="button" onclick="增加准星类别数值()">+</button>
-                                <button type="button" onclick="减少准星类别数值()">-</button>
-                            </div>
-                        </div>
-                        <div class="control-row">
-                            <span class="control-label">准星绑定1:</span>
-                            <div class="select-container">
-                                <select id="准星绑定1" name="准星绑定1">
-                                    <option value="0">空白</option>
-                                    <option value="1">鼠标左键</option>
-                                    <option value="2">鼠标右键</option>
-                                    <option value="3">鼠标中键</option>
-                                    <option value="4" disabled>旧选项（请重新选择）</option>
-                                    <option value="5">鼠标侧键1</option>
-                                    <option value="6">鼠标侧键2</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="control-row">
-                            <span class="control-label">准星绑定2:</span>
-                            <div class="select-container">
-                                <select id="准星绑定2" name="准星绑定2">
-                                    <option value="0">空白</option>
-                                    <option value="1">鼠标左键</option>
-                                    <option value="2">鼠标右键</option>
-                                    <option value="3">鼠标中键</option>
-                                    <option value="4" disabled>旧选项（请重新选择）</option>
-                                    <option value="5">鼠标侧键1</option>
-                                    <option value="6">鼠标侧键2</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="control-row">
-                            <span class="control-label">准星绑定3:</span>
-                            <div class="select-container">
-                                <select id="准星绑定3" name="准星绑定3">
-                                    <option value="0">空白</option>
-                                    <option value="1">鼠标左键</option>
-                                    <option value="2">鼠标右键</option>
-                                    <option value="3">鼠标中键</option>
-                                    <option value="4" disabled>旧选项（请重新选择）</option>
-                                    <option value="5">鼠标侧键1</option>
-                                    <option value="6">鼠标侧键2</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="control-row">
-                            <span class="control-label">准星绑定4:</span>
-                            <div class="select-container">
-                                <select id="准星绑定4" name="准星绑定4">
-                                    <option value="0">空白</option>
-                                    <option value="1">鼠标左键</option>
-                                    <option value="2">鼠标右键</option>
-                                    <option value="3">鼠标中键</option>
-                                    <option value="4" disabled>旧选项（请重新选择）</option>
-                                    <option value="5">鼠标侧键1</option>
-                                    <option value="6">鼠标侧键2</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- ===================== 按下激活 ===================== -->
-                <div class="config-group">
-                    <h3 class="group-title">按下激活</h3>
-                    <div class="control-item">
-                        <div class="control-row special-move-row">
-                            <div class="control-label multi-label">
-                                <div class="main-title">自瞄连续按下</div>
-                                <div class="sub-text">不设置准星绑定</div>
-                                <div class="sub-text">以自瞄按下为准</div>
-                            </div>
-                            <label class="special-toggle">
-                                <input type="checkbox" id="自瞄连续按下" name="自瞄连续按下">
-                                <span class="slider"></span>
-                                <span class="toggle-text">中心为准星</span>
-                            </label>
-                        </div>
-                        <div class="control-row">
-                            <span class="control-label">开镜时间:</span>
-                            <div class="slider-container">
-                                <input type="range" id="开镜时间" min="100" max="1000" value="350">
-                                <span class="value-display" id="开镜时间显示">350ms</span>
-                            </div>
-                        </div>
-                        <div class="control-row special-move-row">
-                            <div class="control-label multi-label">
-                                <div class="main-title">按下自瞄截图</div>
-                                <div class="sub-text">不会打标别开</div>
-                                <div class="sub-text">十分占用性能</div>
-                            </div>
-                            <label class="special-toggle">
-                                <input type="checkbox" id="自动截图" name="自动截图">
-                                <span class="slider"></span>
-                                <span class="toggle-text">自动截图</span>
-                            </label>
-                        </div>
-                        <div class="control-row special-move-row">
-                            <div class="control-label multi-label">
-                                <div class="main-title">准星扳机</div>
-                                <div class="sub-text">开启准星识别才有效</div>
-                                <div class="sub-text">子弹落点准星的游戏</div>
-                            </div>
-                            <label class="special-toggle">
-                                <input type="checkbox" id="准星扳机" name="准星扳机">
-                                <span class="slider"></span>
-                                <span class="toggle-text">准星扳机</span>
-                            </label>
-                        </div>
-                        <div class="control-row special-move-row">
-                            <div class="control-label multi-label">
-                                <div class="main-title">中心扳机</div>
-                                <div class="sub-text">屏幕固定中心的游戏</div>
-                            </div>
-                            <label class="special-toggle">
-                                <input type="checkbox" id="中心扳机" name="中心扳机">
-                                <span class="slider"></span>
-                                <span class="toggle-text">中心扳机</span>
-                            </label>
-                        </div>
-                        <div class="control-row">
-                            <span class="control-label">扳机范围:</span>
-                            <div class="slider-container">
-                                <input type="range" id="扳机范围" min="30" max="99" value="66">
-                                <span class="value-display" id="扳机范围显示">60</span>
-                            </div>
-                        </div>
-                        <div class="control-row">
-                            <span class="control-label">开枪间隔:</span>
-                            <div class="slider-container">
-                                <input type="range" id="开枪间隔" min="50" max="1000" value="80">
-                                <span class="value-display" id="开枪间隔显示">80ms</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- ===================== 配置保存 ===================== -->
-                <div class="config-group">
-                    <h3 class="group-title">配置保存</h3>
-                    <div style="display:flex;flex-direction:column;gap:15px;">
-                        <button class="save-config-btn" onclick="保存配置()">保存配置</button>
-                        <div id="配置列表" style="height:130px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:8px;background:#f8f9fa;padding:10px;box-shadow:inset 0 2px 6px rgba(0,0,0,0.05);">
-                        </div>
-                        <button class="save-config-btn" style="background:linear-gradient(to right,#c0392b,#e74c3c);" onclick="删除配置()">删除选中配置</button>
-                    </div>
-                </div>
-
-                <!-- ===================== 游戏模型 ===================== -->
-                <div class="config-group">
-                    <h3 class="group-title">游戏模型</h3>
-                    <div class="select-container">
-                        <select id="模型名称" name="模型名称" disabled>
-                            <option value="">正在读取模型…</option>
-                        </select>
-                    </div>
-                    <button type="button" onclick="刷新模型列表()" style="margin-top:10px;padding:7px 14px;cursor:pointer;">刷新模型</button>
-                    <span id="模型列表状态" aria-live="polite" style="margin-left:8px;color:#666;font-size:13px;"></span>
-                    <div class="radio-container" style="flex-wrap:wrap;">
-                        <div class="radio-item engine-disabled">
-                            <input type="radio" id="NCNN" name="推理引擎" value="NCNN" disabled>
-                            <label for="NCNN">NCNN</label>
-                        </div>
-                        <div class="radio-item engine-disabled">
-                            <input type="radio" id="ONNX" name="推理引擎" value="ONNX" disabled>
-                            <label for="ONNX">ONNX</label>
-                        </div>
-                        <div class="radio-item engine-disabled">
-                            <input type="radio" id="TensorRT" name="推理引擎" value="TensorRT" disabled>
-                            <label for="TensorRT">N卡专用推理</label>
-                        </div>
-                    </div>
-                    <p style="margin:12px 0 0;color:#666;font-size:13px;line-height:1.7;">同名模型放在程序旁的“模型数据”文件夹：有配对的.param/.bin可选NCNN，有.onnx可选ONNX，有.trt可选N卡专用。缺少对应文件的按钮会变灰。<br>N卡专用模型请先在本机转换；添加或删除文件后点击“刷新模型”。</p>
-                    <div class="control-row" style="margin-top:30px;">
-                        <span class="control-label">扳机热键1:</span>
-                        <div class="select-container">
-                            <select id="扳机热键1" name="扳机热键1">
-                                <option value="0">空白</option>
-                                <option value="1">鼠标左键</option>
-                                <option value="2">鼠标右键</option>
-                                <option value="3">鼠标中键</option>
-                                <option value="4" disabled>旧选项（请重新选择）</option>
-                                <option value="5">鼠标侧键1</option>
-                                <option value="6">鼠标侧键2</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="control-row">
-                        <span class="control-label">扳机热键2:</span>
-                        <div class="select-container">
-                            <select id="扳机热键2" name="扳机热键2">
-                                <option value="0">空白</option>
-                                <option value="1">鼠标左键</option>
-                                <option value="2">鼠标右键</option>
-                                <option value="3">鼠标中键</option>
-                                <option value="4" disabled>旧选项（请重新选择）</option>
-                                <option value="5">鼠标侧键1</option>
-                                <option value="6">鼠标侧键2</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="control-row">
-                        <span class="control-label">扳机热键3:</span>
-                        <div class="select-container">
-                            <select id="扳机热键3" name="扳机热键3">
-                                <option value="0">空白</option>
-                                <option value="1">鼠标左键</option>
-                                <option value="2">鼠标右键</option>
-                                <option value="3">鼠标中键</option>
-                                <option value="4" disabled>旧选项（请重新选择）</option>
-                                <option value="5">鼠标侧键1</option>
-                                <option value="6">鼠标侧键2</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="control-row">
-                        <span class="control-label">扳机热键4:</span>
-                        <div class="select-container">
-                            <select id="扳机热键4" name="扳机热键4">
-                                <option value="0">空白</option>
-                                <option value="1">鼠标左键</option>
-                                <option value="2">鼠标右键</option>
-                                <option value="3">鼠标中键</option>
-                                <option value="4" disabled>旧选项（请重新选择）</option>
-                                <option value="5">鼠标侧键1</option>
-                                <option value="6">鼠标侧键2</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-                <!-- ===================== 锁定类型 ===================== -->
-                <div class="config-group">
-                    <h3 class="group-title">锁定类型</h3>
-                    <div class="move-mode-panel" id="阵营切换面板">
-                        <div class="mode-header">
-                            <span class="mode-label">目前阵容</span>
-                            <div class="mode-tabs">
-                                <div class="mode-tab active" data-camp="0" id="tab默认">默认</div>
-                                <div class="mode-tab" data-camp="1" id="tab阵营1">阵营1</div>
-                                <div class="mode-tab" data-camp="2" id="tab阵营2">阵营2</div>
-                            </div>
-                        </div>
-                        <div class="mode-body">
-                            <div class="checkbox-container" id="阵营复选框容器">
-                                <div id="camp0_checks" class="camp-checks" style="display:block;">
-                                    <div class="checkbox-row">
-                                        <div class="checkbox-item"><input type="checkbox" id="defaultType0" value="0"><label for="defaultType0">0</label></div>
-                                        <div class="checkbox-item"><input type="checkbox" id="defaultType1" value="1"><label for="defaultType1">1</label></div>
-                                        <div class="checkbox-item"><input type="checkbox" id="defaultType2" value="2"><label for="defaultType2">2</label></div>
-                                        <div class="checkbox-item"><input type="checkbox" id="defaultType3" value="3"><label for="defaultType3">3</label></div>
-                                        <div class="checkbox-item"><input type="checkbox" id="defaultType4" value="4"><label for="defaultType4">4</label></div>
-                                    </div>
-                                    <div class="checkbox-row">
-                                        <div class="checkbox-item"><input type="checkbox" id="defaultType5" value="5"><label for="defaultType5">5</label></div>
-                                        <div class="checkbox-item"><input type="checkbox" id="defaultType6" value="6"><label for="defaultType6">6</label></div>
-                                        <div class="checkbox-item"><input type="checkbox" id="defaultType7" value="7"><label for="defaultType7">7</label></div>
-                                        <div class="checkbox-item"><input type="checkbox" id="defaultType8" value="8"><label for="defaultType8">8</label></div>
-                                        <div class="checkbox-item"><input type="checkbox" id="defaultType9" value="9"><label for="defaultType9">9</label></div>
-                                    </div>
-                                </div>
-                                <div id="camp1_checks" class="camp-checks" style="display:none;">
-                                    <div class="checkbox-row">
-                                        <div class="checkbox-item"><input type="checkbox" id="team1Type0" value="0"><label for="team1Type0">0</label></div>
-                                        <div class="checkbox-item"><input type="checkbox" id="team1Type1" value="1"><label for="team1Type1">1</label></div>
-                                        <div class="checkbox-item"><input type="checkbox" id="team1Type2" value="2"><label for="team1Type2">2</label></div>
-                                        <div class="checkbox-item"><input type="checkbox" id="team1Type3" value="3"><label for="team1Type3">3</label></div>
-                                        <div class="checkbox-item"><input type="checkbox" id="team1Type4" value="4"><label for="team1Type4">4</label></div>
-                                    </div>
-                                    <div class="checkbox-row">
-                                        <div class="checkbox-item"><input type="checkbox" id="team1Type5" value="5"><label for="team1Type5">5</label></div>
-                                        <div class="checkbox-item"><input type="checkbox" id="team1Type6" value="6"><label for="team1Type6">6</label></div>
-                                        <div class="checkbox-item"><input type="checkbox" id="team1Type7" value="7"><label for="team1Type7">7</label></div>
-                                        <div class="checkbox-item"><input type="checkbox" id="team1Type8" value="8"><label for="team1Type8">8</label></div>
-                                        <div class="checkbox-item"><input type="checkbox" id="team1Type9" value="9"><label for="team1Type9">9</label></div>
-                                    </div>
-                                </div>
-                                <div id="camp2_checks" class="camp-checks" style="display:none;">
-                                    <div class="checkbox-row">
-                                        <div class="checkbox-item"><input type="checkbox" id="team2Type0" value="0"><label for="team2Type0">0</label></div>
-                                        <div class="checkbox-item"><input type="checkbox" id="team2Type1" value="1"><label for="team2Type1">1</label></div>
-                                        <div class="checkbox-item"><input type="checkbox" id="team2Type2" value="2"><label for="team2Type2">2</label></div>
-                                        <div class="checkbox-item"><input type="checkbox" id="team2Type3" value="3"><label for="team2Type3">3</label></div>
-                                        <div class="checkbox-item"><input type="checkbox" id="team2Type4" value="4"><label for="team2Type4">4</label></div>
-                                    </div>
-                                    <div class="checkbox-row">
-                                        <div class="checkbox-item"><input type="checkbox" id="team2Type5" value="5"><label for="team2Type5">5</label></div>
-                                        <div class="checkbox-item"><input type="checkbox" id="team2Type6" value="6"><label for="team2Type6">6</label></div>
-                                        <div class="checkbox-item"><input type="checkbox" id="team2Type7" value="7"><label for="team2Type7">7</label></div>
-                                        <div class="checkbox-item"><input type="checkbox" id="team2Type8" value="8"><label for="team2Type8">8</label></div>
-                                        <div class="checkbox-item"><input type="checkbox" id="team2Type9" value="9"><label for="team2Type9">9</label></div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="control-item" style="margin-top:15px;">
-                        <div class="control-row">
-                            <span class="control-label">锁定频率:</span>
-                            <div class="slider-container">
-                                <input type="range" id="锁定频率" min="50" max="1000" value="100" step="10">
-                                <span class="value-display" id="锁定频率显示">100ms</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="control-item">
-                        <div class="control-row">
-                            <span class="control-label">延时频率:</span>
-                            <div class="slider-container">
-                                <input type="range" id="延时频率" min="0" max="3000" value="200" step="10">
-                                <span class="value-display" id="延时频率显示">200ms</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="control-item">
-                        <div class="control-row">
-                            <span class="control-label">移动延时:</span>
-                            <div class="radio-group" id="移动延时">
-                                <label class="radio-card"><input type="radio" name="moveDelay" value="5"><span>人类极限</span></label>
-                                <label class="radio-card"><input type="radio" name="moveDelay" value="3"><span>光速移动</span></label>
-                                <label class="radio-card"><input type="radio" name="moveDelay" value="1"><span>一帧拉枪</span></label>
-                            </div>
-                        </div>
-                    </div>
+                </section>
                 </div>
             </div>
         </div>
-    </body>
 
     <script>
         let 目前阵容 = (typeof window.目前阵容 !== 'undefined') ? window.目前阵容 : 0;
@@ -1611,29 +1081,30 @@
             当前选中配置 = null;
             data.forEach(name => {
                 if (!name) return;
-                const item = document.createElement("div");
-                item.innerText = name;
-                item.style.padding = "8px";
-                item.style.borderRadius = "6px";
-                item.style.cursor = "pointer";
-                item.style.marginBottom = "6px";
-                item.style.background = "white";
-                item.style.transition = "all 0.2s";
+                const item = document.createElement("button");
+                item.type = "button";
+                item.textContent = name;
+                item.className = "config-entry";
+                item.setAttribute("aria-pressed", "false");
                 item.onclick = function() {
-                    [...list.children].forEach(c => c.style.background = "white");
-                    item.style.background = "#dcd6f7";
+                    [...list.children].forEach(c => {
+                        c.classList.remove("selected");
+                        c.setAttribute("aria-pressed", "false");
+                    });
+                    item.classList.add("selected");
+                    item.setAttribute("aria-pressed", "true");
                     当前选中配置 = name;
                 };
-                item.ondblclick = async function() {
-                    if (confirm("你确定导入配置: " + name + " 吗?")) {
-                        const 返回数据 = await 发送消息给服务器并获取返回值("导入配置", name);
-                        if (返回数据 && 返回数据["是否刷新"] == "是") {
-                            location.reload();
-                        }
-                    }
-                };
+                item.ondblclick = () => 导入选中配置();
                 list.appendChild(item);
             });
+        }
+
+        async function 导入选中配置() {
+            if (!当前选中配置) { alert("请先选择一个配置"); return; }
+            if (!confirm("你确定导入配置: " + 当前选中配置 + " 吗?")) return;
+            const 返回数据 = await 发送消息给服务器并获取返回值("导入配置", 当前选中配置);
+            if (返回数据 && 返回数据["是否刷新"] == "是") location.reload();
         }
 
         async function 保存配置() {
@@ -1667,7 +1138,8 @@
                 radio.disabled = !engines.includes(index + 1);
                 radio.checked = !radio.disabled && 当前推理引擎 === index + 1;
                 radio.parentElement.classList.toggle('engine-disabled', radio.disabled);
-                radio.parentElement.title = radio.disabled ? '当前模型没有对应文件' : '';
+                radio.parentElement.title = radio.disabled
+                    ? (document.getElementById('模型名称').value ? '当前模型没有对应文件' : '请先选择模型') : '';
             });
         }
         function 更新引擎按钮() {
@@ -1676,6 +1148,9 @@
             设置引擎按钮(engines);
             const status = document.getElementById('模型列表状态');
             status.textContent = 模型引擎目录.size ? '找到 ' + 模型引擎目录.size + ' 个模型' : '“模型数据”文件夹没有可用模型，请放入后刷新';
+            if (模型引擎目录.size && !name) {
+                status.textContent = 当前模型选择 ? '已保存模型未找到，请重新选择模型' : '请先选择模型，再选择推理引擎';
+            }
             if (name && !engines.includes(当前推理引擎)) status.textContent += '，请选择可用的推理引擎';
         }
         function 模型选项(name, label = name) {
@@ -1801,6 +1276,7 @@
             });
 
             initSliders();
+            initPrecisionControls();
 
             // 移动方式点击切换
             document.querySelectorAll('.mode-tab[data-mode]').forEach(tab => {
@@ -2032,6 +1508,98 @@
         }
         setInterval(fetchData, 1000);
 
+        // Fine controls reuse the existing range input handlers and API value conversions.
+        // Initialization only reads values: opening the page must not write configuration.
+        function initPrecisionControls() {
+            const milliseconds = new Set(['开镜时间', '开枪间隔', '锁定频率', '延时频率']);
+            const percentages = new Set(['置信度', '准星精度', '交并比', '优先锁定位置', '其次锁定位置', '再次锁定位置', '扳机范围']);
+            document.querySelectorAll('input[type="range"]').forEach(range => {
+                const row = range.closest('.control-row');
+                const label = row.querySelector('.control-label');
+                const name = label.querySelector('.main-title')?.textContent || label.textContent.replace(/:$/, '').trim();
+                range.setAttribute('aria-label', name);
+                const unit = milliseconds.has(range.id) ? 'ms' : (percentages.has(range.id) ? '%' : '');
+                if (unit) {
+                    const unitLabel = document.createElement('span');
+                    unitLabel.className = 'control-unit';
+                    unitLabel.textContent = unit;
+                    (label.querySelector('.main-title') || label).appendChild(unitLabel);
+                }
+                const group = document.createElement('div');
+                group.className = 'precision-control';
+                const number = document.createElement('input');
+                number.type = 'number';
+                number.id = range.id + '精调';
+                number.min = range.min;
+                number.max = range.max;
+                number.step = range.step || '1';
+                number.inputMode = 'numeric';
+                number.setAttribute('aria-label', name + '精确数值');
+                number.title = '输入数值后按回车或离开输入框生效';
+                const min = Number(range.min), max = Number(range.max), step = Number(number.step);
+                function sync() {
+                    number.value = range.value;
+                    range.style.setProperty('--range-progress', ((Number(range.value) - min) / (max - min) * 100) + '%');
+                    decrease.disabled = Number(range.value) <= min;
+                    increase.disabled = Number(range.value) >= max;
+                }
+                function apply(value) {
+                    if (!Number.isFinite(value)) { sync(); return; }
+                    const bounded = Math.min(max, Math.max(min, value));
+                    const rounded = Number((min + Math.round((bounded - min) / step) * step).toFixed(6));
+                    const previous = range.value;
+                    range.value = String(rounded);
+                    if (range.value !== previous) range.dispatchEvent(new Event('input', {bubbles: true}));
+                    sync();
+                }
+                function makeButton(text, direction) {
+                    const button = document.createElement('button');
+                    button.type = 'button';
+                    button.textContent = text;
+                    button.setAttribute('aria-label', (direction > 0 ? '增加' : '减少') + range.id);
+                    button.addEventListener('click', () => apply(Number(range.value) + direction * step));
+                    return button;
+                }
+                const decrease = makeButton('−', -1), increase = makeButton('+', 1);
+                group.append(decrease, number, increase);
+                range.parentElement.appendChild(group);
+                range.addEventListener('input', sync);
+                number.addEventListener('change', () => apply(number.value.trim() ? Number(number.value) : NaN));
+                number.addEventListener('keydown', event => {
+                    if (event.key === 'Enter') { number.blur(); }
+                    if (event.key === 'Escape') { sync(); number.blur(); }
+                });
+                sync();
+            });
+            document.querySelectorAll('input[type="text"], select').forEach(input => {
+                const row = input.closest('.control-row, .param-row');
+                const label = row?.querySelector('.control-label, .param-label');
+                if (label) input.setAttribute('aria-label', label.textContent.replace(/:$/, '').trim());
+                if (input.type === 'text') input.inputMode = ['移动系数', 'Kp', 'Ki'].includes(input.id) ? 'decimal' : 'numeric';
+            });
+            // These category fields previously only submitted via +/−; direct entry must
+            // update the same globals so the next button click continues from that value.
+            ['优先锁定', '其次锁定', '再次锁定', '准星类别'].forEach(id => {
+                const input = document.getElementById(id);
+                input.addEventListener('change', () => {
+                    const text = input.value.trim();
+                    if (!/^\d+$/.test(text)) { input.value = window[id]; return; }
+                    let value = Number(text);
+                    if (!Number.isSafeInteger(value)) { input.value = window[id]; return; }
+                    if (id !== '准星类别') value = Math.min(10, value);
+                    const changed = value !== Number(window[id]);
+                    window[id] = value;
+                    input.value = value;
+                    if (changed) 发送消息给服务器(id, value);
+                });
+                input.addEventListener('keydown', event => { if (event.key === 'Enter') input.blur(); });
+            });
+            document.querySelectorAll('.btn-group button').forEach(button => {
+                const input = button.closest('.control-row, .param-row')?.querySelector('input');
+                if (input) button.setAttribute('aria-label', (button.textContent.trim() === '+' ? '增加' : '减少') + input.id);
+            });
+        }
+
         function initSliders() {
             document.getElementById('置信度').addEventListener('input', function() {
                 document.getElementById('置信度显示').textContent = this.value;
@@ -2184,4 +1752,5 @@
             });
         }
     </script>
+    </body>
 </html>

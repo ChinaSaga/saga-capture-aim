@@ -170,6 +170,7 @@
     <ClInclude Include="src\HumanTrajectoryModel.h" />
     <ClInclude Include="src\Inference.h" />
     <ClInclude Include="src\TensorPixels.h" />
+    <ClInclude Include="src\YoloScores.h" />
     <ClInclude Include="src\TrtRuntime.h" />
     <ClInclude Include="src\NcnnPostprocess.h" />
     <ClInclude Include="src\detection.hpp" />

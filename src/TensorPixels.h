@@ -1,11 +1,28 @@
 #pragma once
 #include <cstddef>
+#include <cstdint>
+#include <type_traits>
 #include <immintrin.h>
+
+inline void storeTensorPixels(float* out, __m256 values) {
+    _mm256_storeu_ps(out, values);
+}
+inline void storeTensorPixels(uint16_t* out, __m256 values) {
+    _mm_storeu_si128(reinterpret_cast<__m128i*>(out), _mm256_cvtps_ph(values, 0));
+}
+template<class T> inline T tensorPixel(float value) {
+    if constexpr (std::is_same_v<T, float>) return value;
+    else {
+        static_assert(std::is_same_v<T, uint16_t>);
+        return static_cast<uint16_t>(_mm_extract_epi16(_mm_cvtps_ph(_mm_set_ss(value), 0), 0));
+    }
+}
 
 // Fuse BGR deinterleave, RGB channel order and normalization into one pass.
 // Plane pointers also support ncnn's padded channel stride.
+template<class T>
 inline void bgrToRgbPlanes(const unsigned char* pixels, int width, int height,
-    size_t sourceStride, float* r, float* g, float* b, int targetStride) {
+    size_t sourceStride, T* r, T* g, T* b, int targetStride) {
     constexpr float norm = 1.0f / 255.0f;
     const __m256 scale = _mm256_set1_ps(norm);
     const __m256i bm = _mm256_broadcastsi128_si256(_mm_setr_epi8(0,-1,-1,-1,3,-1,-1,-1,6,-1,-1,-1,9,-1,-1,-1));
@@ -28,14 +45,14 @@ inline void bgrToRgbPlanes(const unsigned char* pixels, int width, int height,
             const __m128i hi = _mm_srli_si128(_mm_loadu_si128(
                 reinterpret_cast<const __m128i*>(src + x * 3 + 8)), 4);
             const __m256i v = _mm256_set_m128i(hi, lo);
-            _mm256_storeu_ps(r + x, _mm256_mul_ps(_mm256_cvtepi32_ps(_mm256_shuffle_epi8(v, rm)), scale));
-            _mm256_storeu_ps(g + x, _mm256_mul_ps(_mm256_cvtepi32_ps(_mm256_shuffle_epi8(v, gm)), scale));
-            _mm256_storeu_ps(b + x, _mm256_mul_ps(_mm256_cvtepi32_ps(_mm256_shuffle_epi8(v, bm)), scale));
+            storeTensorPixels(r + x, _mm256_mul_ps(_mm256_cvtepi32_ps(_mm256_shuffle_epi8(v, rm)), scale));
+            storeTensorPixels(g + x, _mm256_mul_ps(_mm256_cvtepi32_ps(_mm256_shuffle_epi8(v, gm)), scale));
+            storeTensorPixels(b + x, _mm256_mul_ps(_mm256_cvtepi32_ps(_mm256_shuffle_epi8(v, bm)), scale));
         }
         for (; x < width; ++x) {
-            r[x] = src[x * 3 + 2] * norm;
-            g[x] = src[x * 3 + 1] * norm;
-            b[x] = src[x * 3] * norm;
+            r[x] = tensorPixel<T>(src[x * 3 + 2] * norm);
+            g[x] = tensorPixel<T>(src[x * 3 + 1] * norm);
+            b[x] = tensorPixel<T>(src[x * 3] * norm);
         }
         r += targetStride; g += targetStride; b += targetStride;
     }

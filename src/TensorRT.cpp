@@ -2,6 +2,7 @@
 #include "TrtRuntime.h"
 #include "preprocessing.hpp"
 #include "nms.hpp"
+#include "YoloScores.h"
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -164,7 +165,6 @@ public:
         trt::checkCuda(api.cudaHostAlloc(&cpuOutput, outputBytes, cudaHostAllocDefault), "Allocate pinned output buffer");
         trt::checkCuda(api.cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), "Create inference stream");
         if (!context->setTensorAddress(inName.c_str(), gpuInput) || !context->setTensorAddress(outName.c_str(), gpuOutput)) throw std::runtime_error("Cannot bind persistent TensorRT buffers");
-        preprocessing.ensureCapacity(shape.height, shape.width, 3);
         if (outputType == nvinfer1::DataType::kHALF) decoded.resize(outputCount);
         boxes.reserve(256); scores.reserve(256); labels.reserve(256); indices.reserve(99);
         char graphSetting[16]{};
@@ -213,11 +213,14 @@ public:
         const bool profiling = profileStart != nullptr;
         const auto t0 = profiling ? Clock::now() : Clock::time_point{};
         cv::Size actual;
-        yolos::preprocessing::letterBoxToBlob(image, preprocessing, 3, shape, actual, false);
-        if (inputType == nvinfer1::DataType::kFLOAT) memcpy(cpuInput, preprocessing.blob.data(), inputBytes);
-        else { auto p = static_cast<unsigned short*>(cpuInput); size_t i = 0;
-            for (; i + 8 <= inputCount; i += 8) _mm_storeu_si128(reinterpret_cast<__m128i*>(p + i), _mm256_cvtps_ph(_mm256_loadu_ps(preprocessing.blob.data() + i), 0));
-            for (; i < inputCount; ++i) p[i] = static_cast<uint16_t>(_mm_extract_epi16(_mm_cvtps_ph(_mm_set_ss(preprocessing.blob[i]), 0), 0)); }
+        // Normalize directly into pinned input. FP16 uses the same FP32
+        // multiply then round-to-nearest conversion, without a full scratch tensor.
+        if (inputType == nvinfer1::DataType::kFLOAT)
+            yolos::preprocessing::letterBoxToBlob(image, preprocessing, 3, shape, actual, false,
+                std::span<float>(static_cast<float*>(cpuInput), inputCount));
+        else
+            yolos::preprocessing::letterBoxToBlob(image, preprocessing, 3, shape, actual, false,
+                std::span<uint16_t>(static_cast<uint16_t*>(cpuInput), inputCount));
         auto& api = trt::library();
         const auto t1 = profiling ? Clock::now() : Clock::time_point{};
         if (profiling) trt::checkCuda(api.cudaEventRecord(profileStart, stream), "Record profiling start");
@@ -239,21 +242,18 @@ public:
             for (; i < outputCount; ++i) decoded[i] = _mm_cvtss_f32(_mm_cvtph_ps(_mm_cvtsi32_si128(p[i]))); values = decoded.data(); }
         float scale, padX, padY; yolos::preprocessing::getScalePad(image.size(), shape, scale, padX, padY); const float inv = 1.f / scale;
         boxes.clear(); scores.clear(); labels.clear();
-        for (int d = 0; d < candidates; ++d) {
-            float score = values[4 * candidates + d]; int label = 0;
-            for (int c = 5; c < features; ++c) if (values[c * candidates + d] > score) { score = values[c * candidates + d]; label = c - 4; }
-            if (!std::isfinite(score) || score <= conf) continue;
+        forEachYoloCandidate(values, candidates, features - 4, conf, [&](size_t d, float score, int label) {
             const float cx = values[d], cy = values[candidates + d], w = values[2 * candidates + d], h = values[3 * candidates + d];
-            if (!std::isfinite(cx) || !std::isfinite(cy) || !std::isfinite(w) || !std::isfinite(h) || w <= 0 || h <= 0) continue;
+            if (!std::isfinite(cx) || !std::isfinite(cy) || !std::isfinite(w) || !std::isfinite(h) || w <= 0 || h <= 0) return;
             const float x = (cx - w * .5f - padX) * inv, y = (cy - h * .5f - padY) * inv;
             // Bounds before integer conversion avoid undefined conversion of
             // malformed engine output while preserving normal YOLO rounding.
-            if (std::fabs(x) > 1e8f || std::fabs(y) > 1e8f || w * inv > 1e8f || h * inv > 1e8f) continue;
+            if (std::fabs(x) > 1e8f || std::fabs(y) > 1e8f || w * inv > 1e8f || h * inv > 1e8f) return;
             yolos::BoundingBox box;
             box.x = std::clamp(int(x), 0, image.cols - 1); box.y = std::clamp(int(y), 0, image.rows - 1);
             box.width = std::clamp(int(w * inv), 1, image.cols - box.x); box.height = std::clamp(int(h * inv), 1, image.rows - box.y);
             boxes.push_back(box); scores.push_back(score); labels.push_back(label);
-        }
+        });
         yolos::nms::NMSBoxesBatched(boxes, scores, labels, conf, iou, indices, nms, 99);
         int count = 0; for (int i : indices) { if (count == 99) break; const auto& box = boxes[i]; out[count++] = {float(box.x), float(box.y), float(box.width), float(box.height), labels[i], scores[i]}; }
         if (profiling) {

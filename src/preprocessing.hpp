@@ -13,6 +13,8 @@
 #include <opencv2/opencv.hpp>
 #include <cmath>
 #include <vector>
+#include <span>
+#include <stdexcept>
 
 #include "types.hpp"
 #include "utils.hpp"
@@ -33,6 +35,8 @@ struct InferenceBuffer {
     cv::Size lastTargetSize;         ///< Last target size
     cv::Size lastResizedSize;        ///< Last content dimensions (padding cache)
     int lastChannels = 0;
+    const void* lastBlob = nullptr; ///< Padding belongs to this output allocation
+    size_t lastElementBytes = 0;
     
     /// @brief Ensure blob has required capacity
     void ensureCapacity(int height, int width, int channels = 3) {
@@ -366,12 +370,15 @@ inline void letterBoxToBlob(const cv::Mat& image,
 /// @param targetSize Target size for inference
 /// @param[out] actualSize Actual output size
 /// @param dynamicShape Whether to use dynamic shape
+/// @param output Optional persistent FP32/FP16 destination; preserve its padding between calls
+template<class T = float>
 inline void letterBoxToBlob(const cv::Mat& image,
                             InferenceBuffer& buffer,
                             int targetChannels,
                             const cv::Size& targetSize,
                             cv::Size& actualSize,
-                            bool dynamicShape = false) {
+                            bool dynamicShape = false,
+                            std::span<T> output = {}) {
     
     const int srcH = image.rows;
     const int srcW = image.cols;
@@ -394,7 +401,15 @@ inline void letterBoxToBlob(const cv::Mat& image,
     }
     
     actualSize = cv::Size(dstW, dstH);
-    buffer.ensureCapacity(dstH, dstW, targetChannels);
+    const size_t required = size_t(dstH) * dstW * targetChannels;
+    if (output.empty()) {
+        if constexpr (std::is_same_v<T, float>) {
+            buffer.ensureCapacity(dstH, dstW, targetChannels);
+            output = std::span<float>(buffer.blob.data(), required);
+        } else throw std::invalid_argument("FP16 letterbox requires an output buffer");
+    } else if (output.size() < required) {
+        throw std::invalid_argument("Letterbox output buffer is too small");
+    }
     
     // Ultralytics uses asymmetric padding with -0.1/+0.1 adjustment
     const float dh = (dstH - newH) / 2.0f;
@@ -407,8 +422,9 @@ inline void letterBoxToBlob(const cv::Mat& image,
     const cv::Size contentSize(newW, newH);
     if ((newH != dstH || newW != dstW) &&
         (buffer.lastTargetSize != actualSize || buffer.lastResizedSize != contentSize ||
-         buffer.lastChannels != targetChannels))
-        std::fill(buffer.blob.begin(), buffer.blob.begin() + dstH * dstW * targetChannels, padNorm);
+         buffer.lastChannels != targetChannels || buffer.lastBlob != output.data() ||
+         buffer.lastElementBytes != sizeof(T)))
+        std::fill_n(output.data(), required, tensorPixel<T>(padNorm));
     
     // Keep externally owned capture pixels out of the persistent resize destination.
     const cv::Mat* prepared = &image;
@@ -420,23 +436,23 @@ inline void letterBoxToBlob(const cv::Mat& image,
     constexpr float scale255 = 1.0f / 255.0f;
     if (targetChannels == 3) {
         // Direct BGR->RGB + normalize to CHW blob
-        float* rChannel = buffer.blob.data();
-        float* gChannel = buffer.blob.data() + dstH * dstW;
-        float* bChannel = buffer.blob.data() + 2 * dstH * dstW;
+        T* rChannel = output.data();
+        T* gChannel = output.data() + dstH * dstW;
+        T* bChannel = output.data() + 2 * dstH * dstW;
         
         const int offset = padTop * dstW + padLeft;
         bgrToRgbPlanes(prepared->data, newW, newH, prepared->step,
             rChannel + offset, gChannel + offset, bChannel + offset, dstW);
     } else {
         // normalize directly into blob (single channel)
-        float* blobPtr = buffer.blob.data();
+        T* blobPtr = output.data();
         for (int y = 0; y < newH; ++y) {
             const int dstY = y + padTop;
             const uchar* row = prepared->ptr<uchar>(y);
             const int rowOffset = dstY * dstW + padLeft;
             
             for (int x = 0; x < newW; ++x) {
-                blobPtr[rowOffset + x] = static_cast<float>(row[x]) * scale255;
+                blobPtr[rowOffset + x] = tensorPixel<T>(static_cast<float>(row[x]) * scale255);
             }
         }
     }
@@ -445,6 +461,8 @@ inline void letterBoxToBlob(const cv::Mat& image,
     buffer.lastTargetSize = actualSize;
     buffer.lastResizedSize = contentSize;
     buffer.lastChannels = targetChannels;
+    buffer.lastBlob = output.data();
+    buffer.lastElementBytes = sizeof(T);
 }
 
 /// @brief Get scale and padding info from letterbox operation

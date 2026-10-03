@@ -1334,38 +1334,8 @@
                 <div class="config-group">
                     <h3 class="group-title">游戏模型</h3>
                     <div class="select-container">
-                        <select id="模型名称" name="模型名称">
-                            <option value="三角洲行动">三角洲行动</option>
-                            <option value="穿越火线">穿越火线</option>
-                            <option value="无畏契约">无畏契约</option>
-                            <option value="守望先锋">守望先锋</option>
-                            <option value="逃离塔科夫">逃离塔科夫</option>
-                            <option value="彩虹六号">彩虹六号</option>
-                            <option value="卡拉比丘">卡拉比丘</option>
-                            <option value="逆战">逆战</option>
-                            <option value="逆战未来">逆战未来</option>
-                            <option value="暗区突围">暗区突围</option>
-                            <option value="COD战区">COD战区</option>
-                            <option value="堡垒之夜">堡垒之夜</option>
-                            <option value="军团要塞">军团要塞</option>
-                            <option value="生死狙击">生死狙击</option>
-                            <option value="生死狙击2">生死狙击2</option>
-                            <option value="CFHD">CFHD</option>
-                            <option value="CS">CS</option>
-                            <option value="CSGO">CSGO</option>
-                            <option value="CS2">CS2</option>
-                            <option value="PUBG">PUBG</option>
-                            <option value="APEX">APEX</option>
-                            <option value="终极角逐">终极角逐</option>
-                            <option value="泰坦陨落2">泰坦陨落2</option>
-                            <option value="远光84">远光84</option>
-                            <option value="战地1">战地1</option>
-                            <option value="战地2">战地2</option>
-                            <option value="战地2042">战地2042</option>
-                            <option value="战地3">战地3</option>
-                            <option value="战地4">战地4</option>
-                            <option value="战地5">战地5</option>
-                            <option value="自定义模型">自定义模型</option>
+                        <select id="模型名称" name="模型名称" disabled>
+                            <option value="">正在读取模型…</option>
                         </select>
                     </div>
                     <button type="button" onclick="刷新模型列表()" style="margin-top:10px;padding:7px 14px;cursor:pointer;">刷新模型</button>
@@ -1675,14 +1645,12 @@
         }
 
         let 模型列表请求序号 = 0;
-        function 确保模型选项(name) {
-            if (typeof name !== 'string' || !name) return;
-            const select = document.getElementById('模型名称');
-            if (Array.from(select.options).some(option => option.value === name)) return;
+        let 当前模型选择 = typeof 模型名称 !== 'undefined' ? 模型名称 : '';
+        function 模型选项(name, label = name) {
             const option = document.createElement('option');
             option.value = name;
-            option.textContent = name;
-            select.appendChild(option);
+            option.textContent = label;
+            return option;
         }
         async function 刷新模型列表(engine) {
             if (!engine) {
@@ -1693,6 +1661,10 @@
             if (![1,2,3].includes(Number(engine))) engine = 1;
             const requestId = ++模型列表请求序号;
             const status = document.getElementById('模型列表状态');
+            const select = document.getElementById('模型名称');
+            const current = select.value || 当前模型选择;
+            select.disabled = true;
+            select.replaceChildren(模型选项('', '正在读取模型…'));
             status.textContent = '正在读取模型…';
             try {
                 const response = await fetch('/models.json?engine=' + engine, {cache:'no-store'});
@@ -1701,14 +1673,24 @@
                 if (requestId !== 模型列表请求序号) return;
                 if (Number(data.engine) !== Number(engine) || !Array.isArray(data.models))
                     throw new Error('模型列表格式错误');
-                const select = document.getElementById('模型名称');
-                const current = select.value;
-                data.models.forEach(确保模型选项);
-                确保模型选项(current);
-                select.value = current;
-                status.textContent = '找到 ' + data.models.filter(name => typeof name === 'string' && name).length + ' 个模型';
+                const names = [...new Set(data.models.filter(name => typeof name === 'string' && name))];
+                const available = names.includes(current);
+                const options = names.map(name => 模型选项(name));
+                if (!available) {
+                    const placeholder = 模型选项('', names.length ? '请选择模型' : '未找到模型');
+                    placeholder.disabled = true;
+                    options.unshift(placeholder);
+                }
+                select.replaceChildren(...options);
+                select.value = available ? current : '';
+                select.disabled = !names.length;
+                status.textContent = names.length ? '找到 ' + names.length + ' 个模型'
+                    : 'EXE 同目录没有此引擎的模型，请放入后刷新';
             } catch (error) {
-                if (requestId === 模型列表请求序号) status.textContent = '暂时无法读取模型列表';
+                if (requestId === 模型列表请求序号) {
+                    select.replaceChildren(模型选项('', '模型列表读取失败'));
+                    status.textContent = '暂时无法读取模型列表，请点击刷新模型重试';
+                }
             }
         }
         window.onload = function() {
@@ -1753,9 +1735,7 @@
             document.getElementById('其次锁定').value = 其次锁定;
             document.getElementById('再次锁定').value = 再次锁定;
             document.getElementById('准星类别').value = 准星类别;
-            确保模型选项(模型名称);
-            document.getElementById('模型名称').value = 模型名称;
-            刷新模型列表();
+            刷新模型列表(推理引擎);
             document.getElementById('优先锁定位置显示').textContent = 优先锁定位置;
             document.getElementById('其次锁定位置显示').textContent = 其次锁定位置;
             document.getElementById('再次锁定位置显示').textContent = 再次锁定位置;
@@ -2172,6 +2152,8 @@
                 发送消息给服务器("开枪间隔", this.value);
             });
             document.getElementById('模型名称').addEventListener('change', function() {
+                if (!this.value || this.disabled) return;
+                当前模型选择 = this.value;
                 发送消息给服务器('模型名称', this.value);
             });
         }

@@ -1,5 +1,6 @@
 #include "TrtBuild.h"
 #include "TrtRuntime.h"
+#include "OnnxFp16.h"
 #include <algorithm>
 #include <fstream>
 #include <limits>
@@ -184,8 +185,8 @@ void validateEngine(nvinfer1::ICudaEngine& engine, const nvinfer1::Dims& inputSh
         if (engine.getTensorFormat(name) != nvinfer1::TensorFormat::kLINEAR ||
             engine.getTensorLocation(name) != nvinfer1::TensorLocation::kDEVICE)
             throw std::runtime_error("TensorRT input/output must use linear device tensors.");
-        if (type != nvinfer1::DataType::kFLOAT && type != nvinfer1::DataType::kHALF)
-            throw std::runtime_error("Only FP32/FP16 YOLO input and output tensors are supported.");
+        if (type != nvinfer1::DataType::kHALF)
+            throw std::runtime_error("The converted engine must have FP16 input and output tensors.");
         if (engine.getTensorIOMode(name) == nvinfer1::TensorIOMode::kINPUT) {
             ++inputCount;
             if (shape.nbDims != 4 || shape.d[0] != 1 || shape.d[1] != 3 || shape.d[2] > 4096 || shape.d[3] > 4096)
@@ -207,7 +208,6 @@ bool convertOnnx(const ConversionOptions& options, const BuildLog& log, std::str
     error.clear();
     try {
         if (options.input.empty() || options.output.empty()) throw std::runtime_error("Select an input model and an output file.");
-        if (options.fp16) throw std::runtime_error("TensorRT 11 preserves ONNX tensor precision. Convert an FP16 ONNX model to use FP16.");
         const auto input = std::filesystem::weakly_canonical(std::filesystem::absolute(options.input));
         const auto output = std::filesystem::weakly_canonical(std::filesystem::absolute(options.output));
         if (_wcsicmp(input.c_str(), output.c_str()) == 0 ||
@@ -223,12 +223,14 @@ bool convertOnnx(const ConversionOptions& options, const BuildLog& log, std::str
         if (options.dynamicWidth < 0 || options.dynamicHeight < 0 || options.dynamicWidth > 4096 || options.dynamicHeight > 4096 ||
             ((options.dynamicWidth == 0) != (options.dynamicHeight == 0)))
             throw std::runtime_error("Dynamic input size requires both a positive width and height, each at most 4096.");
-        const auto bytes = readModel(input);
+        auto bytes = readModel(input);
         const auto values = metadata(bytes);
         const auto task = values.find("task");
         if (task != values.end() && !task->second.empty() && task->second != "detect")
             throw std::runtime_error("Unsupported ONNX task: " + task->second + ". Only YOLO detection models are supported.");
         const size_t classes = classCount(values);
+        emit(log, "Converting floating ONNX tensors and model I/O to FP16 in memory...");
+        bytes = onnx_fp16::convert(bytes);
         emit(log, "Loading TensorRT and checking the NVIDIA device...");
         auto& native = library(); native.ensure(true);
         int devices = 0;
@@ -261,9 +263,8 @@ bool convertOnnx(const ConversionOptions& options, const BuildLog& log, std::str
         std::unique_ptr<nvinfer1::IBuilderConfig> config(builder->createBuilderConfig());
         if (!config) throw fail("TensorRT could not create a build configuration", logger);
         config->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE, size_t(1) << 30);
-        // TensorRT 11 strongly typed networks retain the model's tensor precision.
-        // Disable optional TF32 computation to keep FP32 source precision.
-        if (!options.allowTf32) config->clearFlag(nvinfer1::BuilderFlag::kTF32);
+        // HALF is encoded in the transformed graph, as required by TensorRT 11.
+        config->clearFlag(nvinfer1::BuilderFlag::kTF32);
         const bool dynamic = std::any_of(shape.d, shape.d + shape.nbDims, [](int64_t dimension) { return dimension < 0; });
         nvinfer1::IOptimizationProfile* profile = nullptr; // Owned by IBuilder.
         if (dynamic) {
@@ -283,8 +284,7 @@ bool convertOnnx(const ConversionOptions& options, const BuildLog& log, std::str
             throw std::runtime_error("The model image size must be between 1 and 4096 in each dimension.");
         if (options.dynamicWidth && (shape.d[3] != options.dynamicWidth || shape.d[2] != options.dynamicHeight))
             throw std::runtime_error("The requested --size conflicts with the ONNX model's static dimensions.");
-        emit(log, "Input: " + std::string(tensor->getName()) + " [" + shapeText(shape) + "]. Preserving ONNX precision.");
-        emit(log, options.allowTf32 ? "TF32 acceleration enabled; small numerical differences are possible." : "TF32 disabled; strict FP32 computation for FP32 tensors.");
+        emit(log, "Input: " + std::string(tensor->getName()) + " [" + shapeText(shape) + "]. FP16 engine.");
         emit(log, "Building and optimizing the TensorRT engine. The window remains usable; this may take several minutes.");
         std::unique_ptr<nvinfer1::IHostMemory> serialized(builder->buildSerializedNetwork(*network, *config));
         if (!serialized || !serialized->size()) throw fail("TensorRT engine build failed", logger);

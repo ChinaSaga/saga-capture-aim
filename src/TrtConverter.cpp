@@ -19,11 +19,11 @@ namespace {
 constexpr UINT kLog = WM_APP + 1, kFinished = WM_APP + 2;
 constexpr int kInput = 101, kOutput = 102, kBrowseInput = 103, kBrowseOutput = 104;
 constexpr int kSize = 105, kStart = 106, kLogEdit = 107;
-constexpr int kTf32 = 108;
+
 struct Result { bool success; std::wstring text; };
 struct Ui {
     struct Placement { HWND window; int x, y, width, height; };
-    HWND input{}, output{}, size{}, tf32{}, start{}, log{}, progress{}, status{};
+    HWND input{}, output{}, size{}, start{}, log{}, progress{}, status{};
     HFONT font{};
     unsigned dpi = 96;
     std::vector<Placement> placements;
@@ -92,7 +92,7 @@ bool pick(HWND window, bool save, std::wstring& selected) {
     return true;
 }
 void enable(HWND window, Ui& ui, bool enabled) {
-    for (int id : {kInput, kOutput, kBrowseInput, kBrowseOutput, kSize, kTf32, kStart})
+    for (int id : {kInput, kOutput, kBrowseInput, kBrowseOutput, kSize, kStart})
         EnableWindow(GetDlgItem(window, id), enabled);
     SendMessageW(ui.progress, PBM_SETMARQUEE, !enabled, 40);
 }
@@ -100,7 +100,6 @@ void start(HWND window, Ui& ui) {
     if (ui.busy) return;
     trt::ConversionOptions options;
     options.input = text(ui.input); options.output = text(ui.output);
-    options.allowTf32 = SendMessageW(ui.tf32, BM_GETCHECK, 0, 0) == BST_CHECKED;
     if (options.input.empty() || options.output.empty()) {
         MessageBoxW(window, L"请先选择 ONNX 模型和保存位置。", L"转换模型", MB_OK | MB_ICONINFORMATION); return;
     }
@@ -168,8 +167,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wParam, LPARAM lPar
         control(window, *ui, L"STATIC", L"动态输入尺寸", 0, 0, 24, 153, 124, 24);
         ui->size = control(window, *ui, L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, kSize, 158, 148, 160, 32);
         SendMessageW(ui->size, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(L"例如 416x416"));
-        control(window, *ui, L"STATIC", L"静态模型留空；保留模型精度。", 0, 0, 334, 153, 360, 24);
-        ui->tf32 = control(window, *ui, L"BUTTON", L"启用 TF32 加速（可能有轻微数值差异）", BS_AUTOCHECKBOX | WS_TABSTOP, kTf32, 24, 190, 704, 28);
+        control(window, *ui, L"STATIC", L"静态模型留空；默认 FP16。", 0, 0, 334, 153, 360, 24);
+        control(window, *ui, L"STATIC", L"推理精度：FP16。自动转换 ONNX，生成半精度 TRT 模型。", 0, 0, 24, 190, 704, 28);
         control(window, *ui, L"STATIC", L"转换结果用于这台电脑的 NVIDIA 显卡。原始 ONNX 文件会保留。", 0, 0, 24, 230, 700, 24);
         ui->start = control(window, *ui, L"BUTTON", L"开始转换", BS_DEFPUSHBUTTON | WS_TABSTOP, kStart, 24, 270, 150, 38);
         ui->status = control(window, *ui, L"STATIC", L"选择模型后开始转换。", 0, 0, 192, 278, 520, 24);
@@ -248,13 +247,13 @@ int cli(const std::vector<std::wstring>& args) {
     for (size_t i = 1; i < args.size(); ++i) {
         const auto& flag = args[i];
         if (flag == L"--overwrite") options.overwrite = true;
-        else if (flag == L"--tf32") options.allowTf32 = true;
+        else if (flag == L"--fp16") {} // FP16 is always enabled.
         else if ((flag == L"--input" || flag == L"--output" || flag == L"--size") && i + 1 < args.size()) {
             const auto& value = args[++i];
             if (flag == L"--input") options.input = value;
             else if (flag == L"--output") options.output = value;
             else if (value.empty() || !sizeValue(value, options.dynamicWidth, options.dynamicHeight)) { print("Invalid --size; expected WIDTHxHEIGHT, each dimension between 1 and 4096."); return 2; }
-        } else { print("Usage: TrtConverter --input MODEL.onnx --output MODEL.trt [--size WIDTHxHEIGHT] [--tf32] [--overwrite]"); return 2; }
+        } else { print("Usage: TrtConverter --input MODEL.onnx --output MODEL.trt [--size WIDTHxHEIGHT] [--fp16] [--overwrite]"); return 2; }
     }
     if (options.input.empty() || options.output.empty()) { print("Both --input and --output are required."); return 2; }
     std::string error;

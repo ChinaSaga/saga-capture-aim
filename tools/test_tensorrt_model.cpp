@@ -119,7 +119,8 @@ void module(const wchar_t* name) {
 }
 
 int wmain(int argc, wchar_t** argv) {
-    if (argc != 3) { std::cerr << "Usage: test_tensorrt_model MODEL.trt IMAGE\n"; return 2; }
+    const bool expectFp16 = argc == 4 && std::wstring_view(argv[3]) == L"--expect-fp16";
+    if (argc != 3 && !expectFp16) { std::cerr << "Usage: test_tensorrt_model MODEL.trt IMAGE [--expect-fp16]\n"; return 2; }
     Cleanup cleanup;
     try {
         const auto engine = std::filesystem::canonical(argv[1]);
@@ -142,6 +143,11 @@ int wmain(int argc, wchar_t** argv) {
         Environment graph;
         graph.enabled(false);
         load(path);
+        if (expectFp16) {
+            require(detector->inputType == nvinfer1::DataType::kHALF && detector->outputType == nvinfer1::DataType::kHALF,
+                "Expected FP16 model I/O; FLOAT engine must not pass this check");
+            std::cout << "PASS engine FP16 input/output\n";
+        }
         const auto reference = direct(image); const auto originalRaw = rawOutput();
         const auto changedReference = direct(changed); const auto changedRaw = rawOutput();
         require(originalRaw != changedRaw, "Choose a non-black test image: raw outputs did not change");

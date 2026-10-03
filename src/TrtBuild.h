@@ -8,9 +8,7 @@ struct ConversionOptions {
     std::filesystem::path input;
     std::filesystem::path output;
     bool overwrite = false;
-    // Preserve ONNX tensor precision. TensorRT 11 uses strongly typed networks.
-    bool fp16 = false;
-    bool allowTf32 = false;
+    // Floating graph tensors and public model I/O are converted to FP16.
     int dynamicWidth = 0;
     int dynamicHeight = 0;
 };

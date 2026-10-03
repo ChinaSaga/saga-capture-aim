@@ -13,5 +13,9 @@
     <SagaOrtDir>$(SagaDependenciesRoot)onnxruntime-dml-$(SagaOrtVersion)</SagaOrtDir>
     <SagaDirectMLVersion>1.15.4</SagaDirectMLVersion>
     <SagaDirectMLDir>$(SagaDependenciesRoot)directml-$(SagaDirectMLVersion)-x64</SagaDirectMLDir>
+    <SagaTensorRtVersion>11.3.0.99</SagaTensorRtVersion>
+    <SagaTensorRtDir>$(SagaDependenciesRoot)tensorrt-$(SagaTensorRtVersion)</SagaTensorRtDir>
+    <SagaCudaVersion>13.4</SagaCudaVersion>
+    <SagaCudaDir Condition="'$(SagaCudaDir)' == ''">$(CUDA_PATH)</SagaCudaDir>
   </PropertyGroup>
 </Project>

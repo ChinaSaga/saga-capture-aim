@@ -4,14 +4,17 @@
 它是易语言原版「圣人自用 / 圣人双机」的 C++ 翻写版：界面、配置项、数值语义都对齐易语言原版，
 但把原版依赖的 `Saga.dll`（采集 + NCNN/ONNX + 串口）源码直接编进了 EXE，**运行时不再需要 Saga.dll**。
 
-- 工程：`SagaApp.vcxproj`（唯一工程，`Saga.sln` 引用）/ 源码：`src\`
+- 工程：`Saga.sln` 包含 `SagaApp.vcxproj`（主程序）与 `TrtConverter.vcxproj`（ONNX 转换工具）/ 源码：`src\`
 - 目标：**x64 Release**（工程只配了 x64，没有 Win32 配置）
 - 产物：`x64\Release\圣人双机服务端.exe`（TargetName 已改名，不是 SagaApp.exe）
+- 转换工具：`x64\Release\ONNX转TRT工具.exe`；模型及输出 `.trt` 不随源码入库
 - 许可：本项目主体 **GPL-3.0**（`LICENSE`）；第三方代码与数据见 `THIRD-PARTY-NOTICES.md`
 
 ---
 
 ## 0. 运行效果
+
+2026-10-03 新增“N卡专用推理”和独立 ONNX 转 `.trt` 工具。网页可刷新程序同目录的模型并选择自定义名称。同批 2048 张图片对照，TensorRT 默认使用 CUDA Graph＋阻塞同步，平均耗时约 0.996 ms，比 ONNX / DirectML 约低 21.45%；原有两种引擎保留，不自动切换。支持范围、数值差异与转换步骤见 [N卡专用推理使用说明](docs/TensorRT使用说明.md)。
 
 本次更新 OpenCV 5.0.0、ONNX Runtime 1.30.0（保留 CPU / DirectML）和 Asio 1.38.2；NCNN 20260526、DirectML 1.15.4 经核查保持当前稳定版。YOLOs-CPP、MAKCU 保留维护分支并合并或核查适用修正，Cat SDK 按用户要求保留。版本、来源、性能对照和分支状态见 [依赖更新记录](docs/依赖更新-2026-10-02.md)。SDK 统一位于项目 `.deps`。
 
@@ -49,8 +52,11 @@ NCNN、OpenCV、ONNXRuntime、DirectML 及 VC 运行库。
 
 ```powershell
 ./tools/install_dependencies.ps1 -Python 'C:\你的Python目录\python.exe'
+./tools/install_tensorrt.ps1
 ./tools/build.ps1
 ```
+
+重新编译还需要 CUDA 13.4 Toolkit，并设置 `CUDA_PATH`（或构建属性 `SagaCudaDir`）。这属于开发环境要求；已有程序使用普通 NCNN / ONNX 时，不要求 NVIDIA 显卡或启动 N卡专用引擎。构建同时生成主程序和转换工具。
 
 细节、依赖版本、排错见 **[docs/构建与部署.md](docs/构建与部署.md)**。
 
@@ -67,6 +73,8 @@ NCNN、OpenCV、ONNXRuntime、DirectML 及 VC 运行库。
 | 红蓝球采集与 CPU 训练 | 已编入 EXE 的原生 C++ 功能 | 两个按钮直接使用，无需安装 Python、PyTorch 或其它训练环境 |
 | `<模型名>.param` + `<模型名>.bin` | 用户自备 | NCNN 模型（`推理引擎=1`） |
 | `<模型名>.onnx` + `空类别.txt` | 用户自备 | ONNX 模型（`推理引擎=2`，缺类别文件会写空文件） |
+| `<模型名>.trt` | 本机 `ONNX转TRT工具.exe` 从原 ONNX 生成 | N卡专用推理（`推理引擎=3`）；支持范围见 TensorRT 使用说明 |
+| TensorRT / CUDA 运行库 | 随构建复制 | 仅 N卡专用推理或转换工具使用，普通 NCNN / ONNX 路径不要求 NVIDIA 显卡 |
 | `圣人自用.js` | 首次启动自动按默认值生成 | 全部配置键值对 |
 | `主机IP.ini` | 旧版文件，新版不再读取或生成 | 启动不询问 IP；点击“打开本机调参”使用实际本机地址，局域网地址见“本机网络检查” |
 | `圣人视觉识别系统.html` | 与 EXE 放在同一目录 | 使用外部网页文件；缺失时访问 IP 显示“网页不存在”，调参接口停用；补回文件后刷新恢复 |
@@ -106,7 +114,8 @@ Makcu 盒子用的是 WCH **CH343** 芯片，Windows 没有内置它的驱动，
 
 ```
 D:\C++采集卡源码
-├── Saga.sln / SagaApp.vcxproj         唯一工程（Release|x64、Debug|x64）
+├── Saga.sln / SagaApp.vcxproj         主程序（Release|x64、Debug|x64）
+├── TrtConverter.vcxproj               独立 ONNX 转 TRT 工具
 ├── Dependencies.props / dependencies.lock.json  SDK 路径、固定版本与来源校验
 ├── .deps\                            本地 SDK 与下载缓存（不入库）
 ├── RuntimeDependencies.targets        构建后自动复制第三方 DLL
@@ -141,6 +150,7 @@ D:\C++采集卡源码
 | 文档 | 看什么 |
 |---|---|
 | [CHANGELOG.md](CHANGELOG.md) | 按日期汇总更新及详细说明入口 |
+| [docs/TensorRT使用说明.md](docs/TensorRT使用说明.md) | N卡专用引擎、模型转换、目录刷新与实测范围 |
 | [docs/依赖更新-2026-10-02.md](docs/依赖更新-2026-10-02.md) | 库版本、维护分支、构建部署与新旧依赖对照 |
 | [docs/性能实测与优化-2026-10-02.md](docs/性能实测与优化-2026-10-02.md) | 真实图片、采集卡、可选 FP16 和精度差异 |
 | [docs/更新说明-2026-09-30.md](docs/更新说明-2026-09-30.md) | 最新 MAKCU 按键兼容修复、统一日志与验证结果 |
@@ -155,7 +165,7 @@ D:\C++采集卡源码
 ## 5. 仓库包含 / 不包含什么（准备上传 GitHub）
 
 **入库**：`README.md`、`CHANGELOG.md`、`docs\`（含 `reference\`）、`src\`、`tools\`（开发测试）、`web\`、`人手轨迹\`（说明与参考脚本，**不含个人采集数据**）、`Saga.sln`、`SagaApp.vcxproj`、
-`Dependencies.props`、`dependencies.lock.json`、`RuntimeDependencies.targets`、`圣人自用.sample.js`、`.gitignore`、`.gitattributes`、`LICENSE`、`THIRD-PARTY-NOTICES.md`。
+`TrtConverter.vcxproj`、`Dependencies.props`、`dependencies.lock.json`、`RuntimeDependencies.targets`、`圣人自用.sample.js`、`.gitignore`、`.gitattributes`、`LICENSE`、`THIRD-PARTY-NOTICES.md`。
 
 **不入库**（见 `.gitignore`）：
 

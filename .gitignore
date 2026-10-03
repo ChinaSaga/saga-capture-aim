@@ -54,6 +54,8 @@ __pycache__/
 *.param
 *.engine
 *.plan
+*.trt
+*.trt.*.tmp
 *.pt
 *.onnx.*_data
 模型*/

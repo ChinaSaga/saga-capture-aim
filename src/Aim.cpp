@@ -2,6 +2,7 @@
 #include "App.h"
 #include "AimLock.h"
 #include "FrameWait.h"
+#include "RuntimeLog.h"
 
 #include <cstdarg>
 
@@ -133,7 +134,7 @@ void triggerThread()
 }
 
 // ============================================================================
-//  线程_死循环推理（NCNN = 1 / ONNX = 2 共用）
+//  线程_死循环推理（NCNN = 1 / ONNX = 2 / TensorRT = 3 共用）
 // ============================================================================
 static void msgBox(const std::string& text)
 {
@@ -145,18 +146,22 @@ static void msgBox(const std::string& text)
 //  暂停期间推理线程空转，并且清掉画框与移动意图 —— 否则旧裁剪尺寸算出来的
 //  坐标会配着新的 全_图片宽高 用，中心和框都会错位。
 // ============================================================================
+static void clearInferenceResult()
+{
+    EnterCriticalSection(&g_drawLock);
+    g.canDraw = false;
+    std::memset(g.boxes, 0, sizeof(g.boxes));
+    LeaveCriticalSection(&g_drawLock);
+    g.nearestDist = 0;
+    g.triggerFire = false;
+    EnterCriticalSection(&g_moveLock);
+    g.moveDx = 0;
+    g.moveDy = 0;
+    LeaveCriticalSection(&g_moveLock);
+}
 void inferPause(bool paused)
 {
-    if (paused)
-    {
-        EnterCriticalSection(&g_drawLock);
-        g.canDraw = false;
-        std::memset(g.boxes, 0, sizeof(g.boxes));
-        LeaveCriticalSection(&g_drawLock);
-        g.nearestDist = 0;
-        g.moveDx = 0;
-        g.moveDy = 0;
-    }
+    if (paused) clearInferenceResult();
     g.inferPaused = paused;
 }
 
@@ -189,6 +194,7 @@ void aimThread(int engineWanted)
     unsigned long long captureSequence = 0;
     CaptureFrame captureFrame;
     std::string loadedModel;
+    bool modelReady = false;
     float accuracy = g.conf;
     if (accuracy < 0.1f) accuracy = 0.1f;
     int   detectCount = 0;
@@ -210,7 +216,19 @@ void aimThread(int engineWanted)
 
     while (g.running.load())
     {
-        if (g.engine != engineWanted) { sleepMs(5); continue; }
+        if (g.engine != engineWanted) {
+            // Keep only the selected engine's GPU allocations resident. Returning
+            // to an engine also retries a model whose previous load failed.
+            if (!loadedModel.empty()) {
+                if (engineWanted == 1) saga::ncnn_destroy();
+                else if (engineWanted == 2) saga::onnx_destroy();
+                else saga::trt_destroy();
+                loadedModel.clear();
+                modelReady = false;
+            }
+            sleepMs(5);
+            continue;
+        }
         if (g.inferPaused.load()) { sleepMs(2); continue; }   // 切换识别范围中：等新画面
         const bool directCapture = g.captureRunning.load();
         if (!directCapture) {
@@ -223,9 +241,12 @@ void aimThread(int engineWanted)
         }
 
         // ---------------- 模型加载 ----------------
-        const std::string& req = g.modelName;
+        const std::string req = g.selectedModelName();
+        if (g.engine != engineWanted) continue;
         if (loadedModel != req)
         {
+            clearInferenceResult();
+            modelReady = false;
             if (engineWanted == 1)
             {
                 std::string par = g.runDir + "\\" + req + ".param";
@@ -241,6 +262,7 @@ void aimThread(int engineWanted)
                         sleepMs(100);
                         continue;
                     }
+                    modelReady = true;
                 }
                 else
                 {
@@ -248,7 +270,7 @@ void aimThread(int engineWanted)
                     continue;
                 }
             }
-            else
+            else if (engineWanted == 2)
             {
                 std::string onnx = g.runDir + "\\" + req + ".onnx";
                 if (fileExists(onnx))
@@ -265,6 +287,7 @@ void aimThread(int engineWanted)
                         sleepMs(100);
                         continue;
                     }
+                    modelReady = true;
                 }
                 else
                 {
@@ -272,11 +295,35 @@ void aimThread(int engineWanted)
                     continue;
                 }
             }
+            else if (engineWanted == 3)
+            {
+                const std::string enginePath = g.runDir + "\\" + req + ".trt";
+                if (!fileExists(enginePath)) {
+                    msgBox("模型:" + req + "的trt文件不存在!请先用ONNX转TRT工具转换，再放入程序同目录。");
+                    continue;
+                }
+                loadedModel = req;
+                if (saga::trt_create(enginePath.c_str()) != 0) {
+                    runtime_log::write("[infer] TensorRT load failed: %s", utf8ToAnsi(saga::trt_last_error()).c_str());
+                    msgBox("N卡专用模型加载失败：\n" + utf8ToAnsi(saga::trt_last_error()) +
+                        "\n修复后切换一次推理引擎即可重试。");
+                    continue;
+                }
+                runtime_log::write("[infer] TensorRT model ready: %s", req.c_str());
+                modelReady = true;
+            }
         }
+        // Never invoke a failed or incomplete model. Existing ONNX/NCNN models
+        // previously marked a failed load as loaded and could use a null object.
+        if (!modelReady) { sleepMs(50); continue; }
 
         // ---------------- 帧率统计（每 100 次）----------------
         // Timeouts are not inference frames; acquire before counting a sample.
         if (directCapture && !captureAcquire(captureFrame, captureSequence, 50)) continue;
+        if (g.engine != engineWanted || g.inferPaused.load()) {
+            captureFrame = {};
+            continue;
+        }
         detectCount++;
         if (detectCount >= 100)
         {
@@ -291,17 +338,33 @@ void aimThread(int engineWanted)
 
         // ---------------- 推理 ----------------
         inferTimer.start();
-        int n = directCapture
-            ? (engineWanted == 1
-                ? ncnnDetectBgr(captureFrame.bmp + 54, captureFrame.width, captureFrame.height, captureFrame.stride, accuracy, g.nms, objs)
-                : onnxDetectBgr(captureFrame.bmp + 54, captureFrame.width, captureFrame.height, captureFrame.stride, accuracy, g.nms, objs))
-            : (engineWanted == 1)
-            ? sagaNcnnDetect(localFrame.data(), (int)localFrame.size(), accuracy, g.nms, objs)
-            : sagaOnnxDetect(localFrame.data(), (int)localFrame.size(), accuracy, g.nms, objs);
+        int n;
+        if (directCapture) {
+            const auto detect = engineWanted == 1 ? ncnnDetectBgr :
+                engineWanted == 2 ? onnxDetectBgr : trtDetectBgr;
+            n = detect(captureFrame.bmp + 54, captureFrame.width, captureFrame.height,
+                captureFrame.stride, accuracy, g.nms, objs);
+        } else if (engineWanted == 1) {
+            n = sagaNcnnDetect(localFrame.data(), (int)localFrame.size(), accuracy, g.nms, objs);
+        } else if (engineWanted == 2) {
+            n = sagaOnnxDetect(localFrame.data(), (int)localFrame.size(), accuracy, g.nms, objs);
+        } else {
+            n = saga::trt_detect(localFrame.data(), (int)localFrame.size(), accuracy, g.nms, objs);
+        }
         captureFrame = {};
         const double inferCost = inferTimer.ms();      // 亚毫秒精度，界面换算显示用帧率
+        // A model/engine change during inference must not publish the old result.
+        if (g.engine != engineWanted || g.inferPaused.load() || g.selectedModelName() != req) continue;
         g.inferMs = (int)inferCost;
         g.inferMsPrecise = inferCost;
+        if (n < 0 && engineWanted == 3) {
+            modelReady = false;
+            clearInferenceResult();
+            runtime_log::write("[infer] TensorRT inference failed: %s", utf8ToAnsi(saga::trt_last_error()).c_str());
+            msgBox("N卡专用推理失败：\n" + utf8ToAnsi(saga::trt_last_error()) +
+                "\n请重新转换模型，或切换推理引擎后重试。");
+            continue;
+        }
         if (n < 0) n = 0;
         if (n > 99) n = 99;
 

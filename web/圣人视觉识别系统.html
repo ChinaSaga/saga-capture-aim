@@ -1369,7 +1369,9 @@
                             <option value="自定义模型">自定义模型</option>
                         </select>
                     </div>
-                    <div class="radio-container">
+                    <button type="button" onclick="刷新模型列表()" style="margin-top:10px;padding:7px 14px;cursor:pointer;">刷新模型</button>
+                    <span id="模型列表状态" aria-live="polite" style="margin-left:8px;color:#666;font-size:13px;"></span>
+                    <div class="radio-container" style="flex-wrap:wrap;">
                         <div class="radio-item">
                             <input type="radio" id="NCNN" name="推理引擎" value="NCNN">
                             <label for="NCNN">NCNN</label>
@@ -1378,7 +1380,12 @@
                             <input type="radio" id="ONNX" name="推理引擎" value="ONNX">
                             <label for="ONNX">ONNX</label>
                         </div>
+                        <div class="radio-item">
+                            <input type="radio" id="TensorRT" name="推理引擎" value="TensorRT">
+                            <label for="TensorRT">N卡专用推理</label>
+                        </div>
                     </div>
+                    <p style="margin:12px 0 0;color:#666;font-size:13px;line-height:1.7;">NCNN使用.param/.bin，ONNX使用.onnx，N卡专用使用.trt；模型放在程序同目录。<br>N卡专用模型请先在本机转换，再选择对应的游戏模型。</p>
                     <div class="control-row" style="margin-top:30px;">
                         <span class="control-label">扳机热键1:</span>
                         <div class="select-container">
@@ -1668,6 +1675,43 @@
             }
         }
 
+        let 模型列表请求序号 = 0;
+        function 确保模型选项(name) {
+            if (typeof name !== 'string' || !name) return;
+            const select = document.getElementById('模型名称');
+            if (Array.from(select.options).some(option => option.value === name)) return;
+            const option = document.createElement('option');
+            option.value = name;
+            option.textContent = name;
+            select.appendChild(option);
+        }
+        async function 刷新模型列表(engine) {
+            if (!engine) {
+                const selected = document.querySelector('input[name="推理引擎"]:checked');
+                engine = selected ? ({NCNN:1, ONNX:2, TensorRT:3}[selected.id])
+                    : (typeof 推理引擎 !== 'undefined' ? Number(推理引擎) : 1);
+            }
+            if (![1,2,3].includes(Number(engine))) engine = 1;
+            const requestId = ++模型列表请求序号;
+            const status = document.getElementById('模型列表状态');
+            status.textContent = '正在读取模型…';
+            try {
+                const response = await fetch('/models.json?engine=' + engine, {cache:'no-store'});
+                if (!response.ok) throw new Error('模型列表读取失败');
+                const data = await response.json();
+                if (requestId !== 模型列表请求序号) return;
+                if (Number(data.engine) !== Number(engine) || !Array.isArray(data.models))
+                    throw new Error('模型列表格式错误');
+                const select = document.getElementById('模型名称');
+                const current = select.value;
+                data.models.forEach(确保模型选项);
+                确保模型选项(current);
+                select.value = current;
+                status.textContent = '找到 ' + data.models.filter(name => typeof name === 'string' && name).length + ' 个模型';
+            } catch (error) {
+                if (requestId === 模型列表请求序号) status.textContent = '暂时无法读取模型列表';
+            }
+        }
         window.onload = function() {
             绑定阵营复选框事件();
             切换阵容界面(目前阵容);
@@ -1710,7 +1754,9 @@
             document.getElementById('其次锁定').value = 其次锁定;
             document.getElementById('再次锁定').value = 再次锁定;
             document.getElementById('准星类别').value = 准星类别;
+            确保模型选项(模型名称);
             document.getElementById('模型名称').value = 模型名称;
+            刷新模型列表();
             document.getElementById('优先锁定位置显示').textContent = 优先锁定位置;
             document.getElementById('其次锁定位置显示').textContent = 其次锁定位置;
             document.getElementById('再次锁定位置显示').textContent = 再次锁定位置;
@@ -1733,6 +1779,8 @@
                 document.getElementById('NCNN').checked = true;
             } else if (推理引擎 == 2) {
                 document.getElementById('ONNX').checked = true;
+            } else if (推理引擎 == 3) {
+                document.getElementById('TensorRT').checked = true;
             }
 
             // 移动方式初始化
@@ -2013,10 +2061,22 @@
                 发送消息给服务器("开镜时间", this.value);
             });
             document.getElementById('NCNN').addEventListener('change', function() {
-                if (this.checked) 发送消息给服务器("推理引擎", "1");
+                if (this.checked) {
+                    发送消息给服务器("推理引擎", "1");
+                    刷新模型列表(1);
+                }
             });
             document.getElementById('ONNX').addEventListener('change', function() {
-                if (this.checked) 发送消息给服务器("推理引擎", "2");
+                if (this.checked) {
+                    发送消息给服务器("推理引擎", "2");
+                    刷新模型列表(2);
+                }
+            });
+            document.getElementById('TensorRT').addEventListener('change', function() {
+                if (this.checked) {
+                    发送消息给服务器("推理引擎", "3");
+                    刷新模型列表(3);
+                }
             });
             document.querySelectorAll('input[name="moveDelay"]').forEach(el => {
                 el.addEventListener('change', function() {

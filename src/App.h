@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <ctime>
 #include <string>
 #include <thread>
@@ -84,8 +85,13 @@ struct AppState
     int   lockRange = 256;                     // 整数_锁定范围
     int   centerRange = 50;                    // 仅优先锁定类别的中心点停移范围 (内部 /100.0)
     int   crossClass = 5;                      // 整数_准星类别 (0=关闭)
-    std::string modelName = "三角洲行动";      // 文本_模型名称
-    int   engine = 1;                          // 整数_推理引擎 1=NCNN 2=ONNX
+    mutable std::mutex modelMutex;
+    std::string modelName = "三角洲行动";      // 文本_模型名称，读写须持 modelMutex
+    std::string selectedModelName() const {
+        std::lock_guard<std::mutex> guard(modelMutex);
+        return modelName;
+    }
+    std::atomic<int> engine{1};                 // 1=NCNN 2=ONNX 3=TensorRT
 
     // ---- 锁定类别与位置 ----
     int prioLock = 1, secondLock = 2, thirdLock = 3;              // 整数_优先/其次/再次锁定
@@ -252,7 +258,7 @@ bool applyCropSize(int size);
 //  推理 + 瞄准
 // ============================================================================
 double normRatioRel(int px, int py, int x1, int y1, int x2, int y2);
-void   aimThread(int engineWanted);            // NCNN(1) / ONNX(2) 共用
+void   aimThread(int engineWanted);            // NCNN(1) / ONNX(2) / TensorRT(3)
 void   inferPause(bool paused);                // 暂停/恢复推理线程（切换识别范围用）
 void   mouseMoveThread();                      // 线程_鼠标移动
 void   aimMoveOnce();                          // 接口_鼠标移动

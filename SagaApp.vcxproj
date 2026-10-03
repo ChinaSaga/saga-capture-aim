@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   ============================================================================
-   SagaApp.vcxproj —— 唯一的工程（64 位 / x64 / Release）
+   SagaApp.vcxproj —— 服务端工程（x64 / Release 和 Debug）
+   TrtConverter.vcxproj 单独生成 ONNX 转 TensorRT 工具。
 
    历史：原来是两个工程
      · Saga.vcxproj       -> Saga.dll   （采集卡 + NCNN/ONNX + Makcu 串口，源码在 ConsoleApplication2\）
@@ -78,7 +79,7 @@
       <!-- 不开 /permissive-：原 DLL 工程也没开，asio 那套模板在老工程里没验证过 -->
       <ConformanceMode>false</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)src\Makcu\cat\src;$(ProjectDir)src\Makcu\cat\include;$(ProjectDir)src\Makcu\include;$(SagaNcnnDir)\include;$(SagaNcnnDir)\include\ncnn;$(SagaOrtDir)\include;$(SagaOpenCvDir)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)src\Makcu\cat\src;$(ProjectDir)src\Makcu\cat\include;$(ProjectDir)src\Makcu\include;$(SagaNcnnDir)\include;$(SagaNcnnDir)\include\ncnn;$(SagaOrtDir)\include;$(SagaOpenCvDir)\include;$(SagaTensorRtDir)\include;$(SagaCudaDir)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <!-- Makcu 源码里有 try/catch，必须开异常处理；原 DLL 工程没开（C4530，异常时析构不执行） -->
       <ExceptionHandling>Sync</ExceptionHandling>
@@ -117,7 +118,7 @@
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <ConformanceMode>false</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)src\Makcu\cat\src;$(ProjectDir)src\Makcu\cat\include;$(ProjectDir)src\Makcu\include;$(SagaNcnnDir)\include;$(SagaNcnnDir)\include\ncnn;$(SagaOrtDir)\include;$(SagaOpenCvDir)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)src\Makcu\cat\src;$(ProjectDir)src\Makcu\cat\include;$(ProjectDir)src\Makcu\include;$(SagaNcnnDir)\include;$(SagaNcnnDir)\include\ncnn;$(SagaOrtDir)\include;$(SagaOpenCvDir)\include;$(SagaTensorRtDir)\include;$(SagaCudaDir)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <ExceptionHandling>Sync</ExceptionHandling>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
       <AdditionalOptions>/source-charset:utf-8 /execution-charset:.936 %(AdditionalOptions)</AdditionalOptions>
@@ -152,6 +153,8 @@
     <ClCompile Include="src\OpnecvCapture.cpp" />
     <ClCompile Include="src\NCNN.cpp" />
     <ClCompile Include="src\ONNX.cpp" />
+    <ClCompile Include="src\TensorRT.cpp" />
+    <ClCompile Include="src\TrtRuntime.cpp" />
     <ClCompile Include="src\Mouse.cpp" />
     <ClCompile Include="src\Makcu\Makcu.cpp" />
     <ClCompile Include="src\Makcu\src\serialport.cpp" />
@@ -167,6 +170,7 @@
     <ClInclude Include="src\HumanTrajectoryModel.h" />
     <ClInclude Include="src\Inference.h" />
     <ClInclude Include="src\TensorPixels.h" />
+    <ClInclude Include="src\TrtRuntime.h" />
     <ClInclude Include="src\NcnnPostprocess.h" />
     <ClInclude Include="src\detection.hpp" />
     <ClInclude Include="src\drawing.hpp" />
@@ -189,6 +193,7 @@
     <ClInclude Include="src\LanFirewall.h" />
     <ClInclude Include="src\WebAccess.h" />
     <ClInclude Include="src\RuntimeLog.h" />
+    <ClInclude Include="src\ModelFiles.h" />
   </ItemGroup>
   <ItemGroup>
     <!-- Makcu（WCH CH343）驱动：打进 EXE 资源，缺驱动时自动静默安装 -->

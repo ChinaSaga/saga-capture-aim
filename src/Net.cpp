@@ -1,5 +1,6 @@
 #include "App.h"
 #include "RuntimeLog.h"
+#include "ModelFiles.h"
 
 #include <algorithm>
 #include <map>
@@ -154,7 +155,8 @@ void configSyncAll(bool save)
     bufInt("扳机热键2", g.triggerKey[1]);
     bufInt("扳机热键3", g.triggerKey[2]);
     bufInt("扳机热键4", g.triggerKey[3]);
-    bufInt("推理引擎", g.engine);
+    int engineTmp = g.engine.load();
+    bufInt("推理引擎", engineTmp);
     bufInt("准星类别", g.crossClass);
     bufInt("开镜时间", g.adsTime);
     bufInt("开枪间隔", g.shotInterval);
@@ -165,7 +167,12 @@ void configSyncAll(bool save)
     g.camp = campTmp;
     bufInt("中心点范围", g.centerRange);
 
-    bufStr("模型名称", g.modelName);
+    {
+        std::lock_guard<std::mutex> modelGuard(g.modelMutex);
+        bufStr("模型名称", g.modelName);
+        // Publish the selected engine together with its model name.
+        g.engine = engineTmp >= 1 && engineTmp <= 3 ? engineTmp : 1;
+    }
     bufStr("框内移动", g.moveInBox);
     bufStr("线程移动", g.threadMove);
     bufStr("自瞄连续按下", g.aimContinuous);
@@ -195,7 +202,7 @@ void configSyncAll(bool save)
 void configSaveFile()
 {
     g_outBuf += "模型名称=\"";
-    g_outBuf += g.modelName;
+    g_outBuf += g.selectedModelName();
     g_outBuf += "\"\n";
 
     g_outBuf += "服务器ip=\"";
@@ -323,7 +330,9 @@ static void handleRequest(SOCKET c, const std::string& req)
     std::istringstream requestLine(head);
     std::string method, path;
     requestLine >> method >> path;
-    path = path.substr(0, path.find('?'));
+    const size_t queryOffset = path.find('?');
+    const std::string query = queryOffset == std::string::npos ? "" : path.substr(queryOffset+1);
+    path = path.substr(0, queryOffset);
     if (method == "GET" && path == "/__saga_health") {
         sendResponse(c, 200, "{\"service\":\"SagaApp\",\"pid\":" + std::to_string(GetCurrentProcessId()) + "}");
         return;
@@ -337,6 +346,15 @@ static void handleRequest(SOCKET c, const std::string& req)
     }
     if (method == "GET" && path == "/config.js") {
         sendResponse(c, 200, webConfigScript(), "application/javascript; charset=utf-8");
+        return;
+    }
+    if (method == "GET" && path == "/models.json") {
+        int engine = 0;
+        if (!model_files::parseEngine(query, engine)) {
+            sendResponse(c, 400, "{\"error\":\"Invalid engine; expected 1, 2 or 3\"}");
+            return;
+        }
+        sendResponse(c, 200, model_files::json(model_files::fromGbk(g.runDir), engine));
         return;
     }
     if (method == "GET" && (path == "/" || path == "/index.html") &&

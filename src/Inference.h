@@ -46,6 +46,13 @@ namespace saga
                             float conf_thres, float nms_thres, DetectObject* out_objects);
     void        onnx_destroy();
     const char* onnx_last_error();
+
+    // ---- NVIDIA TensorRT inference (TensorRT.cpp), optional native runtime ----
+    int         trt_create(const char* model_path);
+    int         trt_detect(const unsigned char* bmp_data, int bmp_size,
+                           float conf_thres, float nms_thres, DetectObject* out_objects);
+    void        trt_destroy();
+    const char* trt_last_error();
 }
 
 struct CaptureFrame {
@@ -58,3 +65,4 @@ bool captureAcquire(CaptureFrame& frame, unsigned long long& sequence, unsigned 
 void canvasDrawCapture(const CaptureFrame& frame);
 int ncnnDetectBgr(const unsigned char*, int, int, size_t, float, float, DetectObject*);
 int onnxDetectBgr(const unsigned char*, int, int, size_t, float, float, DetectObject*);
+int trtDetectBgr(const unsigned char*, int, int, size_t, float, float, DetectObject*);

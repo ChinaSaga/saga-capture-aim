@@ -12,6 +12,8 @@
 | PCI 设备 ID 表数据 | `src\GpuIdTable.h`（源数据 `docs\reference\pci.ids`） | pci.ids 项目：GPL-2.0+ 或 3-clause BSD（二选一，均可与本项目共存） |
 | 显卡名简化规则 | `src\GpuNameTable.h` | 本项目自行整理 |
 | YOLOs-CPP 相关头文件维护分支 | `src\yolos.hpp`、`detection.hpp`、`nms.hpp`、`session_base.hpp`、`preprocessing.hpp` 等 | Geekgineer/YOLOs-CPP v1.1.0 上游为 AGPL-3.0；参考许可证见 `docs/licenses/YOLOs-CPP-AGPL-3.0.txt`；保留本地 SIMD 和缓冲复用改动 |
+| NVIDIA TensorRT 11.3.0.99 | `.deps/tensorrt-11.3.0.99`；仅本地构建与部署，不入库 | NVIDIA 软件许可及 TensorRT 补充条款；[官方许可证](https://docs.nvidia.com/deeplearning/tensorrt/latest/reference/sla.html)，随 SDK 的许可文件按原文保留 |
+| NVIDIA CUDA 13.4 运行库 / SDK | 构建环境与运行目录；不入库 | [CUDA 官方 EULA](https://docs.nvidia.com/cuda/eula/)；N卡专用引擎和转换工具使用，不能以项目 GPL 重新授权 |
 
 ## ⚠ 需要注意的两点
 

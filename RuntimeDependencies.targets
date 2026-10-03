@@ -6,6 +6,10 @@
     <SagaVCRedistX64 Condition="'$(SagaVCRedistX64)' == '' and '$(VCToolsRedistDir)' != ''">$(VCToolsRedistDir)x64</SagaVCRedistX64>
     <SagaVCRedistX64 Condition="'$(SagaVCRedistX64)' == ''">$(VSInstallDir)VC\Redist\MSVC\$(VCToolsVersion)\x64</SagaVCRedistX64>
   </PropertyGroup>
+  <Target Name="ValidateSagaTensorRtSdk" BeforeTargets="ClCompile" Condition="'$(DesignTimeBuild)' != 'true'">
+    <Error Condition="!Exists('$(SagaTensorRtDir)\include\NvInfer.h')" Text="TensorRT SDK is missing. Run tools/install_tensorrt.ps1." />
+    <Error Condition="!Exists('$(SagaCudaDir)\include\cuda_runtime_api.h')" Text="CUDA 13.4 headers are missing. Install the CUDA 13.4 Toolkit and set CUDA_PATH, or specify SagaCudaDir." />
+  </Target>
   <Target Name="CopySagaRuntimeDependencies" AfterTargets="Build"
           Condition="'$(Platform)' == 'x64' and '$(DesignTimeBuild)' != 'true'">
     <ItemGroup>
@@ -14,6 +18,10 @@
       <!-- CPU and DirectML are linked into this runtime; no shared provider DLL. -->
       <SagaRuntimeDll Include="$(SagaOrtDir)\lib\onnxruntime.dll" />
       <SagaRuntimeDll Include="$(SagaDirectMLDir)\DirectML.dll" />
+      <!-- TensorRT is loaded only when selected. Ship its builder resources too
+           so the converter can target any supported NVIDIA GPU. -->
+      <SagaRuntimeDll Include="$(SagaTensorRtDir)\bin\*.dll" Condition="Exists('$(SagaTensorRtDir)\bin\nvinfer_11.dll')" />
+      <SagaRuntimeDll Include="$(SagaCudaDir)\bin\x64\cudart64_13.dll;$(SagaCudaDir)\bin\x64\cublas64_13.dll;$(SagaCudaDir)\bin\x64\cublasLt64_13.dll;$(SagaCudaDir)\bin\x64\nvrtc64_130_0.dll;$(SagaCudaDir)\bin\x64\nvrtc-builtins64_134.dll;$(SagaCudaDir)\bin\x64\nvJitLink_130_0.dll" Condition="Exists('$(SagaTensorRtDir)\bin\nvinfer_11.dll')" />
       <!-- Both application configurations use /MD and release third-party libraries. -->
       <SagaRuntimeDll Include="$(SagaVCRedistX64)\Microsoft.VC145.CRT\concrt140.dll" />
       <SagaRuntimeDll Include="$(SagaVCRedistX64)\Microsoft.VC145.CRT\msvcp140.dll" />
@@ -29,12 +37,15 @@
       <SagaOpenCvNotices Include="$(SagaOpenCvDir)\etc\licenses\**\*" />
       <SagaNcnnLicense Include="$(SagaNcnnDir)\..\LICENSE.txt" />
       <SagaOrtLicense Include="$(SagaOrtDir)\LICENSE;$(SagaOrtDir)\ThirdPartyNotices.txt" Condition="Exists('$(SagaOrtDir)\LICENSE')" />
+      <SagaTensorRtLicense Include="$(SagaTensorRtDir)\LICENSE*;$(SagaTensorRtDir)\TensorRT*EULA*;$(SagaTensorRtDir)\doc\*LICENSE*;$(SagaTensorRtDir)\doc\*EULA*;$(SagaTensorRtDir)\doc\Acknowledgements.txt;$(SagaTensorRtDir)\doc\README.txt" />
+      <SagaCudaLicense Include="$(SagaCudaDir)\EULA.txt" Condition="Exists('$(SagaCudaDir)\EULA.txt')" />
     </ItemGroup>
     <Error Condition="!Exists('$(SagaOrtDir)\lib\onnxruntime.dll')"
            Text="Required ONNX Runtime SDK is missing. Run tools/install_dependencies.ps1." />
     <Error Condition="!Exists('%(SagaRuntimeDll.Identity)')"
            Text="Required x64 runtime DLL is missing: %(SagaRuntimeDll.Identity)" />
     <MakeDir Directories="$(TargetDir);$(TargetDir)licenses\DirectML;$(TargetDir)licenses\OpenCV;$(TargetDir)licenses\NCNN;$(TargetDir)licenses\ONNXRuntime" />
+    <MakeDir Directories="$(TargetDir)licenses\TensorRT;$(TargetDir)licenses\CUDA" />
     <Delete Files="$(TargetDir)onnxruntime_providers_shared.dll" />
     <Copy SourceFiles="@(SagaRuntimeDll)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(SagaDirectMLLicense)" DestinationFolder="$(TargetDir)licenses\DirectML" SkipUnchangedFiles="true" />
@@ -42,6 +53,8 @@
     <Copy SourceFiles="@(SagaOpenCvNotices)" DestinationFiles="@(SagaOpenCvNotices->'$(TargetDir)licenses\OpenCV\third-party\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(SagaNcnnLicense)" DestinationFolder="$(TargetDir)licenses\NCNN" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(SagaOrtLicense)" DestinationFolder="$(TargetDir)licenses\ONNXRuntime" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(SagaTensorRtLicense)" DestinationFolder="$(TargetDir)licenses\TensorRT" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(SagaCudaLicense)" DestinationFolder="$(TargetDir)licenses\CUDA" SkipUnchangedFiles="true" />
     <Message Importance="high" Text="x64 runtime DLLs copied to: $(TargetDir)" />
   </Target>
 </Project>

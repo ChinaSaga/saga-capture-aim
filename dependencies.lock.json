@@ -1,5 +1,13 @@
 {
   "verified_on": "2026-10-02",
+  "tensorrt": {
+    "version": "11.3.0.99",
+    "cuda": "13.4",
+    "verified_on": "2026-10-03",
+    "url": "https://developer.download.nvidia.com/compute/machine-learning/tensorrt/11.3.0/zip/TensorRT-Enterprise-11.3.0.99-Windows-amd64-cuda-13.4-Release-external.zip",
+    "sha256": "8ffd112d7bab97bc81eed818358b85df8c317bcdfc3cd3c731c220df7ca737eb",
+    "install": "tools/install_tensorrt.ps1"
+  },
   "opencv": {
     "version": "5.0.0",
     "url": "https://github.com/opencv/opencv/releases/download/5.0.0/opencv-5.0.0-windows.exe",

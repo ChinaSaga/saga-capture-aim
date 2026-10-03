@@ -10,8 +10,9 @@ if ($InstallDependencies) {
     $arguments = @{ VisualStudio = $VisualStudio }
     if ($Python) { $arguments.Python = $Python }
     & (Join-Path $PSScriptRoot 'install_dependencies.ps1') @arguments
+    & (Join-Path $PSScriptRoot 'install_tensorrt.ps1')
 }
 $msbuild = Join-Path $VisualStudio 'MSBuild\Current\Bin\MSBuild.exe'
 if (!(Test-Path -LiteralPath $msbuild)) { throw "MSBuild is missing: $msbuild" }
-& $msbuild (Join-Path $repo 'SagaApp.vcxproj') "/p:Configuration=$Configuration" '/p:Platform=x64' '/m' '/v:minimal' '/nologo'
+& $msbuild (Join-Path $repo 'Saga.sln') "/p:Configuration=$Configuration" '/p:Platform=x64' '/m' '/v:minimal' '/nologo'
 if ($LASTEXITCODE) { throw "Application build failed: $LASTEXITCODE" }

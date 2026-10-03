@@ -333,7 +333,7 @@ void frameThreadShotSave()
                         std::chrono::system_clock::now().time_since_epoch()).count();
                     char name[32];
                     snprintf(name, sizeof(name), "%lld.jpg", ts);
-                    std::string dir = g.runDir + "\\" + g.modelName;
+                    std::string dir = g.runDir + "\\" + g.selectedModelName();
                     CreateDirectoryA(dir.c_str(), nullptr);
                     // The capture lease already contains top-down BGR; preserve
                     // its stride and encode directly, without copying/decoding BMP.

@@ -19,10 +19,11 @@ $out = Join-Path $root $OutputDirectory
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 $env:INCLUDE = "$vc/include;$sdk/Include/$sdkVersion/ucrt;$sdk/Include/$sdkVersion/um;$sdk/Include/$sdkVersion/shared;$sdk/Include/$sdkVersion/winrt"
 $env:LIB = "$vc/lib/x64;$sdk/Lib/$sdkVersion/ucrt/x64;$sdk/Lib/$sdkVersion/um/x64"
-$compilerArgs = @('/nologo','/O2','/Ob3','/MD','/EHsc','/std:c++20','/arch:AVX2','/fp:fast','/source-charset:utf-8','/execution-charset:.936', '/DNDEBUG',
+$compilerArgs = @('/nologo','/O2','/Ob3','/Gy','/MD','/EHsc','/std:c++20','/arch:AVX2','/fp:fast','/source-charset:utf-8','/execution-charset:.936', '/DNDEBUG',
     "/I$(Join-Path $root $Headers)","/I$($deps.SagaOpenCvDir)/include","/I$($deps.SagaOrtDir)/include",
     "/I$($deps.SagaNcnnDir)/include","/I$($deps.SagaNcnnDir)/include/ncnn",
-    "/Fo$out/$Name.obj", "/Fe$out/$Name.exe", (Join-Path $root $Source), '/link',
+    "/I$($deps.SagaTensorRtDir)/include","/I$($deps.SagaCudaDir)/include",
+    "/Fo$out/$Name.obj", "/Fe$out/$Name.exe", (Join-Path $root $Source), '/link', '/OPT:REF',
     "/LIBPATH:$($deps.SagaOpenCvDir)/x64/vc16/lib","/LIBPATH:$($deps.SagaOrtDir)/lib",
     "/LIBPATH:$($deps.SagaNcnnDir)/lib",'ncnn.lib',$deps.SagaOpenCvLibrary,'onnxruntime.lib','dxgi.lib')
 & "$vc/bin/Hostx64/x64/cl.exe" @compilerArgs

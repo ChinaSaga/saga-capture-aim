@@ -169,6 +169,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
     LOG("[11] 启动推理线程");
     std::thread([] { aimThread(1); }).detach();
     std::thread([] { aimThread(2); }).detach();
+    std::thread([] { aimThread(3); }).detach();
     std::thread(mouseMoveThread).detach();
     std::thread(triggerThread).detach();
 

@@ -688,8 +688,8 @@ void makcuStartupThread()
         if (!makcuPortPresent(nullptr)) {
             startupState = findWchDevices().empty() ? StartupState::Absent : StartupState::Failed;
             drvLog("[06] 无可用盒子串口，跳过连接等待；后台初始化用时 %llums", GetTickCount64() - started);
-            return;
-        }
+            // The monitor below also handles a device plugged in after startup.
+        } else {
         startupState = StartupState::Connecting;
         const ULONGLONG deadline = GetTickCount64() + 10000;
         bool connected = false;
@@ -701,9 +701,54 @@ void makcuStartupThread()
         startupState = connected ? StartupState::Ready : StartupState::Failed;
         drvLog("[06] makcuConnect %s；后台初始化用时 %llums", connected ? "成功" : "失败（未收到有效设备应答）",
             GetTickCount64() - started);
+        }
     } catch (const std::exception& error) {
         startupState = StartupState::Failed;
         drvLog("[hw] 后台初始化异常：%s", error.what());
+    }
+
+    // Reuse the startup worker: no enumeration or response waits on the normal
+    // movement path. A zero move validates writes, not downstream HID delivery.
+    bool wasConnected = saga::makcuIsConnected() != 0;
+    ULONGLONG nextProbe = GetTickCount64() + 1000;
+    ULONGLONG nextRetry = 0;
+    while (g.running.load()) {
+        const ULONGLONG now = GetTickCount64();
+        bool connected = saga::makcuIsConnected() != 0;
+        if (connected && now >= nextProbe) {
+            connected = saga::makcuMove(0, 0) != 0;
+            nextProbe = now + 1000;
+        }
+        if (connected) {
+            startupState = StartupState::Ready;
+        } else {
+            if (wasConnected) {
+                drvLog("[hw] MAKCU 通信中断，后台自动重连（不重放失败命令）");
+                startupState = StartupState::Failed;
+                nextRetry = now;
+            }
+            if (now >= nextRetry) {
+                try {
+                    if (makcuPortPresent(nullptr)) {
+                        startupState = StartupState::Connecting;
+                        connected = g.running.load() && makcuConnect(0);
+                        startupState = connected ? StartupState::Ready : StartupState::Failed;
+                        if (connected) {
+                            drvLog("[hw] MAKCU 重新握手成功，通信已恢复");
+                            nextProbe = GetTickCount64() + 1000;
+                        }
+                    } else {
+                        startupState = StartupState::Absent;
+                    }
+                } catch (const std::exception& error) {
+                    startupState = StartupState::Failed;
+                    drvLog("[hw] MAKCU 重连异常：%s", error.what());
+                }
+                nextRetry = GetTickCount64() + 2000;
+            }
+        }
+        wasConnected = connected;
+        Sleep(250);
     }
 }
 
@@ -715,6 +760,6 @@ const char* makcuStartupStatus()
     case StartupState::Connecting: return "MAKCU 连接中";
     case StartupState::Ready: return saga::makcuIsConnected() ? "MAKCU 已连接" : "MAKCU 已断开";
     case StartupState::Absent: return "MAKCU 未插入";
-    default: return "MAKCU 异常，见日志";
+    default: return "MAKCU 异常，自动重连中";
     }
 }

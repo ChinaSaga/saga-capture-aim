@@ -96,7 +96,7 @@ namespace cat {
     }
 
     bool Device::isMonitoring() const {
-        return m_impl->monitoring.load();
+        return m_impl->monitoring.load() && m_impl->catNet->monitorActive();
     }
 
     ErrorCode Device::mouseMove(int16_t x, int16_t y) {

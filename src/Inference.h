@@ -9,6 +9,7 @@ struct DetectObject {
 
 namespace saga
 {
+    void set_capture_log(void (*callback)(const char*));
 
     // ---- Makcu 串口鼠标（Makcu\Makcu.cpp）----
     int  makcuConnect(int port);

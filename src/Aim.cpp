@@ -203,6 +203,7 @@ void aimThread(int engineWanted)
     CaptureFrame captureFrame;
     std::string loadedModel;
     bool modelReady = false;
+    bool firstInference = true;
     float accuracy = g.conf;
     if (accuracy < 0.1f) accuracy = 0.1f;
     int   detectCount = 0;
@@ -253,6 +254,8 @@ void aimThread(int engineWanted)
         if (g.engine != engineWanted) continue;
         if (loadedModel != req)
         {
+            runtime_log::write("[infer] 开始加载模型：引擎=%d，模型=%s", engineWanted, req.c_str());
+            firstInference = true;
             clearInferenceResult();
             modelReady = false;
             if (engineWanted == 1)
@@ -291,7 +294,10 @@ void aimThread(int engineWanted)
                     int rc = sagaOnnxCreate(onnx.c_str(), txt.c_str(), true);
                     if (rc != 0)
                     {
-                        msgBox("模型加载失败，错误码：" + std::to_string(rc));
+                        const std::string detail = utf8ToAnsi(saga::onnx_last_error());
+                        runtime_log::write("[infer] ONNX 加载失败：%s", detail.c_str());
+                        msgBox("ONNX 模型加载失败：\n" + detail +
+                            "\n\n若提示 onnxruntime.dll 不兼容，请完整替换新版程序及配套 DLL，不能只替换 EXE。");
                         sleepMs(100);
                         continue;
                     }
@@ -346,6 +352,7 @@ void aimThread(int engineWanted)
 
         // ---------------- 推理 ----------------
         inferTimer.start();
+        if (firstInference) runtime_log::write("[infer] 模型已就绪，开始首次推理：引擎=%d", engineWanted);
         int n;
         if (directCapture) {
             const auto detect = engineWanted == 1 ? ncnnDetectBgr :
@@ -361,6 +368,10 @@ void aimThread(int engineWanted)
         }
         captureFrame = {};
         const double inferCost = inferTimer.ms();      // 亚毫秒精度，界面换算显示用帧率
+        if (firstInference) {
+            runtime_log::write("[infer] 首次推理返回：引擎=%d，结果=%d，耗时=%.3fms", engineWanted, n, inferCost);
+            firstInference = false;
+        }
         if (profileTrt && n >= 0) {
             const auto timing = trtLastTiming();
             ++profileFrames; profileTotal += inferCost;

@@ -1,4 +1,5 @@
 #include "App.h"
+#include "BoxController.h"
 
 // ============================================================================
 //  线程_死循环热键监控
@@ -8,11 +9,15 @@ void hotkeyThread()
     while (g.running.load())
     {
         // Query a configured button once per scan (Ferrum performs serial I/O).
-        bool queried[7] = {}, pressed[7] = {};
+        struct CachedKey { int key; bool pressed; } cache[12]{};
+        int cached = 0;
         const auto readKey = [&](int key, bool& state) {
-            if (key <= 0 || key >= 7) { state = false; return; }
-            if (!queried[key]) { makcuState(key, pressed[key]); queried[key] = true; }
-            state = pressed[key];
+            if (key <= 0) { state = false; return; }
+            for (int i = 0; i < cached; ++i) {
+                if (cache[i].key == key) { state = cache[i].pressed; return; }
+            }
+            state = boxKeyState(key);
+            if (cached < 12) cache[cached++] = {key, state};
         };
         bool down = false;
         if (g.alwaysOn == "true") down = true;      // 吸附常驻

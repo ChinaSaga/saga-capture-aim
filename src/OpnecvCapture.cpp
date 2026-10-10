@@ -17,6 +17,12 @@
 #include <malloc.h>
 #include "CapturePixels.h"
 
+static std::atomic<void (*)(const char*)> captureLogSink{nullptr};
+void saga::set_capture_log(void (*callback)(const char*)) { captureLogSink.store(callback); }
+static void captureLog(const char* text) {
+    if (auto callback = captureLogSink.load()) callback(text);
+}
+
 #pragma comment(lib, "strmiids.lib")
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "oleaut32.lib")
@@ -547,7 +553,7 @@ public:
     }
     void stop() {
         // Stop streaming before releasing the two frame buffers.
-        if (control_) control_->Stop();
+        if (control_) { captureLog("停止旧采集图"); control_->Stop(); }
         if (grabber_) grabber_->SetCallback(nullptr, 0);
         control_.reset(); grabber_.reset(); graph_.reset();
         receiver_.clear(); receiver_.set_event(nullptr);
@@ -556,6 +562,7 @@ public:
     }
 
     const char* start(const char* name, int width, int height, const GUID& subtype, int fps, int crop) {
+        captureLog("开始清理旧采集会话");
         stop();
         // Keep COM alive between API calls; graph interfaces are free-threaded.
         HRESULT hr = CoIncrementMTAUsage(&mta_);
@@ -565,18 +572,22 @@ public:
         ComPtr<IPin> pin;
         ComPtr<IAMStreamConfig> config;
         const char* step = "创建采集图";
+        captureLog(step);
         do {
             hr = CoCreateInstance(CLSID_FilterGraph, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(graph_.put()));
             if (FAILED(hr)) break;
             hr = CoCreateInstance(CLSID_CaptureGraphBuilder2, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(builder.put()));
             if (FAILED(hr) || FAILED(hr = builder->SetFiltergraph(graph_.get()))) break;
             step = "打开采集设备";
+            captureLog(step);
             hr = bind_device(name, source.put());
             if (FAILED(hr) || FAILED(hr = graph_->AddFilter(source.get(), L"Capture device"))) break;
             step = "设置采集格式或帧率";
+            captureLog(step);
             hr = capture_pin(builder.get(), source.get(), pin.put(), config.put());
             if (FAILED(hr) || FAILED(hr = set_format(config.get(), width, height, subtype, fps))) break;
             step = "创建 Sample Grabber";
+            captureLog(step);
             hr = CoCreateInstance(kSampleGrabber, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(grabberFilter.put()));
             if (FAILED(hr) || FAILED(hr = grabberFilter->QueryInterface(__uuidof(ISampleGrabber),
                 reinterpret_cast<void**>(grabber_.put())))) break;
@@ -590,6 +601,7 @@ public:
             hr = CoCreateInstance(kNullRenderer, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(renderer.put()));
             if (FAILED(hr) || FAILED(hr = graph_->AddFilter(renderer.get(), L"Null renderer"))) break;
             step = native ? "连接采集卡原始视频流" : "连接采集卡到 BGR24（需驱动或系统支持解码/转换）";
+            captureLog(step);
             hr = builder->RenderStream(nullptr, &MEDIATYPE_Video, pin.get(), grabberFilter.get(), renderer.get());
             if (FAILED(hr)) break;
             // Intelligent Connect may renegotiate the source. Do not silently
@@ -619,15 +631,20 @@ public:
             ComPtr<IMediaFilter> mediaFilter;
             if (SUCCEEDED(graph_->QueryInterface(IID_PPV_ARGS(mediaFilter.put())))) mediaFilter->SetSyncSource(nullptr);
             step = "启动采集卡";
+            captureLog(step);
             if (FAILED(hr = control_->Run())) break;
             step = "等待采集卡首帧";
+            captureLog(step);
             const DWORD wait = WaitForSingleObject(firstFrame_, kFirstFrameTimeoutMs);
             if (wait != WAIT_OBJECT_0) {
                 hr = HRESULT_FROM_WIN32(wait == WAIT_TIMEOUT ? ERROR_TIMEOUT : GetLastError());
                 break;
             }
+            captureLog("首帧已收到，采集启动成功");
             return "成功";
         } while (false);
+        captureLog(error_text(step, hr));
+        captureLog("启动失败，清理采集图");
         config.reset(); pin.reset(); renderer.reset(); grabberFilter.reset(); source.reset(); builder.reset();
         stop();
         return error_text(step, hr);

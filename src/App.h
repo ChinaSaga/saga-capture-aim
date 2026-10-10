@@ -77,7 +77,7 @@ struct AppState
 
     // ---- 图片 ----
     int  imgSize = 320;                        // 全_图片宽高
-    bool noConvert = false;                    // 全_图片无需转换
+    std::atomic<bool> noConvert{false};        // 全_图片无需转换（后台采集初始化会写入）
     std::atomic<bool> showImg{ false };        // 全_是否显示图片
 
     // ---- 识别参数 ----

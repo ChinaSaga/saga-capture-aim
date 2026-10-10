@@ -1,7 +1,10 @@
 #include "App.h"
+#include "BoxController.h"
 #include "AppExit.h"
 #include "HumanTrajectory.h"
 #include "RuntimeLog.h"
+#include "CrashDiagnostics.h"
+#include <onnxruntime_c_api.h>
 
 #include <cstdlib>
 #include <mmsystem.h>
@@ -58,8 +61,16 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
     g.cfgPath = g.runDir + "\\圣人自用.js";
 
     runtime_log::initialize();
+    LOG("[crash] 自动崩溃记录 %s（EXE目录/崩溃报告）", initializeCrashDiagnostics() ? "已启用" : "初始化失败");
     LOG("[01] runDir=%s", g.runDir.c_str());
     LOG("[build] CH343 async/skip-absent v4; main-close/IP-reprompt/Esc-ignore v5; %s %s", __DATE__, __TIME__);
+    const OrtApiBase* ortBase = OrtGetApiBase();
+    LOG("[runtime] ONNX Runtime=%s; required API=%u", ortBase ? ortBase->GetVersionString() : "unavailable", ORT_API_VERSION);
+    char ortDllPath[MAX_PATH]{};
+    if (HMODULE ortModule = GetModuleHandleA("onnxruntime.dll")) {
+        GetModuleFileNameA(ortModule, ortDllPath, MAX_PATH);
+        LOG("[runtime] onnxruntime.dll=%s", ortDllPath);
+    }
 
     g.running = true;
     SetDllDirectoryA(g.runDir.c_str());
@@ -136,6 +147,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
     // The serial API publishes its connection atomically; until ready, input
     // and motion calls safely return without touching an unfinished connection.
     std::thread(makcuStartupThread).detach();
+    boxStart();
     LOG("[hw] Makcu 检测与连接已交给后台线程");
     if (!trajReady())
         MessageBoxA(nullptr, "尚无可用的人手轨迹模型。\n请点击“点我开始记录人手数据”，记录后点击“点我开始训练人手模型”。\n训练成功后自动使用新模型，无需重启程序。",

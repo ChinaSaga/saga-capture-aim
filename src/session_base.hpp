@@ -9,6 +9,7 @@
 // ============================================================================
 
 #include <onnxruntime_cxx_api.h>
+#include "OrtRuntimeCompatibility.h"
 #include <opencv2/opencv.hpp>
 #include <dml_provider_factory.h>
 #include <algorithm>
@@ -37,7 +38,7 @@ public:
     /// @param useGPU Whether to use GPU (CUDA or DirectML) for inference
     /// @param numThreads Number of intra-op threads (0 = auto)
     OrtSessionBase(const std::string& modelPath, bool useGPU = false, int numThreads = 0)
-        : env_(ORT_LOGGING_LEVEL_WARNING, "YOLOS") {
+        : env_((requireCompatibleOrtRuntime(OrtGetApiBase()), ORT_LOGGING_LEVEL_WARNING), "YOLOS") {
         
         initSession(modelPath, useGPU, numThreads);
     }

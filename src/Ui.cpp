@@ -1,4 +1,8 @@
 #include "App.h"
+#include "BoxController.h"
+#include "RuntimeLog.h"
+#include "CaptureTaskUi.h"
+using namespace capture_task_ui;
 #include "AppExit.h"
 #include "HumanTrajectory.h"
 #include "WebAccess.h"
@@ -144,6 +148,9 @@ static void boardClear()
 // resize buffer, and cvtColor writes directly into the DIB destination stride.
 static void boardDrawPixels(const cv::Mat& image)
 {
+    static bool first = true;
+    const bool trace = first;
+    first = false;
     g_hasFrame = false;
     if (!g_bits || image.empty()) return;
     try {
@@ -154,14 +161,17 @@ static void boardDrawPixels(const cv::Mat& image)
         static cv::Mat resized;
         const cv::Mat* pixels = &image;
         if (image.cols != width || image.rows != height) {
+            if (trace) runtime_log::write("[preview] 首次缩放：%dx%d -> %dx%d", image.cols, image.rows, width, height);
             cv::resize(image, resized, cv::Size(width, height), 0, 0,
                 g_imageScale < 1 ? cv::INTER_AREA : cv::INTER_LINEAR);
+            if (trace) runtime_log::write("[preview] 首次缩放完成");
             pixels = &resized;
         }
         cv::Mat destination(height, width, CV_8UC4,
             (BYTE*)g_bits + ((size_t)g_imageY * kBoard + g_imageX) * 4,
             (size_t)kBoard * 4);
         cv::cvtColor(*pixels, destination, cv::COLOR_BGR2BGRA);
+        if (trace) runtime_log::write("[preview] 首次颜色转换完成");
         g_hasFrame = true;
     } catch (const cv::Exception&) {
         OutputDebugStringA("Preview decode failed.\n");
@@ -203,7 +213,15 @@ static void drawBigPoint(int x, int y, COLORREF c)
 
 static void canvasDrawImpl(const std::vector<unsigned char>* encoded, const CaptureFrame* raw)
 {
+    {
     AcquireSRWLockExclusive(&g_canvasLock);
+    struct UnlockCanvas {
+        ~UnlockCanvas() { ReleaseSRWLockExclusive(&g_canvasLock); }
+    } unlock;
+    static bool first = true;
+    const bool trace = first;
+    first = false;
+    if (trace) runtime_log::write("[preview] 首次预览开始");
     boardInit();
     boardClear();
     if (raw)
@@ -267,7 +285,8 @@ static void canvasDrawImpl(const std::vector<unsigned char>* encoded, const Capt
     }
     // Complete GDI operations before allowing the UI thread to read this bitmap.
     GdiFlush();
-    ReleaseSRWLockExclusive(&g_canvasLock);
+    if (trace) runtime_log::write("[preview] 首次预览绘制完成");
+    }
     if (g_hwnd) { RECT r = previewRect(); InvalidateRect(g_hwnd, &r, FALSE); }
 }
 
@@ -487,9 +506,10 @@ static void sizeComboShowApplied()
 // 切换失败（引擎重建失败）时把下拉框显示退回上一个生效值，免得框里显示的和实际用的对不上。
 static void sizeComboCommit()
 {
+    if (captureTaskBusy) return;
     const int sel = (int)SendMessageA(g_cbSize, CB_GETCURSEL, 0, 0);
     if (sel < 0) return;
-    if (!applyCropSize(sel * 32 + 160)) sizeComboShowApplied();
+    queueCaptureTask(g_hwnd, [sel] { return applyCropSize(sel * 32 + 160); }, true);
 }
 
 // ============================================================================
@@ -537,6 +557,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         else if (id == 101 && code == BN_CLICKED)     // 按钮_开始采集
         {
+            if (captureTaskBusy) break;
             char dev[256] = {}, fmt[256] = {};
             GetWindowTextA(g_cbDevice, dev, sizeof(dev));
             GetWindowTextA(g_cbFormat, fmt, sizeof(fmt));
@@ -550,11 +571,9 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
             char fourcc[32] = {};
             if (sscanf(f.c_str(), "%d@%d@%d@%31s", &w, &h2, &fps, fourcc) == 4)
             {
-                if (!startCapture(dev, w, h2, fourcc, fps))
-                {
-                    MessageBoxA(h, "采集初始化失败", "系统提示", MB_OK);
-                    break;
-                }
+                queueCaptureTask(g_hwnd, [device = std::string(dev), codec = std::string(fourcc), w, h2, fps] {
+                    return startCapture(device.c_str(), w, h2, codec.c_str(), fps);
+                });
             }
             else
             {
@@ -576,6 +595,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         else if (id == 106 && code == BN_CLICKED) webShowDiagnostics(h);
         else if (id == 107 && code == BN_CLICKED) webOpenLocalPage(h);
+        else if (id == 108 && code == BN_CLICKED) boxConfigure(h);
         else if (id == 200 && code == CBN_SELCHANGE)  // 组合框_设备名
         {
             char dev[256] = {};
@@ -670,8 +690,22 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         sizeComboShowApplied();
         return 0;
 
+    case kCaptureTaskDone:
+        captureTaskBusy = false;
+        for (int i = 0; i < 5; ++i) EnableWindow(GetDlgItem(h, captureControls[i]), captureControlsEnabled[i]);
+        SetWindowTextA(GetDlgItem(h, 101), "开始采集");
+        if (l) sizeComboShowApplied();
+        if (!w) MessageBoxA(h, "采集初始化失败，请查看程序目录的运行日志.txt 中 [capture] 记录。", "采集提示", MB_OK | MB_ICONWARNING);
+        return 0;
+
     case WM_TIMER:
         if (w == 1) {
+            if (captureTaskBusy && !captureTaskWarned && GetTickCount64() - captureTaskStarted >= 15000) {
+                captureTaskWarned = true;
+                SetWindowTextA(GetDlgItem(h, 101), "等待采集驱动…");
+                runtime_log::write("[capture] 初始化超过15秒，驱动调用仍未返回；保留后台任务，禁止重复启动");
+                MessageBoxA(h, "采集驱动已等待超过15秒，窗口仍可操作或关闭。\n请检查采集卡信号、所选格式和是否被其他软件占用。\n若一直没有返回，请关闭程序后重新打开，并发送运行日志.txt。", "采集驱动响应超时", MB_OK | MB_ICONWARNING);
+            }
             static std::wstring previousTitle;
             const std::wstring title = L"圣人视觉 C++ · 采集与推理  |  网页访问IP：" + webAccessAddress();
             if (title != previousTitle) {
@@ -734,12 +768,17 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         PAINTSTRUCT ps;
         HDC dc = BeginPaint(h, &ps);
         RECT view = previewRect();
-        AcquireSRWLockShared(&g_canvasLock);
-        bool ready = g_hasFrame && g.showImg.load();
-        if (ready) BitBlt(dc, kViewX, kViewY, kBoard, kBoard, g_memDC, 0, 0, SRCCOPY);
-        GdiFlush();
-        ReleaseSRWLockShared(&g_canvasLock);
-        if (!ready) {
+        // Never wait for OpenCV/GDI work on the window thread. Keep the last
+        // displayed pixels if a producer is busy; the next publication repaints.
+        const bool acquired = TryAcquireSRWLockShared(&g_canvasLock) != FALSE;
+        bool ready = false;
+        if (acquired) {
+            ready = g_hasFrame && g.showImg.load();
+            if (ready) BitBlt(dc, kViewX, kViewY, kBoard, kBoard, g_memDC, 0, 0, SRCCOPY);
+            GdiFlush();
+            ReleaseSRWLockShared(&g_canvasLock);
+        }
+        if (acquired && !ready) {
             HBRUSH background = CreateSolidBrush(RGB(17,25,40));
             FillRect(dc, &view, background); DeleteObject(background);
             RECT text = view; text.top += 275; text.bottom = text.top + 36;
@@ -769,9 +808,9 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         line += tail;
         textAt(dc, line.c_str(), statusRect, g_uiFont, RGB(101,118,142),
             DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-        const std::string hardware = std::string("本地推理 · ") + makcuStartupStatus();
-        textAt(dc, hardware.c_str(), {696,26,1056,56}, g_uiFont, RGB(101,118,142));
-        textAt(dc, "画面等比显示 · F1 快速开关", {696,65,1056,94}, g_uiFont, RGB(101,118,142));
+        const std::string hardware = std::string("本地推理 · ") + boxStatus();
+        textAt(dc, hardware.c_str(), {696,26,1056,56}, g_uiFont, RGB(101,118,142),
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         textAt(dc, "识别范围为中心裁剪尺寸", {696,365,1056,391}, g_uiFont, RGB(119,132,153));
         textAt(dc, "数据：EXE / 人手数据 · 训练后自动生效", {696,738,1056,760}, g_uiFont, RGB(119,132,153));
         textAt(dc, "截图：EXE / 模型名 / 时间戳.jpg · JPEG 95%", {696,763,1056,785}, g_uiFont, RGB(119,132,153));
@@ -876,6 +915,7 @@ bool uiCreate(HINSTANCE hInst)
         SetWindowSubclass(control, controlProc, 1, 0);
     };
     button(100, "初始化采集卡", 696, 414);
+    button(108, "CAT 网络盒子", 696, 60, 360);
     button(101, "开始采集", 882, 414);
     g_chkRefresh = CreateWindowA("BUTTON", "实时显示（F1 开关）",
         BS_AUTOCHECKBOX | WS_CHILD | WS_VISIBLE | WS_TABSTOP, 696, 480, 360, 32,
@@ -1132,6 +1172,9 @@ void uiStartupCommandLine()
     else
     {
         uiSetShowImg(false);
-        startCapture("", 0, 0, "", 0);           // 空参 → 读 监控双机.ini
+        // Select capture mode before the main thread decides whether to start
+        // a UDP input worker; background initialization may not have finished.
+        g.noConvert = true;
+        queueCaptureTask(g_hwnd, [] { return startCapture("", 0, 0, "", 0); });
     }
 }

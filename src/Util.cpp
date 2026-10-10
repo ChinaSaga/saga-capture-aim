@@ -1,4 +1,5 @@
 #include "App.h"
+#include "BoxController.h"
 #include "Inference.h"
 #include "RuntimeLog.h"
 
@@ -259,22 +260,22 @@ bool makcuConnect(int port)
 
 void makcuMove(float x, float y)
 {
-    saga::makcuMove((int)std::round(x), (int)std::round(y));
+    boxMove((int)std::round(x), (int)std::round(y));
 }
 
 void makcuDown(int key)
 {
-    saga::makcuMouseDown(key);
+    boxDown(key);
 }
 
 void makcuUp(int key)
 {
-    saga::makcuMouseUp(key);
+    boxUp(key);
 }
 
 void makcuState(int key, bool& out)
 {
-    out = (saga::makcuMouseButtonState(key) != 0);
+    out = boxButtonState(key);
 
 }
 

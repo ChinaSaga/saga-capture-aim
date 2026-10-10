@@ -78,5 +78,7 @@ Makcu驱动报告.txt
 SagaApp_startup.log
 网络自检.txt
 Makcu串口日志.txt
+CAT盒子.ini
+崩溃报告/
 *.log
 自动截图/

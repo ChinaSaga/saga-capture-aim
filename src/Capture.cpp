@@ -1,6 +1,7 @@
 #include "App.h"
 #include "Inference.h"
 #include "FrameWait.h"
+#include "RuntimeLog.h"
 
 
 #include <chrono>
@@ -149,6 +150,7 @@ static int  g_lastW = 0, g_lastH = 0, g_lastFps = 0;
 
 bool startCapture(const char* dev, int w, int h, const char* codec, int fps)
 {
+    saga::set_capture_log([](const char* text) { runtime_log::write("[capture] %s", text); });
     std::string name = dev ? dev : "";
     std::string cc = codec ? codec : "";
     std::string ini = g.runDir + "\\监控双机.ini";
@@ -175,7 +177,9 @@ bool startCapture(const char* dev, int w, int h, const char* codec, int fps)
     // setcjk_ex 现在自行配平 COM 初始化，并会对设备枚举失败返回错误文本。
     std::string nameUtf8 = ansiToUtf8(name);
     std::string res;
+    runtime_log::write("[capture] 请求启动：设备=%s，%dx%d@%d，编码=%s，裁剪=%d", name.c_str(), w, h, fps, cc.c_str(), (int)g.imgSize);
     sagaSetCapture(nameUtf8.c_str(), w, h, cc.c_str(), fps, g.imgSize, res);
+    runtime_log::write("[capture] 初始化返回：%s", res.c_str());
     // 引擎源码现在与本文件用同一套字符集（执行字符集 GBK）编译，返回值与字面量都是 GBK，
     // 直接比字面量即可（原来引擎是 DLL、用 /utf-8 编，返回值是 UTF-8，所以要 ansiToUtf8("成功")）。
     if (res != "成功") return false;

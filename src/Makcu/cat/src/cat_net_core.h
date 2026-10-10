@@ -9,6 +9,8 @@
 #include <cstdint>
 #include "aes_functions.h"
 #include <random>
+#include <atomic>
+#include <mutex>
 #include "input-event-codes.h"
 
 #define AES_BLOCK_SIZE 16
@@ -65,13 +67,13 @@ private:
         }
 
         void updateKeyState(uint16_t key, bool isPressed) {
-            if (key <= KEY_CNT) {
+            if (key < KEY_CNT) {
                 keyStateBitset.set(key, isPressed);
             }
         }
 
         [[nodiscard]] bool isKeyPressed(uint16_t key) const {
-            if (key <= KEY_CNT) {
+            if (key < KEY_CNT) {
                 return keyStateBitset.test(key);
             }
             return false;
@@ -97,13 +99,13 @@ private:
         }
 
         void updateKeyState(uint16_t key, bool isPressed) {
-            if (key <= KEY_CNT) {
+            if (key < KEY_CNT) {
                 keyStateBitset.set(key, isPressed);
             }
         }
 
         bool isKeyPressed(uint16_t key) {
-            if (key <= KEY_CNT) {
+            if (key < KEY_CNT) {
                 return keyStateBitset.test(key);
             }
             return false;
@@ -196,6 +198,8 @@ public:
     };
 
     CatNetCore();
+    ~CatNetCore();
+    bool monitorActive() const { return is_monitor.load(); }
 
     /**
      * 初始化函数 超时请检查UUID是否正确
@@ -323,17 +327,19 @@ public:
 
 private:
     bool is_init = false;
-    bool is_monitor = false;
+    std::atomic<bool> is_monitor{false};
+    std::mutex state_mutex;
     asio::io_context read_io_context;
     asio::ip::udp::socket read_socket;
     asio::ip::udp::endpoint server_endpoint;
+    asio::ip::udp::endpoint monitor_sender;
     asio::io_context send_io_context;
     asio::ip::udp::socket send_socket;
     asio::ip::udp::endpoint box_endpoint;
     std::thread read_io_context_thread;
     std::array<char, 1024> buffer{};
 
-    const unsigned char* m_key{};
+    std::array<unsigned char, 16> m_key{};
 
     MouseStateManager mouse_state;
     KeyStateManager keyboard_state;
@@ -422,10 +428,9 @@ private:
         return input_len - padding;
     }
 
-    static unsigned char* expandTo16Bytes(const std::string& cat_uuid) {
+    static std::array<unsigned char, 16> expandTo16Bytes(const std::string& cat_uuid) {
         auto uuid = static_cast<uint32_t>(std::stoul(cat_uuid, nullptr, 16));
-        static unsigned char enc_key[16];
-        std::memset(enc_key, 0, sizeof(enc_key));
+        std::array<unsigned char, 16> enc_key{};
 
         std::stringstream ss_uuid;
         ss_uuid << std::hex << std::setw(8) << std::setfill('0') << uuid;

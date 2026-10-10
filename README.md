@@ -9,6 +9,7 @@
 - 产物：`x64\Release\圣人双机服务端.exe`（TargetName 已改名，不是 SagaApp.exe）
 - 转换工具：`x64\Release\ONNX转TRT工具.exe`；模型及输出 `.trt` 不随源码入库
 - 许可：本项目主体 **GPL-3.0**（`LICENSE`）；第三方代码与数据见 `THIRD-PARTY-NOTICES.md`
+
 支持的模型：
 
 - **NCNN 框架**：YOLOv11。

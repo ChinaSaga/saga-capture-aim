@@ -14,7 +14,7 @@
 
 - **NCNN 框架**：YOLOv11。
 - **ONNX 框架**：YOLOv5、v6、v7、v8、v9、v10、v11、v12、v26，以及 [**YOLOE**](https://github.com/Geekgineer/YOLOs-CPP/blob/main/docs/guides/models.md#yoloe-open-vocabulary-detection-segmentation)（open-vocab，开放词汇）。
-- **TRT 框架**：YOLOv5、v6、v7、v8、v9、v10、v11、v12、v26，以及 [**YOLOE**](https://github.com/Geekgineer/YOLOs-CPP/blob/main/docs/guides/models.md#yoloe-open-vocabulary-detection-segmentation)（open-vocab，开放词汇）。
+- **TRT 框架**：YOLOv8、YOLOv11 的标准目标检测导出；要求单个 RGB 输入 `[1,3,H,W]` 和单个原始检测输出 `[1,4+类别数,候选框数]`。不支持带 objectness 的旧版输出、内置 NMS、分割、姿态及 YOLOE 开放词汇接口；其他版本不能保证兼容。详见 [TensorRT 支持范围](docs/TensorRT使用说明.md#支持范围与依赖)。
 
 ---
 

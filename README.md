@@ -28,47 +28,17 @@
 
 原生人手数据采集、CPU 训练与模型热加载、局域网网页调参、网络自检及窗口标题实际 IP 的使用方法见 [2026-09-29 更新说明](docs/更新说明-2026-09-29.md)。
 
-完整视频分为 7 段，按时间顺序展示。每段独立循环，向下浏览即可观看后续内容。
+完整演示分为 7 段 GIF，每段独立循环；第 2–7 段位于本页最底部。
 
 第 1 段：0–10.00 秒
 
 ![第 1 段：0–10.00 秒](docs/demo/demo-part-01.gif)
-
-第 2 段：10–20.00 秒
-
-![第 2 段：10–20.00 秒](docs/demo/demo-part-02.gif)
-
-第 3 段：20–30.00 秒
-
-![第 3 段：20–30.00 秒](docs/demo/demo-part-03.gif)
-
-第 4 段：30–40.00 秒
-
-![第 4 段：30–40.00 秒](docs/demo/demo-part-04.gif)
-
-第 5 段：40–50.00 秒
-
-![第 5 段：40–50.00 秒](docs/demo/demo-part-05.gif)
-
-第 6 段：50–60.00 秒
-
-![第 6 段：50–60.00 秒](docs/demo/demo-part-06.gif)
-
-第 7 段：60–70.33 秒
-
-![第 7 段：60–70.33 秒](docs/demo/demo-part-07.gif)
 
 ![运行演示 1](docs/demo/demo-01.png)
 ![运行演示 2](docs/demo/demo-02.png)
 ![运行演示 3](docs/demo/demo-03.png)
 ![运行演示 4](docs/demo/demo-04.png)
 ![运行演示 5](docs/demo/demo-05.png)
-
-🎬 **[观看完整运行演示（36 MB，放在 Release 附件）](https://github.com/ChinaSaga/saga-capture-aim/releases/latest)**
-
-> 视频没放进仓库：GitHub 的 Markdown 渲染器不支持内联播放仓库里的 mp4（`<video>` 会被清掉，
-> raw 链接只会触发下载），而且 36 MB 会让每次 `git clone` 都变慢。
-> 完整视频保留在 Release 附件中；上方 GIF 提供分段动态预览。
 
 ---
 
@@ -238,3 +208,31 @@ YOLOs-CPP 上游为 AGPL-3.0，MAKCU 上游为 GPL-3.0，参考许可证保留�
 - `src\Makcu\cat\`（网络键鼠 Kmbox/Cat）已随源码编译并导出 C API，但**应用层目前没有调用**，
   只走串口 Makcu。
 - 本仓库不含 UDP 发送端：双机模式下画面由外部采集机以 **1472 字节分包**发到本机 `:6666`。
+
+---
+
+## 完整演示（后续片段）
+
+第 2 段：10–20.00 秒
+
+![第 2 段：10–20.00 秒](docs/demo/demo-part-02.gif)
+
+第 3 段：20–30.00 秒
+
+![第 3 段：20–30.00 秒](docs/demo/demo-part-03.gif)
+
+第 4 段：30–40.00 秒
+
+![第 4 段：30–40.00 秒](docs/demo/demo-part-04.gif)
+
+第 5 段：40–50.00 秒
+
+![第 5 段：40–50.00 秒](docs/demo/demo-part-05.gif)
+
+第 6 段：50–60.00 秒
+
+![第 6 段：50–60.00 秒](docs/demo/demo-part-06.gif)
+
+第 7 段：60–70.33 秒
+
+![第 7 段：60–70.33 秒](docs/demo/demo-part-07.gif)

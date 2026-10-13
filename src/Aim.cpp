@@ -62,6 +62,7 @@ void aimMoveOnce()
     }
 
     if (!g.aimKeyDown.load()) return;
+    if (g.moveProfileToken.load() != g.aimProfiles.token()) return;
     if (g.moveDx == 0 && g.moveDy == 0) return;
 
     float fx, fy;
@@ -185,6 +186,7 @@ void aimThread(int engineWanted)
     // 锁定记忆：上一帧锁定那个「人」的各部位框。必须是本线程的局部变量
     // （两个推理线程共用同一个 aimThread，写成 static 会互相打架）
     aimlock::Memory lockMem;
+    std::uint64_t lastProfileToken = 0;
 
     RunTimer runTimer, inferTimer;
     runTimer.start();
@@ -431,6 +433,19 @@ void aimThread(int engineWanted)
             LeaveCriticalSection(&g_drawLock);
         }
 
+        // Read one complete profile for this frame. Clear sticky target/PID memory
+        // when keys or settings change so the previous ordering cannot hold the lock.
+        const auto profileSnapshot = g.aimProfiles.active();
+        const auto& profile = profileSnapshot.profile;
+        if (lastProfileToken != profileSnapshot.token) {
+            lockMem = {};
+            pidX = {}; pidY = {};
+            prevNearestRange = 0;
+            nearestX = nearestY = 0;
+            nearestRect = {};
+            lastProfileToken = profileSnapshot.token;
+        }
+
         // ---------------- 鼠标中心点（准星）----------------
         int idx = 0;
         int crossCount = 0;
@@ -478,24 +493,24 @@ void aimThread(int engineWanted)
             float rh = objs[i].height;
 
             LockTarget t;
-            if (cls == g.prioLock)
+            if (cls == profile.prioLock)
             {
-                if (g.prioLockPos > 50) ty = roundToInt(ty + rh * std::fabs((double)(g.prioLockPos - 50)) * 0.01);
-                if (g.prioLockPos < 50) ty = roundToInt(ty - rh * std::fabs((double)(g.prioLockPos - 50)) * 0.01);
+                if (profile.prioLockPos > 50) ty = roundToInt(ty + rh * std::fabs((double)(profile.prioLockPos - 50)) * 0.01);
+                if (profile.prioLockPos < 50) ty = roundToInt(ty - rh * std::fabs((double)(profile.prioLockPos - 50)) * 0.01);
                 t.lockType = 1;
                 t.normRatio = normRatioRel(centerX, centerY, roundToInt(rx1), roundToInt(ry1), roundToInt(rx2), roundToInt(ry2));
             }
-            else if (cls == g.secondLock)
+            else if (cls == profile.secondLock)
             {
-                if (g.secondLockPos > 50) ty = roundToInt(ty + rh * std::fabs((double)(g.secondLockPos - 50)) * 0.01);
-                if (g.secondLockPos < 50) ty = roundToInt(ty - rh * std::fabs((double)(g.secondLockPos - 50)) * 0.01);
+                if (profile.secondLockPos > 50) ty = roundToInt(ty + rh * std::fabs((double)(profile.secondLockPos - 50)) * 0.01);
+                if (profile.secondLockPos < 50) ty = roundToInt(ty - rh * std::fabs((double)(profile.secondLockPos - 50)) * 0.01);
                 t.lockType = 2;
                 t.normRatio = normRatioRel(centerX, centerY, roundToInt(rx1), roundToInt(ry1), roundToInt(rx2), roundToInt(ry2));
             }
-            else if (cls == g.thirdLock)
+            else if (cls == profile.thirdLock)
             {
-                if (g.thirdLockPos > 50) ty = roundToInt(ty + rh * std::fabs((double)(g.thirdLockPos - 50)) * 0.01);
-                if (g.thirdLockPos < 50) ty = roundToInt(ty - rh * std::fabs((double)(g.thirdLockPos - 50)) * 0.01);
+                if (profile.thirdLockPos > 50) ty = roundToInt(ty + rh * std::fabs((double)(profile.thirdLockPos - 50)) * 0.01);
+                if (profile.thirdLockPos < 50) ty = roundToInt(ty - rh * std::fabs((double)(profile.thirdLockPos - 50)) * 0.01);
                 t.lockType = 3;
                 t.normRatio = normRatioRel(centerX, centerY, roundToInt(rx1), roundToInt(ry1), roundToInt(rx2), roundToInt(ry2));
             }
@@ -541,9 +556,9 @@ void aimThread(int engineWanted)
             cand[i].lockType = t.lockType;
         }
         aimlock::Params lockParam;
-        lockParam.lockRange = g.lockRange;
+        lockParam.lockRange = profile.lockRange;
         lockParam.prevNearestRange = prevNearestRange;
-        lockParam.moveInBox = (g.moveInBox == "true");
+        lockParam.moveInBox = profile.moveInBox;
         const aimlock::Result picked = aimlock::select(cand, idx, lockParam, lockMem);
 
         // 注意：nearestX/nearestY 必须跨迭代保持（原版 局_最近距离x/y 是子程序级局部变量）。
@@ -596,7 +611,7 @@ void aimThread(int engineWanted)
 
             // 中心点范围仅限制优先锁定类别；其它类别继续追向锁定位置 XY。
             if (targets[picked.index].lockType == 1 &&
-                crossRatio > 0 && crossRatio <= (double)g.centerRange / 100.0)
+                crossRatio > 0 && crossRatio <= (double)profile.centerRange / 100.0)
                 continue;
 
             // ---- 移动量计算 ----
@@ -629,12 +644,14 @@ void aimThread(int engineWanted)
                 EnterCriticalSection(&g_moveLock);
                 g.moveDx = nearestX;
                 g.moveDy = nearestY;
+                g.moveProfileToken = profileSnapshot.token;
                 LeaveCriticalSection(&g_moveLock);
             }
             else
             {
                 g.moveDx = nearestX;
                 g.moveDy = nearestY;
+                g.moveProfileToken = profileSnapshot.token;
                 aimMoveOnce();
             }
         }

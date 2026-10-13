@@ -151,6 +151,11 @@ void configSyncAll(bool save)
     bufInt("准星绑定2", g.crossBind[1]);
     bufInt("准星绑定3", g.crossBind[2]);
     bufInt("准星绑定4", g.crossBind[3]);
+    int rangeKey = atoi(hashGet("测距按下").c_str());
+    if (rangeKey <= 1000 || rangeKey > 1127) rangeKey = 0;
+    hashSet("测距按下", std::to_string(rangeKey));
+    bufInt("测距按下", rangeKey);
+    g.rangePressKey = rangeKey;
     bufInt("扳机热键1", g.triggerKey[0]);
     bufInt("扳机热键2", g.triggerKey[1]);
     bufInt("扳机热键3", g.triggerKey[2]);
@@ -195,6 +200,51 @@ void configSyncAll(bool save)
     bufFlt("Kp", g.kp);
     bufFlt("Ki", g.ki);
     bufFlt("扳机范围", g.triggerRange);
+
+    aim_profiles::Config profiles;
+    auto& first = profiles.profiles[0];
+    first.keys = {g.aimMainKey, g.aimSubKey1, g.aimSubKey2, g.aimSubKey3};
+    first.prioLock = g.prioLock;
+    first.secondLock = g.secondLock;
+    first.thirdLock = g.thirdLock;
+    first.prioLockPos = g.prioLockPos;
+    first.secondLockPos = g.secondLockPos;
+    first.thirdLockPos = g.thirdLockPos;
+    first.lockRange = g.lockRange;
+    first.centerRange = g.centerRange;
+    first.moveInBox = g.moveInBox == "true";
+    profiles.alwaysOn = g.alwaysOn == "true";
+    for (int group = 1; group < 3; ++group) {
+        // Old files become group 1. New groups start with copied target settings
+        // and no keys; materialize defaults once so later group-1 edits stay isolated.
+        auto& profile = profiles.profiles[group];
+        profile = first;
+        profile.keys = {};
+        const auto prefix = std::string("热键") + std::to_string(group + 1) + "_";
+        const auto field = [&](const char* name, int& value) {
+            const auto key = prefix + name;
+            if (g_hash.find(key) == g_hash.end()) hashSet(key, std::to_string(value));
+            bufInt(key.c_str(), value);
+        };
+        field("自瞄主键", profile.keys[0]);
+        field("自瞄副键", profile.keys[1]);
+        field("自瞄副键2", profile.keys[2]);
+        field("自瞄副键3", profile.keys[3]);
+        field("优先锁定", profile.prioLock);
+        field("其次锁定", profile.secondLock);
+        field("再次锁定", profile.thirdLock);
+        field("优先锁定位置", profile.prioLockPos);
+        field("其次锁定位置", profile.secondLockPos);
+        field("再次锁定位置", profile.thirdLockPos);
+        field("锁定范围", profile.lockRange);
+        field("中心点范围", profile.centerRange);
+        const auto key = prefix + "框内移动";
+        std::string moveInBox = first.moveInBox ? "true" : "false";
+        if (g_hash.find(key) == g_hash.end()) hashSet(key, moveInBox);
+        bufStr(key.c_str(), moveInBox);
+        profile.moveInBox = moveInBox == "true";
+    }
+    g.aimProfiles.replace(profiles);
 
     if (save) configSaveFile();
 }

@@ -272,10 +272,11 @@ static void canvasDrawImpl(const std::vector<unsigned char>* encoded, const Capt
             }
         }
         const int half = g.imgSize / 2;
+        const int lockRange = g.aimProfiles.active().profile.lockRange;
         HPEN pen = CreatePen(PS_SOLID, 1, RGB(255,222,89));
         auto oldPen = SelectObject(g_memDC, pen);
-        Ellipse(g_memDC, px(half - g.lockRange), py(half - g.lockRange),
-            px(half + g.lockRange), py(half + g.lockRange));
+        Ellipse(g_memDC, px(half - lockRange), py(half - lockRange),
+            px(half + lockRange), py(half + lockRange));
         MoveToEx(g_memDC, px(half), py(half), nullptr);
         LineTo(g_memDC, px(half + g.moveDx), py(half + g.moveDy));
         SelectObject(g_memDC, oldPen); DeleteObject(pen);

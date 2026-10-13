@@ -121,6 +121,7 @@ int main() {
             check(wrongKey.connect("127.0.0.1", peer.port(), "ffffffff", 40) != cat::ErrorCode::SUCCESS, "wrong UUID cannot connect");
         }
         boxMove(2, 3); boxDown(1); boxUp(1);
+        check(boxLastMoveNeedsDelay(), "MAKCU retains movement pacing");
         check(makcuMoves == 1 && makcuDowns == 1 && makcuUps == 1 && boxButtonState(2), "MAKCU default route");
         check(!boxKeyState(1030) && !boxKeyState(1001), "MAKCU never substitutes local keyboard state");
         auto session = std::make_shared<CatSession>();
@@ -130,6 +131,7 @@ int main() {
         switchRoute(session);
         check(makcuUps == 2, "release old MAKCU press on switch");
         boxMove(-321, 123);
+        check(!boxLastMoveNeedsDelay(), "CAT skips additional movement pacing");
         for (int key : keys) { boxDown(key); boxUp(key); }
         check(makcuMoves == 1 && makcuDowns == 2, "CAT commands do not leak to MAKCU");
         const auto commands = peer.snapshot();
@@ -160,6 +162,50 @@ int main() {
             eventually([code] { return !boxKeyState(1000 + code); }, 500, "CAT keyboard up");
         }
         check(!boxKeyState(1000) && !boxKeyState(1128) && !boxKeyState(-1), "invalid keyboard bindings rejected");
+        g.running = true;
+        g.rangePressActive = true;
+        g.rangePressKey = 1057;
+        keyboardTick(GetTickCount64(), 50, 75);
+        check(repeatHeld && peer.snapshot().back()[0] == 4 && peer.snapshot().back()[1] == 57 && peer.snapshot().back()[3] == 1, "CAT space down");
+        const auto heldCount = peer.snapshot().size();
+        keyboardTick(repeatDue - 1, 50, 75);
+        check(peer.snapshot().size() == heldCount, "no transition before deadline");
+        keyboardTick(repeatDue, 50, 75);
+        check(!repeatHeld && peer.snapshot().back()[3] == 0, "CAT space up");
+        keyboardTick(repeatDue, 50, 75);
+        check(repeatHeld, "repeat after release gap");
+        g.rangePressKey = 1030;
+        keyboardTick(GetTickCount64(), 50, 75);
+        auto changed = peer.snapshot();
+        check(changed[changed.size()-2][1] == 57 && changed[changed.size()-2][3] == 0 && changed.back()[1] == 30 && changed.back()[3] == 1, "changing key releases old key first");
+        g.rangePressActive = false;
+        keyboardTick(GetTickCount64(), 50, 75);
+        check(!repeatHeld && peer.snapshot().back()[3] == 0, "aim release stops immediately without waiting for deadline");
+        g.rangePressActive = true;
+        g.rangePressKey = 1;
+        auto invalidCount = peer.snapshot().size();
+        keyboardTick(GetTickCount64(), 50, 75);
+        check(peer.snapshot().size() == invalidCount, "mouse binding cannot produce keyboard output");
+        g.rangePressKey = 1057;
+        keyboardTick(GetTickCount64(), 50, 75);
+        peer.drop = true;
+        g.rangePressKey = 0;
+        keyboardTick(GetTickCount64(), 50, 75);
+        check(pendingKeyboardReleases.test(57) && !session->online, "failed release retained for reconnect");
+        peer.drop = false;
+        switchRoute(nullptr);
+        session->online = true;
+        switchRoute(session);
+        check(pendingKeyboardReleases.none() && peer.snapshot().back()[0] == 4 && peer.snapshot().back()[3] == 0, "reconnect releases keyboard before use");
+        g.rangePressKey = 1057;
+        keyboardTick(GetTickCount64(), 50, 75);
+        boxStopKeyboard();
+        check(!repeatHeld && peer.snapshot().back()[3] == 0, "application exit releases held keyboard");
+        auto stoppedCount = peer.snapshot().size();
+        keyboardTick(GetTickCount64(), 50, 75);
+        check(peer.snapshot().size() == stoppedCount, "exit prevents new presses");
+        g.rangePressActive = false;
+        g.rangePressKey = 0;
         peer.keyboard(30, true);
         eventually([] { return boxKeyState(1030); }, 500, "held keyboard before route change");
         boxDown(3);
@@ -192,6 +238,7 @@ int main() {
             eventually([] { return !activeCat.load(); }, 1000, "automatic MAKCU fallback");
             const int before = makcuMoves;
             boxMove(3, 4);
+            check(boxLastMoveNeedsDelay(), "MAKCU fallback restores movement pacing");
             check(makcuMoves == before + 1, "fallback routes next move");
             peer.drop = false;
             eventually([] { return activeCat.load() != nullptr; }, 4500, "automatic CAT recovery");

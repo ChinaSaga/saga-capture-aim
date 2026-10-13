@@ -9,7 +9,7 @@ void hotkeyThread()
     while (g.running.load())
     {
         // Query a configured button once per scan (Ferrum performs serial I/O).
-        struct CachedKey { int key; bool pressed; } cache[12]{};
+        struct CachedKey { int key; bool pressed; } cache[20]{};
         int cached = 0;
         const auto readKey = [&](int key, bool& state) {
             if (key <= 0) { state = false; return; }
@@ -17,16 +17,24 @@ void hotkeyThread()
                 if (cache[i].key == key) { state = cache[i].pressed; return; }
             }
             state = boxKeyState(key);
-            if (cached < 12) cache[cached++] = {key, state};
+            if (cached < 20) cache[cached++] = {key, state};
         };
-        bool down = false;
-        if (g.alwaysOn == "true") down = true;      // 吸附常驻
-
-        if (!down && g.aimMainKey > 0) { readKey(g.aimMainKey, down); }
-        if (!down && g.aimSubKey1 > 0) { readKey(g.aimSubKey1, down); }
-        if (!down && g.aimSubKey2 > 0) { readKey(g.aimSubKey2, down); }
-        if (!down && g.aimSubKey3 > 0) { readKey(g.aimSubKey3, down); }
-        g.aimKeyDown = down;
+        const auto config = g.aimProfiles.config();
+        const int active = aim_profiles::select(config.config, [&](int key) {
+            bool pressed = false;
+            readKey(key, pressed);
+            return pressed;
+        });
+        g.aimKeyDown = g.aimProfiles.activate(active, config.revision);
+        // Repeat only while a configured aim key is physically held, even in always-on mode.
+        auto physicalConfig = config.config;
+        physicalConfig.alwaysOn = false;
+        g.rangePressActive = g.rangePressKey.load() > 1000 &&
+            aim_profiles::select(physicalConfig, [&](int key) {
+                bool pressed = false;
+                readKey(key, pressed);
+                return pressed;
+            }) >= 0;
 
         // 准星追踪（原版为"只置真不自动复位"的锁存行为，由准星监控线程复位）
         bool track = g.crossTrack.load();

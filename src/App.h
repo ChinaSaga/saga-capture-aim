@@ -24,6 +24,7 @@
 // Shared detection result.
 #include "Inference.h"
 #include "ModelPaths.h"
+#include "AimProfiles.h"
 
 
 // ============================================================================
@@ -59,6 +60,8 @@ struct DrawBox
 // ============================================================================
 struct AppState
 {
+    aim_profiles::Store aimProfiles;
+    std::atomic<std::uint64_t> moveProfileToken{0};
     // ---- 运行控制 ----
     std::atomic<bool> running{ false };        // 全_死循环
     std::atomic<bool> inferPaused{ false };    // 切换识别范围期间暂停推理（等新画面到位）
@@ -113,6 +116,8 @@ struct AppState
     int aimMainKey = 2;                        // 整数_自瞄主键
     int aimSubKey1 = 0, aimSubKey2 = 0, aimSubKey3 = 0;
     int crossBind[4] = { 0, 0, 0, 0 };         // 整数_准星绑定1~4
+    std::atomic<int> rangePressKey{0};
+    std::atomic<bool> rangePressActive{false};
     int triggerKey[4] = { 0, 0, 0, 0 };        // 整数_扳机热键1~4
 
     // ---- 扳机 ----

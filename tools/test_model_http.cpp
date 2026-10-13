@@ -112,6 +112,48 @@ int main() {
         require(request("/config.js?ignored=1").find("application/javascript; charset=utf-8")!=std::string::npos,"Existing config script route broken");
         require(request("/api").find("HTTP/1.1 201 ")==0,"Existing API read route broken");
         require(request("/api",ansiToUtf8("推理引擎|3")).find("HTTP/1.1 201 ")==0 && g.engine==3,"Engine 3 POST/config publication broken");
+        // Migrate a legacy file and round-trip all profile fields through real HTTP/config IO.
+        writeFileAll(g.cfgPath, ansiToUtf8("优先锁定=1\n其次锁定=2\n再次锁定=3\n优先锁定位置=55\n其次锁定位置=25\n再次锁定位置=35\n锁定范围=320\n中心点范围=40\n框内移动=true\n吸附常驻=false\n自瞄主键=2\n"));
+        configInit(); configSyncAll(true);
+        require(g.rangePressKey == 0, "Legacy config must disable range repeat");
+        request("/api",ansiToUtf8("测距按下|1"));
+        require(g.rangePressKey == 0, "Range repeat rejects mouse keys");
+        request("/api",ansiToUtf8("测距按下|1057"));
+        require(g.rangePressKey == 1057, "Range repeat accepts CAT space");
+        configInit(); configSyncAll(false);
+        require(g.rangePressKey == 1057, "Range repeat survives config reload");
+        auto profiles = g.aimProfiles.config().config;
+        require(profiles.profiles[0].keys[0]==2 && profiles.profiles[0].prioLockPos==55, "Legacy profile 1 not preserved");
+        for(int group=1;group<3;++group) {
+            require(profiles.profiles[group].keys==std::array<int,4>{}, "New profiles must start unbound");
+            require(profiles.profiles[group].prioLockPos==55 && profiles.profiles[group].lockRange==320 && profiles.profiles[group].moveInBox,
+                "New target pages must inherit legacy target defaults");
+        }
+        const char* names[]={"自瞄主键","自瞄副键","自瞄副键2","自瞄副键3","优先锁定","其次锁定","再次锁定",
+            "优先锁定位置","其次锁定位置","再次锁定位置","锁定范围","中心点范围"};
+        const int values[]={1,2,5,6,3,2,1,70,40,20,240,30};
+        for(int group=1;group<=3;++group) {
+            const auto prefix=group==1?std::string():std::string("热键")+std::to_string(group)+"_";
+            for(int field=0;field<12;++field)
+                require(request("/api",ansiToUtf8(prefix+names[field]+"|"+std::to_string(values[field]+group))).find("HTTP/1.1 201 ")==0,
+                    "Profile field POST failed");
+            request("/api",ansiToUtf8(prefix+"框内移动|"+(group==2?"false":"true")));
+        }
+        profiles=g.aimProfiles.config().config;
+        for(int group=0;group<3;++group) {
+            const auto& p=profiles.profiles[group];const int offset=group+1;
+            require(p.keys==std::array<int,4>{1+offset,2+offset,5+offset,6+offset}, "Four key bindings leaked between groups");
+            require(p.prioLock==3+offset && p.secondLock==2+offset && p.thirdLock==1+offset &&
+                p.prioLockPos==70+offset && p.secondLockPos==40+offset && p.thirdLockPos==20+offset &&
+                p.lockRange==240+offset && p.centerRange==30+offset && p.moveInBox==(group!=1), "Target settings leaked between groups");
+        }
+        configInit(); configSyncAll(false);
+        require(g.aimProfiles.config().config==profiles, "Saved profiles did not survive reload");
+        require(request("/config.js").find(ansiToUtf8("\"热键3_优先锁定\":6"))!=std::string::npos, "Browser config omitted group 3");
+        request("/api",ansiToUtf8("保存配置|三组测试"));
+        request("/api",ansiToUtf8("热键2_优先锁定|9"));
+        request("/api",ansiToUtf8("导入配置|三组测试"));
+        require(g.aimProfiles.config().config==profiles, "Named configuration import must restore all groups");
         require(request("/unknown").find("HTTP/1.1 404 ")==0,"Unknown route did not return 404");
         std::filesystem::remove(directory/L"圣人视觉识别系统.html");
         require(request("/models.json?engine=3").find("HTTP/1.1 404 ")==0,"Missing panel protection broken");

@@ -342,14 +342,14 @@ void trajMove10(float endX, float endY)
     trajDelta(endX, endY, arr, mx, my);
 
     float ax = mx[0], ay = my[0];
-    if (needMove(ax, ay)) { makcuMove(ax, ay); hiSleep(0.885); ax = 0; ay = 0; }
+    if (needMove(ax, ay)) { makcuMove(ax, ay); if (boxLastMoveNeedsDelay()) hiSleep(0.885); ax = 0; ay = 0; }
     for (int j = 1; j < 10; ++j)
     {
         ax += mx[j]; ay += my[j];
         if (needMove(ax, ay))
         {
             makcuMove(ax, ay);
-            if (j != 9) hiSleep(0.885);
+            if (j != 9 && boxLastMoveNeedsDelay()) hiSleep(0.885);
             ax = 0; ay = 0;
         }
     }
@@ -371,7 +371,7 @@ void trajMove5(float endX, float endY)
         if (needMove(ax, ay))
         {
             makcuMove(ax, ay);
-            if (k != 4) hiSleep(0.885);
+            if (k != 4 && boxLastMoveNeedsDelay()) hiSleep(0.885);
             ax = 0; ay = 0;
         }
     }
@@ -394,7 +394,7 @@ void trajMove3(float endX, float endY)
         if (needMove(ax, ay))
         {
             makcuMove(ax, ay);
-            if (k != 2) hiSleep(0.885);
+            if (k != 2 && boxLastMoveNeedsDelay()) hiSleep(0.885);
             ax = 0; ay = 0;
         }
     }

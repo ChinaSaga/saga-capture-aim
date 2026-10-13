@@ -169,6 +169,7 @@
     <ClInclude Include="src\CapturePixels.h" />
     <ClInclude Include="src\FrameWait.h" />
     <ClInclude Include="src\App.h" />
+    <ClInclude Include="src\AimProfiles.h" />
     <ClInclude Include="src\HumanTrajectory.h" />
     <ClInclude Include="src\HumanTrajectoryModel.h" />
     <ClInclude Include="src\Inference.h" />

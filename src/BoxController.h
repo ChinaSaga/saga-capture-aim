@@ -3,9 +3,12 @@
 #include <windows.h>
 
 void boxStart();
+void boxStopKeyboard();
 void boxConfigure(HWND owner);
 const char* boxStatus();
 void boxMove(int x, int y);
+// Whether this thread's last dispatched movement used MAKCU and needs its pacing.
+bool boxLastMoveNeedsDelay();
 void boxDown(int key);
 void boxUp(int key);
 bool boxButtonState(int key);

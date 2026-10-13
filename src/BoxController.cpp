@@ -7,6 +7,8 @@
 #include <mutex>
 #include <thread>
 #include <array>
+#include <bitset>
+#include <random>
 
 namespace {
 struct CatSession {
@@ -15,11 +17,58 @@ struct CatSession {
 };
 std::atomic<std::shared_ptr<CatSession>> activeCat;
 std::atomic<unsigned long long> routeGeneration{0};
+thread_local bool lastMoveNeedsDelay = false;
 std::mutex routeMutex, settingsMutex;
 CatSettings settings;
 unsigned settingsVersion = 0;
 unsigned injectedButtons = 0; // Protected by routeMutex; belongs to current route.
 unsigned pendingCatReleases = 0;
+std::bitset<128> pendingKeyboardReleases;
+int repeatKey = 0; // Linux code; protected by routeMutex.
+bool repeatHeld = false;
+ULONGLONG repeatDue = 0;
+std::atomic<bool> keyboardStopped{false};
+void releaseRepeat(const std::shared_ptr<CatSession>& session) {
+    if (repeatHeld && session && session->device.keyUp(static_cast<uint16_t>(repeatKey)) != cat::ErrorCode::SUCCESS) {
+        pendingKeyboardReleases.set(repeatKey);
+        session->online = false;
+    }
+    repeatHeld = false;
+    repeatKey = 0;
+    repeatDue = 0;
+}
+
+// One transition per tick, without catching up missed presses after network delays.
+void keyboardTick(ULONGLONG now, int holdMs, int gapMs) {
+    std::lock_guard<std::mutex> route(routeMutex);
+    const auto session = activeCat.load();
+    const int selected = g.rangePressKey.load();
+    const int wanted = !keyboardStopped && g.running && g.rangePressActive &&
+        session && session->online && selected > 1000 && selected <= 1127 ? selected - 1000 : 0;
+    if (repeatKey != wanted || (session && !session->online)) releaseRepeat(session);
+    if (!wanted || !session->online) return;
+    if (!repeatKey) repeatKey = wanted;
+    if (now < repeatDue) return;
+    if (repeatHeld) {
+        releaseRepeat(session);
+        if (session->online) { repeatKey = wanted; repeatDue = GetTickCount64() + gapMs; }
+    } else {
+        // A down may have executed even if its ACK is lost: always remember to release it.
+        repeatHeld = true;
+        if (session->device.keyDown(static_cast<uint16_t>(repeatKey)) != cat::ErrorCode::SUCCESS)
+            session->online = false;
+        repeatDue = GetTickCount64() + holdMs;
+    }
+}
+void keyboardWorker() {
+    std::mt19937 random(std::random_device{}());
+    std::uniform_int_distribution<int> hold(35, 65), gap(55, 95);
+    while (g.running && !keyboardStopped) {
+        keyboardTick(GetTickCount64(), hold(random), gap(random));
+        Sleep(5);
+    }
+    boxStopKeyboard();
+}
 std::atomic<bool> catConfigured{false}, catConnecting{false};
 constexpr int keys[] = {1, 2, 3, 5, 6};
 constexpr cat::MouseButton buttons[] = {cat::MouseButton::LEFT, cat::MouseButton::RIGHT,
@@ -30,6 +79,7 @@ int buttonIndex(int key) {
 }
 std::string settingsPath() { return g.runDir + "\\CAT盒子.ini"; }
 void releaseInjected(const std::shared_ptr<CatSession>& old) {
+    releaseRepeat(old);
     for (int i = 0; i < 5; ++i) if (injectedButtons & (1u << i)) {
         if (old) {
             if (old->device.mouseUp(buttons[i]) != cat::ErrorCode::SUCCESS)
@@ -43,6 +93,15 @@ void switchRoute(std::shared_ptr<CatSession> next) {
     std::lock_guard<std::mutex> route(routeMutex);
     auto old = activeCat.load();
     releaseInjected(old);
+    if (next) {
+        for (int code = 1; code < 128; ++code) if (pendingKeyboardReleases.test(code)) {
+            if (next->device.keyUp(static_cast<uint16_t>(code)) != cat::ErrorCode::SUCCESS) {
+                next.reset();
+                break;
+            }
+            pendingKeyboardReleases.reset(code);
+        }
+    }
     if (next) {
         // A lost release ACK must not leave a software-held key across recovery.
         // Releases are idempotent; failed movement/press commands are never replayed.
@@ -160,6 +219,13 @@ void boxStart() {
         catConfigured = settings.enabled;
     }
     std::thread(catWorker).detach();
+    std::thread(keyboardWorker).detach();
+}
+
+void boxStopKeyboard() {
+    keyboardStopped = true;
+    std::lock_guard<std::mutex> route(routeMutex);
+    releaseRepeat(activeCat.load());
 }
 
 void boxConfigure(HWND owner) {
@@ -222,14 +288,16 @@ const char* boxStatus() {
 }
 
 void boxMove(int x, int y) {
+    lastMoveNeedsDelay = false;
     const auto generation = routeGeneration.load();
     std::lock_guard<std::mutex> route(routeMutex);
     if (generation != routeGeneration.load()) return;
     auto session = activeCat.load();
-    if (!session) { saga::makcuMove(x, y); return; }
+    if (!session) { saga::makcuMove(x, y); lastMoveNeedsDelay = true; return; }
     if (!session->online || x < -32768 || x > 32767 || y < -32768 || y > 32767) return;
     if (session->device.mouseMove(static_cast<int16_t>(x), static_cast<int16_t>(y)) != cat::ErrorCode::SUCCESS) session->online = false;
 }
+bool boxLastMoveNeedsDelay() { return lastMoveNeedsDelay; }
 void boxDown(int key) {
     const int index = buttonIndex(key);
     if (index < 0) return;

@@ -162,6 +162,10 @@ select:disabled { opacity: .65; }
 .mode-tab { flex: 1; min-width: 0; background: transparent; color: var(--muted); padding: 5px 4px; font-size: 11px; border-radius: 5px; border: 0; white-space: nowrap; }
 .mode-tab:hover { background: var(--selected-bg); }
 .mode-tab.active { background: var(--on-primary); color: var(--primary-color); box-shadow: 0 1px 4px #083c650a; }
+.hotkey-profile-tabs { margin-bottom: 14px; flex: none; }
+.hotkey-profile-tabs .mode-tab { min-height: 34px; }
+#always-on-row[hidden] { display: none; }
+.profile-note { color: var(--muted); font-size: 11px; line-height: 1.6; margin: 0 0 12px; }
 .param-row { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; }
 .param-row:last-child { margin-bottom: 0; }
 .param-label { flex: 0 0 40px; color: var(--muted); font-size: 12px; }
@@ -650,7 +654,79 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
 :is(#tab移动系数, #tabPID移动, #panel-types button, #panel-types .checkbox-item label, #panel-types .radio-card span)::after {
     animation: none !important;
 }
-</style>
+/* Profile colors are scoped to the two linked cards; profile 1 keeps the original palette. */
+.config-group[data-profile="2"] {
+    --primary-color: #075581;
+    --hover-color: #064365;
+    --card-bg: #e4eff8;
+    --card-border: #88abc5;
+    --control-bg: #afcce1;
+    --control-border: #608aa9;
+    --soft-bg: #9ebfd7;
+    --selected-bg: #8eb3ce;
+    --track: #9bbbd2;
+    --line: #a3bfd3;
+    --text-color: #12364f;
+    --heading-color: #093c5b;
+    --muted: #36586f;
+    --focus-color: #075581;
+    --profile-control-text: #12364f;
+    --profile-off: #9ebbd0;
+    --profile-glow: #22678f;
+    --profile-glow-center: #3a7b9f;
+}
+.config-group[data-profile="3"] {
+    --primary-color: #062f4b;
+    --hover-color: #041f33;
+    --card-bg: #c8dcec;
+    --card-border: #557c99;
+    --control-bg: #355b79;
+    --control-border: #244762;
+    --soft-bg: #294d69;
+    --selected-bg: #1e405a;
+    --track: #809fb6;
+    --line: #8cabc2;
+    --text-color: #102f45;
+    --heading-color: #072a43;
+    --muted: #28495f;
+    --focus-color: #062f4b;
+    --profile-control-text: #f6fbff;
+    --profile-off: #7898b0;
+    --profile-glow: #164763;
+    --profile-glow-center: #285b78;
+}
+.config-group:is([data-profile="2"], [data-profile="3"]) :is(input[type="text"], .precision-control input, .precision-control button, .btn-group button, .mode-tab:not(.active)) {
+    color: var(--profile-control-text);
+}
+.config-group:is([data-profile="2"], [data-profile="3"]) select {
+    color: var(--profile-control-text);
+    background-image: linear-gradient(45deg, transparent 50%, var(--profile-control-text) 50%), linear-gradient(135deg, var(--profile-control-text) 50%, transparent 50%);
+}
+.config-group:is([data-profile="2"], [data-profile="3"]) .mode-tab:not(.active) {
+    background: var(--control-bg);
+    border-color: var(--control-border);
+}
+.config-group:is([data-profile="2"], [data-profile="3"]) :is(.btn-group button, .precision-control button, .mode-tab:not(.active)):hover {
+    background: var(--selected-bg);
+    color: var(--profile-control-text);
+}
+.config-group:is([data-profile="2"], [data-profile="3"]) .special-toggle input:not(:checked) + .slider {
+    background: var(--profile-off);
+    box-shadow: inset 0 0 0 1px var(--control-border);
+}
+.config-group:is([data-profile="2"], [data-profile="3"]) :is(.mode-tab.active, .special-toggle input:checked + .slider) {
+    background-image: linear-gradient(110deg,
+        var(--primary-color) 0%, var(--primary-color) 35%,
+        var(--profile-glow) 46%, var(--profile-glow-center) 50%, var(--profile-glow) 54%,
+        var(--primary-color) 65%, var(--primary-color) 100%);
+}
+.config-group:is([data-profile="2"], [data-profile="3"]) #热键文本显示 {
+    color: var(--profile-control-text);
+}
+@media (prefers-reduced-motion: reduce) {
+    .config-group:is([data-profile="2"], [data-profile="3"]) :is(.mode-tab.active, .special-toggle input:checked + .slider) { background-image: none; }
+}
+        </style>
     </head>
 
     <body>
@@ -762,7 +838,7 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
                     </div>
                 </section>
 <section class="config-group target-card" id="panel-target" aria-labelledby="heading-target">
-                    <h3 class="group-title" id="heading-target">目标锁定</h3>
+                    <h3 class="group-title" id="heading-target">目标锁定1</h3>
                     <div class="control-item">
                         <div class="control-row">
                             <div class="control-label multi-label">
@@ -847,12 +923,18 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
                 </section>
 <section class="config-group hotkeys-card" id="panel-hotkeys" aria-labelledby="heading-hotkeys">
                     <h3 class="group-title" id="heading-hotkeys">热键设置</h3>
-                    <div class="control-item">
-                        <div class="control-row special-move-row">
+                    <div class="mode-tabs hotkey-profile-tabs" role="tablist" aria-label="热键设置分组">
+                        <button type="button" class="mode-tab active" id="hotkey-tab-1" role="tab" data-hotkey-profile="0" aria-selected="true" aria-controls="hotkey-profile-content">热键设置1</button>
+                        <button type="button" class="mode-tab" id="hotkey-tab-2" role="tab" data-hotkey-profile="1" aria-selected="false" aria-controls="hotkey-profile-content" tabindex="-1">热键设置2</button>
+                        <button type="button" class="mode-tab" id="hotkey-tab-3" role="tab" data-hotkey-profile="2" aria-selected="false" aria-controls="hotkey-profile-content" tabindex="-1">热键设置3</button>
+                    </div>
+                    <p class="profile-note">三组热键同时生效，冲突时 1 ＞ 2 ＞ 3。切换标签可编辑对应的目标锁定。</p>
+                    <div class="control-item" id="hotkey-profile-content" role="tabpanel" aria-labelledby="hotkey-tab-1">
+                        <div class="control-row special-move-row" id="always-on-row">
                             <strong>
                                 <div class="control-label multi-label">
                                     <div class="main-title">吸附常驻</div>
-                                    <div class="sub-text">开启无视下面</div>
+                                    <div class="sub-text">开启后始终使用第1组</div>
                                 </div>
                             </strong>
                             <label class="special-toggle">
@@ -1942,6 +2024,133 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
                                 </select>
                             </div>
                         </div>
+                        <div class="control-row">
+                            <span class="control-label">测距按下:</span>
+                            <div class="select-container">
+                                <select id="测距按下" name="测距按下" title="按住自瞄键时，通过 CAT 连按所选键；空白关闭">
+                                    <option value="0">空白</option>
+                                    <optgroup label="键盘 · 字母（CAT）">
+                                        <option value="1030">键盘 A</option>
+                                        <option value="1048">键盘 B</option>
+                                        <option value="1046">键盘 C</option>
+                                        <option value="1032">键盘 D</option>
+                                        <option value="1018">键盘 E</option>
+                                        <option value="1033">键盘 F</option>
+                                        <option value="1034">键盘 G</option>
+                                        <option value="1035">键盘 H</option>
+                                        <option value="1023">键盘 I</option>
+                                        <option value="1036">键盘 J</option>
+                                        <option value="1037">键盘 K</option>
+                                        <option value="1038">键盘 L</option>
+                                        <option value="1050">键盘 M</option>
+                                        <option value="1049">键盘 N</option>
+                                        <option value="1024">键盘 O</option>
+                                        <option value="1025">键盘 P</option>
+                                        <option value="1016">键盘 Q</option>
+                                        <option value="1019">键盘 R</option>
+                                        <option value="1031">键盘 S</option>
+                                        <option value="1020">键盘 T</option>
+                                        <option value="1022">键盘 U</option>
+                                        <option value="1047">键盘 V</option>
+                                        <option value="1017">键盘 W</option>
+                                        <option value="1045">键盘 X</option>
+                                        <option value="1021">键盘 Y</option>
+                                        <option value="1044">键盘 Z</option>
+                                    </optgroup>
+                                    <optgroup label="键盘 · 数字（CAT）">
+                                        <option value="1002">键盘 1</option>
+                                        <option value="1003">键盘 2</option>
+                                        <option value="1004">键盘 3</option>
+                                        <option value="1005">键盘 4</option>
+                                        <option value="1006">键盘 5</option>
+                                        <option value="1007">键盘 6</option>
+                                        <option value="1008">键盘 7</option>
+                                        <option value="1009">键盘 8</option>
+                                        <option value="1010">键盘 9</option>
+                                        <option value="1011">键盘 0</option>
+                                    </optgroup>
+                                    <optgroup label="键盘 · 常用键（CAT）">
+                                        <option value="1057">键盘 空格</option>
+                                        <option value="1042">键盘 左 Shift</option>
+                                        <option value="1054">键盘 右 Shift</option>
+                                        <option value="1029">键盘 左 Ctrl</option>
+                                        <option value="1097">键盘 右 Ctrl</option>
+                                        <option value="1056">键盘 左 Alt</option>
+                                        <option value="1100">键盘 右 Alt</option>
+                                        <option value="1015">键盘 Tab</option>
+                                        <option value="1028">键盘 Enter</option>
+                                        <option value="1001">键盘 Esc</option>
+                                        <option value="1014">键盘 Backspace</option>
+                                        <option value="1058">键盘 Caps Lock</option>
+                                        <option value="1125">键盘 左 Win</option>
+                                        <option value="1126">键盘 右 Win</option>
+                                        <option value="1127">键盘 菜单键</option>
+                                    </optgroup>
+                                    <optgroup label="键盘 · 功能键（CAT）">
+                                        <option value="1059">键盘 F1</option>
+                                        <option value="1060">键盘 F2</option>
+                                        <option value="1061">键盘 F3</option>
+                                        <option value="1062">键盘 F4</option>
+                                        <option value="1063">键盘 F5</option>
+                                        <option value="1064">键盘 F6</option>
+                                        <option value="1065">键盘 F7</option>
+                                        <option value="1066">键盘 F8</option>
+                                        <option value="1067">键盘 F9</option>
+                                        <option value="1068">键盘 F10</option>
+                                        <option value="1087">键盘 F11</option>
+                                        <option value="1088">键盘 F12</option>
+                                    </optgroup>
+                                    <optgroup label="键盘 · 方向与编辑（CAT）">
+                                        <option value="1103">键盘 ↑ 上</option>
+                                        <option value="1108">键盘 ↓ 下</option>
+                                        <option value="1105">键盘 ← 左</option>
+                                        <option value="1106">键盘 → 右</option>
+                                        <option value="1110">键盘 Insert</option>
+                                        <option value="1111">键盘 Delete</option>
+                                        <option value="1102">键盘 Home</option>
+                                        <option value="1107">键盘 End</option>
+                                        <option value="1104">键盘 Page Up</option>
+                                        <option value="1109">键盘 Page Down</option>
+                                        <option value="1099">键盘 Print Screen</option>
+                                        <option value="1070">键盘 Scroll Lock</option>
+                                        <option value="1119">键盘 Pause</option>
+                                    </optgroup>
+                                    <optgroup label="键盘 · 符号（CAT）">
+                                        <option value="1012">键盘 减号 -</option>
+                                        <option value="1013">键盘 等号 =</option>
+                                        <option value="1026">键盘 左方括号 [</option>
+                                        <option value="1027">键盘 右方括号 ]</option>
+                                        <option value="1039">键盘 分号 ;</option>
+                                        <option value="1040">键盘 单引号</option>
+                                        <option value="1041">键盘 反引号</option>
+                                        <option value="1043">键盘 反斜杠</option>
+                                        <option value="1051">键盘 逗号</option>
+                                        <option value="1052">键盘 句号</option>
+                                        <option value="1053">键盘 斜杠 /</option>
+                                    </optgroup>
+                                    <optgroup label="键盘 · 数字小键盘（CAT）">
+                                        <option value="1082">键盘 小键盘 0</option>
+                                        <option value="1079">键盘 小键盘 1</option>
+                                        <option value="1080">键盘 小键盘 2</option>
+                                        <option value="1081">键盘 小键盘 3</option>
+                                        <option value="1075">键盘 小键盘 4</option>
+                                        <option value="1076">键盘 小键盘 5</option>
+                                        <option value="1077">键盘 小键盘 6</option>
+                                        <option value="1071">键盘 小键盘 7</option>
+                                        <option value="1072">键盘 小键盘 8</option>
+                                        <option value="1073">键盘 小键盘 9</option>
+                                        <option value="1078">键盘 小键盘 +</option>
+                                        <option value="1074">键盘 小键盘 -</option>
+                                        <option value="1055">键盘 小键盘 *</option>
+                                        <option value="1098">键盘 小键盘 /</option>
+                                        <option value="1083">键盘 小键盘 .</option>
+                                        <option value="1096">键盘 小键盘 Enter</option>
+                                        <option value="1069">键盘 Num Lock</option>
+                                    </optgroup>
+
+                                </select>
+                            </div>
+                        </div>
                     </div>
                 </section>
 <section class="config-group activation-card" id="panel-activation" aria-labelledby="heading-activation">
@@ -2813,6 +3022,64 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
             }
         }
 
+        // The editor selection is local UI state; all three groups remain live.
+        const 热键配置字段 = ['自瞄主键', '自瞄副键', '自瞄副键2', '自瞄副键3'];
+        const 目标配置字段 = ['锁定范围', '中心点范围', '框内移动', '优先锁定', '其次锁定', '再次锁定',
+            '优先锁定位置', '其次锁定位置', '再次锁定位置'];
+        const 分组配置字段 = new Set([...热键配置字段, ...目标配置字段]);
+        let 当前热键配置 = 0;
+        let 热键配置组 = [];
+        function 分组参数名(name, group) {
+            return group === 0 ? name : '热键' + (group + 1) + '_' + name;
+        }
+        function 切换热键配置(group) {
+            if (!Number.isInteger(group) || group < 0 || group > 2) return;
+            当前热键配置 = group;
+            ['panel-hotkeys', 'panel-target'].forEach(id => {
+                document.getElementById(id).dataset.profile = String(group + 1);
+            });
+            const profile = 热键配置组[group];
+            分组配置字段.forEach(name => {
+                const element = document.getElementById(name);
+                window[name] = profile[name];
+                if (element.type === 'checkbox') element.checked = profile[name];
+                else element.value = profile[name];
+                const display = document.getElementById(name + '显示');
+                if (display) display.textContent = profile[name];
+                // Refresh fine controls without firing a setting-write event.
+                element.dispatchEvent(new Event('profilechange'));
+            });
+            document.getElementById('always-on-row').hidden = group !== 0;
+            document.getElementById('heading-target').textContent = '目标锁定' + (group + 1);
+            document.getElementById('hotkey-profile-content').setAttribute('aria-labelledby', 'hotkey-tab-' + (group + 1));
+            document.querySelectorAll('[data-hotkey-profile]').forEach(tab => {
+                const selected = Number(tab.dataset.hotkeyProfile) === group;
+                tab.classList.toggle('active', selected);
+                tab.setAttribute('aria-selected', String(selected));
+                tab.tabIndex = selected ? 0 : -1;
+            });
+        }
+        function 初始化热键配置() {
+            热键配置组 = [0, 1, 2].map(group => Object.fromEntries([...分组配置字段].map(name => {
+                const key = 分组参数名(name, group);
+                const fallback = 热键配置字段.includes(name) && group !== 0 ? 0 : window[name];
+                const value = window[key] ?? fallback;
+                return [name, name === '框内移动' ? (value === true || value === 'true') : Number(value)];
+            })));
+            document.querySelectorAll('[data-hotkey-profile]').forEach(tab => {
+                tab.addEventListener('click', () => 切换热键配置(Number(tab.dataset.hotkeyProfile)));
+                tab.addEventListener('keydown', event => {
+                    const group = Number(tab.dataset.hotkeyProfile);
+                    const next = {ArrowLeft: (group + 2) % 3, ArrowRight: (group + 1) % 3, Home: 0, End: 2}[event.key];
+                    if (next === undefined) return;
+                    event.preventDefault();
+                    切换热键配置(next);
+                    document.getElementById('hotkey-tab-' + (next + 1)).focus();
+                });
+            });
+            切换热键配置(0);
+        }
+
         let 模型列表请求序号 = 0;
         let 当前模型选择 = typeof 模型名称 !== 'undefined' ? 模型名称 : '';
         let 当前推理引擎 = typeof 推理引擎 !== 'undefined' ? Number(推理引擎) : 1;
@@ -2914,6 +3181,7 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
             document.getElementById('准星绑定2').value = 准星绑定2;
             document.getElementById('准星绑定3').value = 准星绑定3;
             document.getElementById('准星绑定4').value = 准星绑定4;
+            document.getElementById('测距按下').value = typeof window.测距按下 === 'number' ? window.测距按下 : 0;
             document.getElementById('扳机热键1').value = 扳机热键1;
             document.getElementById('扳机热键2').value = 扳机热键2;
             document.getElementById('扳机热键3').value = 扳机热键3;
@@ -2962,6 +3230,7 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
 
             initSliders();
             initPrecisionControls();
+            初始化热键配置();
 
             // 移动方式点击切换
             document.querySelectorAll('.mode-tab[data-mode]').forEach(tab => {
@@ -3121,6 +3390,13 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
         }
 
         function 发送消息给服务器(参数名, 发送的消息) {
+            if (分组配置字段.has(参数名) && 热键配置组.length) {
+                const value = 参数名 === '框内移动'
+                    ? (发送的消息 === true || 发送的消息 === 'true') : Number(发送的消息);
+                热键配置组[当前热键配置][参数名] = value;
+                window[参数名] = value;
+                参数名 = 分组参数名(参数名, 当前热键配置);
+            }
             fetch(apiEndpoint, {
                 method: 'POST',
                 body: 参数名 + "|" + 发送的消息
@@ -3249,6 +3525,7 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
                 group.append(decrease, number, increase);
                 range.parentElement.appendChild(group);
                 range.addEventListener('input', sync);
+                range.addEventListener('profilechange', sync);
                 number.addEventListener('change', () => apply(number.value.trim() ? Number(number.value) : NaN));
                 number.addEventListener('keydown', event => {
                     if (event.key === 'Enter') { number.blur(); }
@@ -3384,6 +3661,9 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
             });
             document.getElementById('准星绑定3').addEventListener('change', function() {
                 发送消息给服务器('准星绑定3', this.value);
+            });
+            document.getElementById('测距按下').addEventListener('change', function() {
+                发送消息给服务器('测距按下', this.value);
             });
             document.getElementById('准星绑定4').addEventListener('change', function() {
                 发送消息给服务器('准星绑定4', this.value);

@@ -76,6 +76,52 @@ int validate() {
     receiver.BufferCB(0, sample.data(), static_cast<long>(sample.size()));
     if (g_captureSequence != sequence + 1) return 4;
     receiver.clear();
+    // Validate the whole crop against independently generated source pixels,
+    // including the last scanline, both DIB orientations and the RGB24 header
+    // used by Live Gamer Ultra 2.1. A frame count alone cannot detect garbage.
+    unsigned rgbCases = 0;
+    type.subtype = MEDIASUBTYPE_RGB24;
+    info.bmiHeader.biBitCount = 24;
+    info.bmiHeader.biSizeImage = 1920 * 1080 * 3;
+    sample.resize(info.bmiHeader.biSizeImage);
+    for (bool bottomUp : {false, true}) {
+        info.bmiHeader.biHeight = bottomUp ? 1080 : -1080;
+        for (int y = 0; y < 1080; ++y) {
+            BYTE* row = sample.data() + (bottomUp ? 1079 - y : y) * 1920 * 3;
+            for (int x = 0; x < 1920; ++x) {
+                row[x * 3] = static_cast<BYTE>(x * 3 + y);
+                row[x * 3 + 1] = static_cast<BYTE>(y * 5 + x);
+                row[x * 3 + 2] = static_cast<BYTE>(x ^ y);
+            }
+        }
+        for (DWORD compression : {DWORD(BI_RGB), MEDIASUBTYPE_RGB24.Data1}) {
+            info.bmiHeader.biCompression = compression;
+            for (int crop : {320, 640}) {
+                if (!receiver.configure(type, 1920, 1080, crop)) return 5;
+                receiver.BufferCB(0, sample.data(), static_cast<long>(sample.size()));
+                CaptureFrame frame;
+                unsigned long long seq = 0;
+                if (!captureAcquire(frame, seq, 0)) return 6;
+                for (int y = 0; y < crop; ++y) {
+                    const BYTE* row = frame.bmp + 54 + y * frame.stride;
+                    for (int x = 0; x < crop; ++x) {
+                        const int sx = (1920 - crop) / 2 + x, sy = (1080 - crop) / 2 + y;
+                        if (row[x * 3] != static_cast<BYTE>(sx * 3 + sy) ||
+                            row[x * 3 + 1] != static_cast<BYTE>(sy * 5 + sx) ||
+                            row[x * 3 + 2] != static_cast<BYTE>(sx ^ sy)) {
+                            std::printf("FAIL RGB24 crop=%d bottomUp=%d row=%d col=%d\n", crop, bottomUp, y, x);
+                            return 7;
+                        }
+                    }
+                }
+                receiver.clear();
+                ++rgbCases;
+            }
+        }
+    }
+    info.bmiHeader.biCompression = BI_RLE8;
+    if (receiver.configure(type, 1920, 1080, 320)) return 8;
+    std::printf("PASS %u full-frame RGB24 cases (standard/driver headers, both orientations, 320/640 crops)\n", rgbCases);
     std::printf("PASS %u scalar-exact planar cases, output sentinels and malformed frame publication checks\n", cases);
     return 0;
 }

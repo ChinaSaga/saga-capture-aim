@@ -285,7 +285,11 @@ bool frame_layout(AM_MEDIA_TYPE& type, int width, int height, FrameLayout& layou
         layout.format == PixelFormat::P010;
     uint64_t minimumPitch = 0, rows = static_cast<uint64_t>(height);
     if (layout.format == PixelFormat::Bgr24) {
-        if (bitmap->biBitCount != 24 || bitmap->biCompression != BI_RGB) return false;
+        // Some capture drivers (including Live Gamer Ultra 2.1) put the
+        // RGB24 subtype's Data1 in biCompression instead of BI_RGB. The
+        // negotiated subtype and bit depth still identify packed BGR24.
+        if (bitmap->biBitCount != 24 ||
+            (bitmap->biCompression != BI_RGB && bitmap->biCompression != MEDIASUBTYPE_RGB24.Data1)) return false;
         minimumPitch = (static_cast<uint64_t>(width) * 3 + 3) & ~uint64_t(3);
         layout.bottomUp = bitmap->biHeight > 0;
     } else {

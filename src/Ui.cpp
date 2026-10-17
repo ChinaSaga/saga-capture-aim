@@ -679,10 +679,10 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
                         if (q == std::string::npos) break;
                         s0 = q + 1;
                     }
-                    const char* ok[] = { "NV12","YUY2","MJPG","YUYV","H264","H265","HEVC" };
+                    const char* ok[] = { "NV12","YUY2","MJPG","YUYV","H264","H265","HEVC","RGB24" };
                     bool hit = false;
                     if (seg.size() == 4)
-                        for (int k = 0; k < 7; ++k) if (seg[3] == ok[k]) hit = true;
+                        for (const char* format : ok) if (seg[3] == format) hit = true;
                     if (seg.size() == 4 && hit)
                     {
                         std::string show = seg[0] + "x" + seg[1] + "@" + seg[2] + "@" + seg[3];

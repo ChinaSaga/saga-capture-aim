@@ -96,6 +96,24 @@ int main() {
         boardPaint(target);
         require(GetPixel(target, kViewX + 10, kViewY + 10) == RGB(17,25,40), "initial placeholder missing");
 
+        // Independent expected pixels, with a deliberately padded input stride.
+        // Check every scanline, not just that the window copied its own bitmap.
+        std::vector<unsigned char> padded(640 * (640 * 3 + 32), 0xcd);
+        std::vector<unsigned char> reference(640 * 640 * 4, 255);
+        for (int y = 0; y < 640; ++y) {
+            for (int x = 0; x < 640; ++x) {
+                auto* src = padded.data() + y * (640 * 3 + 32) + x * 3;
+                src[0] = static_cast<BYTE>(x + y * 3);
+                src[1] = static_cast<BYTE>(y + x * 5);
+                src[2] = static_cast<BYTE>(x ^ y);
+                std::memcpy(reference.data() + (y * 640 + x) * 4, src, 3);
+            }
+        }
+        boardInit(); boardClear();
+        boardDrawPixels(cv::Mat(640, 640, CV_8UC3, padded.data(), 640 * 3 + 32));
+        boardPaint(target);
+        checkPreview(reference);
+
         std::vector<unsigned char> input(54 + 320 * 320 * 3);
         for (int y = 0; y < 320; ++y)
             for (int x = 0; x < 320; ++x) {

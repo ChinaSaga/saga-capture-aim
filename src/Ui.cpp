@@ -38,6 +38,10 @@ static HBRUSH g_panelBrush = nullptr;
 static HFONT g_titleFont = nullptr;
 static SRWLOCK g_canvasLock = SRWLOCK_INIT;
 static bool g_hasFrame = false;
+// Owned only by the window thread. A repaint must still have complete pixels
+// when the render thread is resizing/annotating the next frame under the lock.
+static unsigned char g_presentPixels[kBoard * kBoard * 4] = {};
+static bool g_hasPresentedFrame = false;
 static double g_imageScale = 1.0;
 static int g_imageX = 0, g_imageY = 0;
 static constexpr UINT kSyncPreview = WM_APP + 41;
@@ -299,6 +303,56 @@ void canvasDraw(const std::vector<unsigned char>& frame)
 void canvasDrawCapture(const CaptureFrame& frame)
 {
     canvasDrawImpl(nullptr, &frame);
+}
+
+static void boardPaint(HDC dc)
+{
+    const bool show = g.showImg.load();
+    if (show && TryAcquireSRWLockShared(&g_canvasLock)) {
+        if (g_hasFrame && g_bits) {
+            std::memcpy(g_presentPixels, g_bits, sizeof(g_presentPixels));
+            g_hasPresentedFrame = true;
+        }
+        ReleaseSRWLockShared(&g_canvasLock);
+    }
+    if (show && g_hasPresentedFrame) {
+        BITMAPINFO bitmap{};
+        bitmap.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bitmap.bmiHeader.biWidth = kBoard;
+        bitmap.bmiHeader.biHeight = -kBoard;
+        bitmap.bmiHeader.biPlanes = 1;
+        bitmap.bmiHeader.biBitCount = 32;
+        bitmap.bmiHeader.biCompression = BI_RGB;
+        SetDIBitsToDevice(dc, kViewX, kViewY, kBoard, kBoard, 0, 0, 0, kBoard,
+            g_presentPixels, &bitmap, DIB_RGB_COLORS);
+        GdiFlush();
+        return;
+    }
+    RECT view = previewRect();
+    HBRUSH background = CreateSolidBrush(RGB(17,25,40));
+    FillRect(dc, &view, background); DeleteObject(background);
+    RECT text = view; text.top += 275; text.bottom = text.top + 36;
+    textAt(dc, show ? "等待采集画面" : "实时预览已暂停", text,
+        g_uiFontBold, RGB(209,222,242), DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    text.top += 36; text.bottom += 36;
+    textAt(dc, show ? "选择设备后开始采集 · 640 × 640" : "按 F1 或勾选右侧实时显示恢复", text,
+        g_uiFont, RGB(119,141,170), DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+}
+
+static LRESULT eraseBackground(HWND window, HDC dc)
+{
+    // An erase request for the status bar also erases any pending video update
+    // in the same update region. The preview paints every pixel itself, so it
+    // must never be cleared by the window's background brush between frames.
+    const int saved = SaveDC(dc);
+    if (!saved) return 0;
+    const RECT view = previewRect();
+    ExcludeClipRect(dc, view.left, view.top, view.right, view.bottom);
+    RECT client;
+    GetClientRect(window, &client);
+    FillRect(dc, &client, g_panelBrush);
+    RestoreDC(dc, saved);
+    return 1;
 }
 
 // ============================================================================
@@ -764,31 +818,15 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return TRUE;
     }
 
+    case WM_ERASEBKGND:
+        return eraseBackground(h, reinterpret_cast<HDC>(w));
+
     case WM_PAINT:
     {
         PAINTSTRUCT ps;
         HDC dc = BeginPaint(h, &ps);
-        RECT view = previewRect();
-        // Never wait for OpenCV/GDI work on the window thread. Keep the last
-        // displayed pixels if a producer is busy; the next publication repaints.
-        const bool acquired = TryAcquireSRWLockShared(&g_canvasLock) != FALSE;
-        bool ready = false;
-        if (acquired) {
-            ready = g_hasFrame && g.showImg.load();
-            if (ready) BitBlt(dc, kViewX, kViewY, kBoard, kBoard, g_memDC, 0, 0, SRCCOPY);
-            GdiFlush();
-            ReleaseSRWLockShared(&g_canvasLock);
-        }
-        if (acquired && !ready) {
-            HBRUSH background = CreateSolidBrush(RGB(17,25,40));
-            FillRect(dc, &view, background); DeleteObject(background);
-            RECT text = view; text.top += 275; text.bottom = text.top + 36;
-            textAt(dc, g.showImg.load() ? "等待采集画面" : "实时预览已暂停", text,
-                g_uiFontBold, RGB(209,222,242), DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-            text.top += 36; text.bottom += 36;
-            textAt(dc, g.showImg.load() ? "选择设备后开始采集 · 640 × 640" : "按 F1 或勾选右侧实时显示恢复", text,
-                g_uiFont, RGB(119,141,170), DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-        }
+        const RECT view = previewRect();
+        if (RectVisible(dc, &view)) boardPaint(dc);
         textAt(dc, "圣人视觉 / C++", {24,18,664,56}, g_titleFont, RGB(27,43,68));
         // 状态栏：中心尺寸 / 采集帧率 / 推理帧率 / 显卡名称 / 推理耗时
         char head[160];

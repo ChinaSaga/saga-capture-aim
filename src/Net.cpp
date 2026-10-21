@@ -1,6 +1,8 @@
 #include "App.h"
 #include "RuntimeLog.h"
 #include "ModelFiles.h"
+#include "HttpRequest.h"
+#include "ConfigValue.h"
 
 #include <algorithm>
 #include <map>
@@ -17,6 +19,7 @@ static std::map<std::string, std::string> g_hash;
 static std::recursive_mutex g_hashMutex;
 static std::string g_outBuf;                       // 集_写出内容
 static std::map<std::string, std::string> g_webConfig;
+static bool g_configSaved = true; // Accessed under g_hashMutex.
 static std::string jsonEscape(const std::string& s);
 
 static std::vector<std::string> splitStr(const std::string& s, const std::string& sep)
@@ -54,13 +57,11 @@ void configInit()
     g_hash.clear();
 
     std::string raw = readFileAll(g.cfgPath);
-    runtime_log::write("[cfg] path=%s rawSize=%zu", g.cfgPath.c_str(), raw.size());
+    runtime_log::write("[cfg] path=%s rawSize=%zu", file_paths::narrow(g.cfgPath.wstring()).c_str(), raw.size());
     if (raw.empty()) return;
-    std::string text = utf8ToAnsi(raw);
     // 去掉可能的 UTF-8 BOM
-    if (text.size() >= 3 && (unsigned char)text[0] == 0xEF &&
-        (unsigned char)text[1] == 0xBB && (unsigned char)text[2] == 0xBF)
-        text = text.substr(3);
+    if (raw.starts_with("\xef\xbb\xbf")) raw.erase(0, 3);
+    std::string text = utf8ToAnsi(raw);
 
     auto lines = splitStr(text, "\n");
     for (auto& ln : lines)
@@ -94,7 +95,7 @@ void configApplyStartupDefaults()
 
 static void bufInt(const char* name, int& v)
 {
-    v = atoi(hashGet(name).c_str());
+    v = config_value::integer(hashGet(name));
     g_webConfig[name] = std::to_string(v);
     g_outBuf += name;
     g_outBuf += "=";
@@ -105,6 +106,7 @@ static void bufInt(const char* name, int& v)
 static void bufStr(const char* name, std::string& v)
 {
     v = hashGet(name);
+    if (std::string(name) == "模型名称" && !v.empty() && !config_value::leafName(v)) v.clear();
     g_webConfig[name] = (v == "true" || v == "false") && std::string(name) != "模型名称"
         ? v : "\"" + jsonEscape(v) + "\"";
     if (name == std::string("模型名称")) return;      // 原版：读了但不写回缓冲
@@ -117,7 +119,7 @@ static void bufStr(const char* name, std::string& v)
 
 static void bufFlt(const char* name, float& v)
 {
-    v = (float)atof(hashGet(name).c_str());
+    v = config_value::number(hashGet(name));
     g_outBuf += name;
     g_outBuf += "=";
     char tmp[64];
@@ -127,15 +129,23 @@ static void bufFlt(const char* name, float& v)
     g_outBuf += "\n";
 }
 
+static void bufBool(const char* name, bool& value)
+{
+    std::string text;
+    bufStr(name, text);
+    value = text == "true";
+}
+
 // 变量全部对应一次
 void configSyncAll(bool save)
 {
     std::lock_guard<std::recursive_mutex> lk(g_hashMutex);
+    auto settings = g.settings.snapshot();
     g_outBuf.clear();
     g_webConfig.clear();
 
     bufInt("本地端口", g.localPort);
-    bufInt("移动方式", g.moveMode);
+    bufInt("移动方式", settings.moveMode);
     bufInt("优先锁定", g.prioLock);
     bufInt("其次锁定", g.secondLock);
     bufInt("再次锁定", g.thirdLock);
@@ -147,26 +157,26 @@ void configSyncAll(bool save)
     bufInt("自瞄副键", g.aimSubKey1);
     bufInt("自瞄副键2", g.aimSubKey2);
     bufInt("自瞄副键3", g.aimSubKey3);
-    bufInt("准星绑定1", g.crossBind[0]);
-    bufInt("准星绑定2", g.crossBind[1]);
-    bufInt("准星绑定3", g.crossBind[2]);
-    bufInt("准星绑定4", g.crossBind[3]);
-    int rangeKey = atoi(hashGet("测距按下").c_str());
+    bufInt("准星绑定1", settings.crossBind[0]);
+    bufInt("准星绑定2", settings.crossBind[1]);
+    bufInt("准星绑定3", settings.crossBind[2]);
+    bufInt("准星绑定4", settings.crossBind[3]);
+    int rangeKey = config_value::integer(hashGet("测距按下"));
     if (rangeKey <= 1000 || rangeKey > 1127) rangeKey = 0;
     hashSet("测距按下", std::to_string(rangeKey));
     bufInt("测距按下", rangeKey);
     g.rangePressKey = rangeKey;
-    bufInt("扳机热键1", g.triggerKey[0]);
-    bufInt("扳机热键2", g.triggerKey[1]);
-    bufInt("扳机热键3", g.triggerKey[2]);
-    bufInt("扳机热键4", g.triggerKey[3]);
+    bufInt("扳机热键1", settings.triggerKey[0]);
+    bufInt("扳机热键2", settings.triggerKey[1]);
+    bufInt("扳机热键3", settings.triggerKey[2]);
+    bufInt("扳机热键4", settings.triggerKey[3]);
     int engineTmp = g.engine.load();
     bufInt("推理引擎", engineTmp);
-    bufInt("准星类别", g.crossClass);
-    bufInt("开镜时间", g.adsTime);
-    bufInt("开枪间隔", g.shotInterval);
-    bufInt("锁定频率", g.lockFreq);
-    bufInt("延时频率", g.delayFreq);
+    bufInt("准星类别", settings.crossClass);
+    bufInt("开镜时间", settings.adsTime);
+    bufInt("开枪间隔", settings.shotInterval);
+    bufInt("锁定频率", settings.lockFreq);
+    bufInt("延时频率", settings.delayFreq);
     int campTmp = g.camp.load();
     bufInt("目前阵容", campTmp);
     g.camp = campTmp;
@@ -174,32 +184,38 @@ void configSyncAll(bool save)
 
     {
         std::lock_guard<std::mutex> modelGuard(g.modelMutex);
+        const auto previousModel = g.modelName;
+        const int previousEngine = g.engine.load();
         bufStr("模型名称", g.modelName);
         // Publish the selected engine together with its model name.
         g.engine = engineTmp >= 1 && engineTmp <= 3 ? engineTmp : 1;
+        if (previousModel != g.modelName || previousEngine != g.engine) {
+            ++g.inferenceEpoch;
+            g.triggerFire = false;
+        }
     }
     bufStr("框内移动", g.moveInBox);
-    bufStr("线程移动", g.threadMove);
-    bufStr("自瞄连续按下", g.aimContinuous);
-    bufStr("自动截图", g.autoShot);
+    bufBool("线程移动", settings.threadMove);
+    bufBool("自瞄连续按下", settings.aimContinuous);
+    bufBool("自动截图", settings.autoShot);
     bufStr("吸附常驻", g.alwaysOn);
-    bufStr("准星扳机", g.crossTrigger);
-    bufStr("中心扳机", g.centerTrigger);
+    bufBool("准星扳机", settings.crossTrigger);
+    bufBool("中心扳机", settings.centerTrigger);
 
     // 原版写出顺序：type0~9 一组，team1type0~9 一组，team2type0~9 一组
     char k[32];
-    for (int i = 0; i < 10; ++i) { snprintf(k, sizeof(k), "type%d", i);      bufStr(k, g.type[i]); }
-    for (int i = 0; i < 10; ++i) { snprintf(k, sizeof(k), "team1type%d", i); bufStr(k, g.team1[i]); }
-    for (int i = 0; i < 10; ++i) { snprintf(k, sizeof(k), "team2type%d", i); bufStr(k, g.team2[i]); }
+    for (int i = 0; i < 10; ++i) { snprintf(k, sizeof(k), "type%d", i);      bufBool(k, settings.type[i]); }
+    for (int i = 0; i < 10; ++i) { snprintf(k, sizeof(k), "team1type%d", i); bufBool(k, settings.team1[i]); }
+    for (int i = 0; i < 10; ++i) { snprintf(k, sizeof(k), "team2type%d", i); bufBool(k, settings.team2[i]); }
 
-    bufInt("移动延时", g.moveDelay);
-    bufFlt("置信度", g.conf);
-    bufFlt("准星精度", g.crossConf);
-    bufFlt("交并比", g.nms);
-    bufFlt("移动系数", g.moveFactor);
-    bufFlt("Kp", g.kp);
-    bufFlt("Ki", g.ki);
-    bufFlt("扳机范围", g.triggerRange);
+    bufInt("移动延时", settings.moveDelay);
+    bufFlt("置信度", settings.conf);
+    bufFlt("准星精度", settings.crossConf);
+    bufFlt("交并比", settings.nms);
+    bufFlt("移动系数", settings.moveFactor);
+    bufFlt("Kp", settings.kp);
+    bufFlt("Ki", settings.ki);
+    bufFlt("扳机范围", settings.triggerRange);
 
     aim_profiles::Config profiles;
     auto& first = profiles.profiles[0];
@@ -246,11 +262,13 @@ void configSyncAll(bool save)
     }
     g.aimProfiles.replace(profiles);
 
+    g.settings.replace(settings);
     if (save) configSaveFile();
 }
 
 void configSaveFile()
 {
+    std::lock_guard<std::recursive_mutex> lock(g_hashMutex);
     g_outBuf += "模型名称=\"";
     g_outBuf += g.selectedModelName();
     g_outBuf += "\"\n";
@@ -267,7 +285,8 @@ void configSaveFile()
         if (c == '\n') crlf += "\r\n";
         else crlf += c;
     }
-    writeFileAll(g.cfgPath, ansiToUtf8(crlf));
+    g_configSaved = writeFileAll(g.cfgPath, ansiToUtf8(crlf));
+    if (!g_configSaved) runtime_log::writeWide(L"[cfg] 无法保存配置：" + g.cfgPath.wstring());
     g_outBuf.clear();
 }
 
@@ -277,8 +296,18 @@ void configSaveFile()
 static std::string jsonEscape(const std::string& s)
 {
     std::string r;
-    for (char c : s)
+    for (size_t i = 0; i < s.size(); ++i)
     {
+        const char c = s[i];
+        // Internal strings are GBK: 0x5c may be the trail byte of a Chinese
+        // character, not a JSON backslash. UTF-8 conversion happens afterward.
+        const auto lead = static_cast<unsigned char>(c);
+        if (lead >= 0x81 && lead <= 0xfe && i + 1 < s.size()) {
+            const auto trail = static_cast<unsigned char>(s[i+1]);
+            if (trail >= 0x40 && trail <= 0xfe && trail != 0x7f) {
+                r += c; r += s[++i]; continue;
+            }
+        }
         if (c == '"' || c == '\\') { r += '\\'; r += c; }
         else if (static_cast<unsigned char>(c) < 0x20) {
             char escaped[7];
@@ -295,7 +324,7 @@ static std::string buildJsonBody(const std::string& extraKey = "",
                                  const std::string& extraVal = "")
 {
     std::string j = "{";
-    j += "\"推理帧率\":\"" + std::to_string(g.inferFps) + "\",";
+    j += "\"推理帧率\":\"" + std::to_string(g.inferFps.load()) + "\",";
     // Latency-derived capacity is separate from captured frames processed per second.
     const double inferMs = g.inferMsPrecise;
     const bool active = g.running.load() && !g.inferPaused.load()
@@ -326,7 +355,8 @@ static void sendResponse(SOCKET c, int code, const std::string& body,
 {
     const char* reason = code == 200 ? "OK" : code == 201 ? "Created" :
         code == 400 ? "Bad Request" : code == 404 ? "Not Found" :
-        code == 405 ? "Method Not Allowed" : "Internal Server Error";
+        code == 405 ? "Method Not Allowed" : code == 413 ? "Payload Too Large" :
+        code == 503 ? "Service Unavailable" : "Internal Server Error";
     std::string head = "HTTP/1.1 " + std::to_string(code) + " " + reason + "\r\n";
     head += std::string("Content-Type: ") + contentType + "\r\n";
     head += "Cache-Control: no-store\r\n";
@@ -368,18 +398,40 @@ static void sendMissingWebPanel(SOCKET c)
         "</body></html>"), "text/html; charset=utf-8");
 }
 
+static void sendModelList(SOCKET c, int engine = 0)
+{
+    const auto directory = g.modelDirectory();
+    const auto pathJson = model_files::escapeJson(model_files::utf8(directory.wstring()));
+    try {
+        auto body = engine ? model_files::json(directory, engine) : model_files::catalogJson(directory);
+        body.pop_back();
+        body += ",\"directory\":\"" + pathJson + "\"}";
+        sendResponse(c, 200, body);
+    } catch (const std::filesystem::filesystem_error& error) {
+        const auto detail = L"无法读取模型数据目录：" + file_paths::errorText(error.code().value());
+        runtime_log::writeWide(L"[model] " + directory.wstring() + L" — " + detail);
+        sendResponse(c, 500, "{\"error\":\"" + model_files::escapeJson(model_files::utf8(detail)) +
+            "\",\"directory\":\"" + pathJson + "\",\"code\":" + std::to_string(error.code().value()) + "}");
+    }
+}
+
 static void handleRequest(SOCKET c, const std::string& req)
 {
+    const auto framing = http_request::inspect(req);
+    if (framing.state != http_request::State::complete) {
+        sendResponse(c, framing.state == http_request::State::tooLarge ? 413 : 400,
+            "{\"error\":\"Invalid or incomplete request\"}");
+        return;
+    }
     // 分离头部与 body
     size_t sep = req.find("\r\n\r\n");
     std::string head = (sep == std::string::npos) ? req : req.substr(0, sep);
     std::string body = (sep == std::string::npos) ? "" : req.substr(sep + 4);
 
-    bool isPost = (head.size() >= 4 && head.compare(0, 4, "POST") == 0);
-    bool isOpt = (head.size() >= 7 && head.compare(0, 7, "OPTIONS") == 0);
     std::istringstream requestLine(head);
     std::string method, path;
     requestLine >> method >> path;
+    const bool isPost = method == "POST", isOpt = method == "OPTIONS";
     const size_t queryOffset = path.find('?');
     const std::string query = queryOffset == std::string::npos ? "" : path.substr(queryOffset+1);
     path = path.substr(0, queryOffset);
@@ -389,7 +441,7 @@ static void handleRequest(SOCKET c, const std::string& req)
     }
     // The panel is supplied alongside the EXE. Never fall back to an embedded
     // page or a different folder; stale browser tabs must not tune without it.
-    const std::string panelPath = g.runDir + "\\圣人视觉识别系统.html";
+    const auto panelPath = g.runDir / L"圣人视觉识别系统.html";
     if (!fileExists(panelPath)) {
         sendMissingWebPanel(c);
         return;
@@ -399,7 +451,7 @@ static void handleRequest(SOCKET c, const std::string& req)
         return;
     }
     if (method == "GET" && path == "/model-catalog.json") {
-        sendResponse(c, 200, model_files::catalogJson(model_files::fromGbk(g.modelDirectory())));
+        sendModelList(c);
         return;
     }
     if (method == "GET" && path == "/models.json") {
@@ -408,7 +460,7 @@ static void handleRequest(SOCKET c, const std::string& req)
             sendResponse(c, 400, "{\"error\":\"Invalid engine; expected 1, 2 or 3\"}");
             return;
         }
-        sendResponse(c, 200, model_files::json(model_files::fromGbk(g.modelDirectory()), engine));
+        sendModelList(c, engine);
         return;
     }
     if (method == "GET" && (path == "/" || path == "/index.html") &&
@@ -427,27 +479,6 @@ static void handleRequest(SOCKET c, const std::string& req)
         return;
     }
 
-    std::string extra;
-    if (isPost)
-    {
-        // 按 Content-Length 补齐 body
-        size_t cl = head.find("Content-Length:");
-        if (cl == std::string::npos) cl = head.find("content-length:");
-        if (cl != std::string::npos)
-        {
-            int want = atoi(head.c_str() + cl + 15);
-            int have = (int)body.size();
-            while (have < want)
-            {
-                char buf[4096];
-                int n = recv(c, buf, sizeof(buf), 0);
-                if (n <= 0) break;
-                body.append(buf, n);
-                have += n;
-            }
-        }
-    }
-
     if (isOpt)
     {
         sendResponse(c, 200, "");
@@ -459,37 +490,37 @@ static void handleRequest(SOCKET c, const std::string& req)
 
     std::string json = buildJsonBody();
 
-    if (parts.size() == 2)
+    if (isPost && parts.size() == 2)
     {
         std::lock_guard<std::recursive_mutex> lock(g_hashMutex);
         const std::string& cmd = trim(parts[0]);
         const std::string& arg = trim(parts[1]);
-        if ((cmd == "保存配置" || cmd == "删除配置" || cmd == "导入配置") &&
-            (arg.empty() || arg.size() > 128 || arg == "." || arg == ".." ||
-             arg.find_first_of("\\/:*?\"<>|") != std::string::npos)) {
+        if (((cmd == "保存配置" || cmd == "删除配置" || cmd == "导入配置" || cmd == "模型名称") &&
+            !config_value::leafName(arg)) ||
+            std::any_of(payload.begin(), payload.end(), [](unsigned char ch) { return ch < 32; })) {
             sendResponse(c, 400, "{\"error\":\"Invalid configuration name\"}");
             return;
         }
 
-        std::string cfgDir = g.runDir + "\\配置保存";
-        CreateDirectoryA(cfgDir.c_str(), nullptr);
+        const auto cfgDir = file_paths::io(g.runDir / L"配置保存");
+        CreateDirectoryW(cfgDir.c_str(), nullptr);
 
         if (cmd == "获取所有配置名")
         {
             std::string names;
-            WIN32_FIND_DATAA fd;
-            std::string pat = cfgDir + "\\*.*";
-            HANDLE hf = FindFirstFileA(pat.c_str(), &fd);
+            WIN32_FIND_DATAW fd;
+            const auto pat = cfgDir / L"*.*";
+            HANDLE hf = FindFirstFileW(pat.c_str(), &fd);
             if (hf != INVALID_HANDLE_VALUE)
             {
                 do
                 {
                     if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
-                    std::string n = fd.cFileName;
+                    std::string n = file_paths::narrow(fd.cFileName);
                     size_t dot = n.rfind('.');
                     if (dot != std::string::npos) n = n.substr(0, dot);
                     names += n + ",";
-                } while (FindNextFileA(hf, &fd));
+                } while (FindNextFileW(hf, &fd));
                 FindClose(hf);
             }
             // 原版 文本_删右边 (局_返回文件名, 1)：去掉最后一个逗号
@@ -499,30 +530,48 @@ static void handleRequest(SOCKET c, const std::string& req)
         }
         else if (cmd == "保存配置")
         {
-            CopyFileA(g.cfgPath.c_str(), (cfgDir + "\\" + arg + ".js").c_str(), FALSE);
+            if (!CopyFileW(g.cfgPath.c_str(), (cfgDir / file_paths::wide(arg + ".js")).c_str(), FALSE)) {
+                sendResponse(c, 500, "{\"error\":\"Cannot save configuration\"}");
+                return;
+            }
             // 原版是在同一份 JSON 上追加 是否刷新（仍带 推理帧率/目前阵容/热键文本）
             json = buildJsonBody("是否刷新", "是");
         }
         else if (cmd == "删除配置")
         {
-            DeleteFileA((cfgDir + "\\" + arg + ".js").c_str());
+            if (!DeleteFileW((cfgDir / file_paths::wide(arg + ".js")).c_str())) {
+                sendResponse(c, 500, "{\"error\":\"Cannot delete configuration\"}");
+                return;
+            }
             json = buildJsonBody("是否刷新", "是");
         }
         else if (cmd == "导入配置")
         {
-            if (!CopyFileA((cfgDir + "\\" + arg + ".js").c_str(), g.cfgPath.c_str(), FALSE)) {
+            if (!CopyFileW((cfgDir / file_paths::wide(arg + ".js")).c_str(), g.cfgPath.c_str(), FALSE)) {
                 sendResponse(c, 400, "{\"error\":\"Configuration not found\"}");
                 return;
             }
             configInit();
             configApplyStartupDefaults();
             configSyncAll(true);
+            if (!g_configSaved) {
+                sendResponse(c, 500, "{\"error\":\"Configuration applied but could not be saved\"}");
+                return;
+            }
             json = buildJsonBody("是否刷新", "是");
         }
         else
         {
+            if (!g_webConfig.contains(cmd)) {
+                sendResponse(c, 400, "{\"error\":\"Unknown configuration key\"}");
+                return;
+            }
             hashSet(cmd, arg);
             configSyncAll(true);
+            if (!g_configSaved) {
+                sendResponse(c, 500, "{\"error\":\"Configuration applied but could not be saved\"}");
+                return;
+            }
         }
     }
 
@@ -531,32 +580,31 @@ static void handleRequest(SOCKET c, const std::string& req)
 
 static void clientThread(SOCKET c)
 {
+    struct Close { SOCKET socket; ~Close() { closesocket(socket); } } close{c};
+    try {
     DWORD timeout = 5000;
     setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
     setsockopt(c, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
     std::string req;
     char buf[4096];
+    const auto deadline = GetTickCount64() + timeout;
     for (;;)
     {
+        const auto now = GetTickCount64();
+        if (now >= deadline) return;
+        timeout = static_cast<DWORD>(deadline - now);
+        setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
         int n = recv(c, buf, sizeof(buf), 0);
         if (n <= 0) break;
         req.append(buf, n);
-        if (req.find("\r\n\r\n") != std::string::npos)
-        {
-            // 头部已完整；若声明了 Content-Length 且 body 未到齐则继续读
-            size_t sep = req.find("\r\n\r\n");
-            std::string head = req.substr(0, sep);
-            size_t cl = head.find("Content-Length:");
-            if (cl == std::string::npos) cl = head.find("content-length:");
-            if (cl == std::string::npos) break;
-            int want = atoi(head.c_str() + cl + 15);
-            if ((int)req.size() - (int)sep - 4 >= want) break;
-        }
-        if (req.size() > 65536) break;
+        if (http_request::inspect(req).state != http_request::State::incomplete) break;
     }
 
     if (!req.empty()) handleRequest(c, req);
-    closesocket(c);
+    } catch (const std::exception& error) {
+        runtime_log::write("[web] Request failed: %s", error.what());
+        sendResponse(c, 500, "{\"error\":\"Request failed\"}");
+    }
 }
 
 void httpServerThread()
@@ -593,7 +641,23 @@ void httpServerThread()
         for (SOCKET listener : {listeners.primary, listeners.standard}) {
             if (listener == INVALID_SOCKET || !FD_ISSET(listener, &readable)) continue;
             SOCKET c = accept(listener, nullptr, nullptr);
-            if (c != INVALID_SOCKET) std::thread(clientThread, c).detach();
+            if (c != INVALID_SOCKET) {
+                static std::atomic<unsigned> clients{0};
+                if (clients.fetch_add(1) >= 16) {
+                    --clients;
+                    closesocket(c);
+                    continue;
+                }
+                try {
+                    std::thread([c] {
+                        struct Release { ~Release() { --clients; } } release;
+                        clientThread(c);
+                    }).detach();
+                } catch (const std::exception&) {
+                    --clients;
+                    closesocket(c);
+                }
+            }
         }
     }
 

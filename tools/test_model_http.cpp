@@ -4,35 +4,24 @@
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include "FixtureReadDeny.h"
+#include <sddl.h>
+#pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "ws2_32.lib")
 
+#include "FileIO.h"
 AppState g;
-long long g_lastFrameTime=0;
+std::atomic<long long> g_lastFrameTime{0};
 long long nowMs() { return GetTickCount64(); }
 void makcuState(int, bool& state) { state=false; }
-namespace runtime_log { void write(const char*, ...) {} }
-static std::string encode(const std::wstring& text, unsigned codepage) {
-    const int count=WideCharToMultiByte(codepage,0,text.data(),static_cast<int>(text.size()),nullptr,0,nullptr,nullptr);
-    std::string result(count,'\0');
-    WideCharToMultiByte(codepage,0,text.data(),static_cast<int>(text.size()),result.data(),count,nullptr,nullptr);
-    return result;
-}
-std::string ansiToUtf8(const std::string& text) { return model_files::utf8(model_files::fromGbk(text)); }
-std::string utf8ToAnsi(const std::string& text) {
-    const int count=MultiByteToWideChar(CP_UTF8,0,text.data(),static_cast<int>(text.size()),nullptr,0);
-    std::wstring result(count,L'\0');
-    MultiByteToWideChar(CP_UTF8,0,text.data(),static_cast<int>(text.size()),result.data(),count);
-    return encode(result,936);
-}
-bool fileExists(const std::string& name) { return std::filesystem::is_regular_file(model_files::fromGbk(name)); }
-std::string readFileAll(const std::string& name) {
-    std::ifstream stream(std::filesystem::path(model_files::fromGbk(name)),std::ios::binary);
-    return std::string(std::istreambuf_iterator<char>(stream),{});
-}
-bool writeFileAll(const std::string& name,const std::string& content) {
-    std::ofstream stream(std::filesystem::path(model_files::fromGbk(name)),std::ios::binary);
-    stream.write(content.data(),static_cast<std::streamsize>(content.size()));return bool(stream);
-}
+std::string ansiToUtf8(const std::string& text) { return file_paths::narrow(file_paths::wide(text),CP_UTF8); }
+std::string utf8ToAnsi(const std::string& text) { return file_paths::narrow(file_paths::wide(text,CP_UTF8)); }
+bool fileExists(const std::filesystem::path& path) { return file_io::exists(path); }
+std::string readFileAll(const std::filesystem::path& path) { return file_io::read(path); }
+bool writeFileAll(const std::filesystem::path& path,const std::string& data) { return file_io::write(path,data); }
+namespace runtime_log { void write(const char*, ...) {} void writeWide(std::wstring_view) {} }
+bool boxButtonState(int) { return false; }
+
 // Production httpServerThread is deliberately unused and discarded with /Gy
 // /OPT:REF. These stubs also ensure accidental fixture calls cannot start it.
 WebListeners startWebListeners(unsigned short) { throw std::runtime_error("Forbidden permanent listener"); }
@@ -41,7 +30,7 @@ void webAccessMonitor(WebListeners) { throw std::runtime_error("Forbidden app mo
 void webAccessFailed(const std::wstring&) {}
 
 static void require(bool ok,const char* error) { if(!ok)throw std::runtime_error(error); }
-static std::string request(const std::string& path,const std::string& body="") {
+static std::string request(const std::string& path,const std::string& body="",const std::string& raw="") {
     SOCKET listener=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP),client=INVALID_SOCKET,server=INVALID_SOCKET;
     try {
         require(listener!=INVALID_SOCKET,"Listener creation failed");
@@ -54,9 +43,14 @@ static std::string request(const std::string& path,const std::string& body="") {
         server=accept(listener,nullptr,nullptr);require(server!=INVALID_SOCKET,"Loopback accept failed");
         DWORD timeout=3000;setsockopt(client,SOL_SOCKET,SO_RCVTIMEO,reinterpret_cast<char*>(&timeout),sizeof(timeout));
         const auto method=body.empty()?"GET":"POST";
-        const auto message=std::string(method)+" "+path+" HTTP/1.1\r\nHost: localhost\r\nContent-Length: "+std::to_string(body.size())+"\r\n\r\n"+body;
-        handleRequest(server,message);
-        closesocket(server);server=INVALID_SOCKET;
+        const auto message=raw.empty()?std::string(method)+" "+path+" HTTP/1.1\r\nHost: localhost\r\nContent-Length: "+std::to_string(body.size())+"\r\n\r\n"+body:raw;
+        std::jthread worker([server] { clientThread(server); });
+        server=INVALID_SOCKET;
+        for(size_t offset=0;offset<message.size();) {
+            const int sent=send(client,message.data()+offset,static_cast<int>((std::min)(size_t(17),message.size()-offset)),0);
+            require(sent>0,"Request fragment send failed");offset+=sent;
+        }
+        shutdown(client,SD_SEND);
         std::string response;char bytes[4096];int count;
         while((count=recv(client,bytes,sizeof(bytes),0))>0)response.append(bytes,count);
         require(count==0,"Response read failed");closesocket(client);closesocket(listener);return response;
@@ -67,34 +61,54 @@ static std::string request(const std::string& path,const std::string& body="") {
         throw;
     }
 }
+static std::string withDirectory(std::string body, const std::filesystem::path& path) {
+    body.pop_back();
+    return body + ",\"directory\":\"" + model_files::escapeJson(model_files::utf8(file_paths::io(path).wstring())) + "\"}";
+}
 int main() {
     std::filesystem::path directory;
+    std::filesystem::path cleanupDirectory;
     WSADATA winsock{};
     try {
         require(WSAStartup(MAKEWORD(2,2),&winsock)==0,"Winsock startup failed");
-        directory=std::filesystem::temp_directory_path()/(L"saga-model-http-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64()));
+        directory=std::filesystem::temp_directory_path()/(L"saga-model-http-中文-\U0001F600-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64()));
         require(std::filesystem::create_directory(directory),"Unique fixture directory failed");
-        g.runDir=encode(directory.wstring(),936);g.cfgPath=g.runDir+"\\fixture.js";
+        cleanupDirectory = file_paths::io(directory);
+        directory = file_paths::io(directory / std::wstring(100,L'a') / std::wstring(100,L'b') / L"桌面软件");
+        require(std::filesystem::create_directories(directory),"Long Unicode fixture directory failed");
+        g.runDir=directory;g.cfgPath=directory/L"fixture.js";
         const std::string page="<!doctype html><title>fixture</title>";
-        writeFileAll(g.runDir+"\\圣人视觉识别系统.html",page);
+        writeFileAll(g.runDir/L"圣人视觉识别系统.html",page);
         // Models in the EXE root must neither appear nor enable an engine.
         for(const auto name:{L"根目录模型.onnx",L"根目录模型.trt",L"任意模型.param",L"任意模型.bin"})
             std::ofstream(directory/name).put('x');
-        require(request("/model-catalog.json").find("{\"models\":[]}")!=std::string::npos,"Missing model data folder must not fall back to EXE root");
+        require(request("/model-catalog.json").find("HTTP/1.1 500 ")==0,"Missing model directory must return a diagnostic");
         const auto modelDirectory = model_paths::directory(directory);
-        require(model_files::fromGbk(g.modelDirectory())==modelDirectory.wstring(),"Runtime model directory differs from scanner directory");
+        require(g.modelDirectory()==file_paths::io(modelDirectory),"Runtime model directory differs from scanner directory");
+        require(writeFileAll(modelDirectory,"not a directory"),"Cannot create obstruction fixture");
+        require(request("/model-catalog.json").find("HTTP/1.1 500 ")==0,"File in place of model folder must report an error");
+        std::filesystem::remove(modelDirectory);
         require(std::filesystem::create_directory(modelDirectory),"Cannot create dedicated model fixture folder");
+        {
+            FixtureReadDeny denied(modelDirectory);
+            const auto response = request("/model-catalog.json");
+            require(response.find("HTTP/1.1 500 ")==0 && response.find("\"code\":5")!=std::string::npos,
+                "Access denied must report Windows error 5 instead of an empty catalog");
+            require(response.find(model_files::escapeJson(model_files::utf8(modelDirectory.wstring())))!=std::string::npos,
+                "Unreadable catalog must identify the exact Unicode directory");
+            denied.restore();
+        }
         for(const auto name:{L"任意模型.onnx",L"其他模型.TRT",L"配对.PARAM",L"配对.BIN",L"缺bin.param"})
             std::ofstream(modelDirectory/name).put('x');
         for(int engine=1;engine<=3;++engine) {
             const auto response=request("/models.json?engine="+std::to_string(engine));
             require(response.find("HTTP/1.1 200 ")==0,"Model list HTTP status failed");
             require(response.find("application/json; charset=utf-8")!=std::string::npos,"Model response content type failed");
-            require(response.substr(response.find("\r\n\r\n")+4)==model_files::json(modelDirectory,engine),"Model HTTP UTF-8 body differs");
+            require(response.substr(response.find("\r\n\r\n")+4)==withDirectory(model_files::json(modelDirectory,engine),modelDirectory),"Model HTTP UTF-8 body differs");
         }
         auto catalogResponse=request("/model-catalog.json");
         require(catalogResponse.find("HTTP/1.1 200 ")==0 &&
-            catalogResponse.substr(catalogResponse.find("\r\n\r\n")+4)==model_files::catalogJson(modelDirectory), "Catalog HTTP status/UTF-8 body differs");
+            catalogResponse.substr(catalogResponse.find("\r\n\r\n")+4)==withDirectory(model_files::catalogJson(modelDirectory),modelDirectory), "Catalog HTTP status/UTF-8 body differs");
         require(catalogResponse.find(model_files::utf8(L"缺bin"))==std::string::npos,"Incomplete NCNN model leaked into catalog");
         require(catalogResponse.find(model_files::utf8(L"根目录模型"))==std::string::npos,"EXE root models leaked into model data catalog");
         require(catalogResponse.find("{\"name\":\""+model_files::utf8(L"任意模型")+"\",\"engines\":[2]}")!=std::string::npos,"Root NCNN files must not pair with ONNX in model data folder");
@@ -154,14 +168,33 @@ int main() {
         request("/api",ansiToUtf8("热键2_优先锁定|9"));
         request("/api",ansiToUtf8("导入配置|三组测试"));
         require(g.aimProfiles.config().config==profiles, "Named configuration import must restore all groups");
+        require(SetFileAttributesW(g.cfgPath.c_str(),FILE_ATTRIBUTE_READONLY),"Cannot make fixture config read-only");
+        require(request("/api",ansiToUtf8("测距按下|1057")).find("HTTP/1.1 500 ")==0,
+            "Failed config write must not claim success");
+        require(SetFileAttributesW(g.cfgPath.c_str(),FILE_ATTRIBUTE_NORMAL),"Cannot restore fixture config attributes");
         require(request("/unknown").find("HTTP/1.1 404 ")==0,"Unknown route did not return 404");
+        const auto originalConfig=readFileAll(g.cfgPath);
+        require(request("/api","","POST /api HTTP/1.1\r\nContent-Length: 20\r\n\r\nx|1").starts_with("HTTP/1.1 400 "),"Truncated body was accepted");
+        require(request("/api","","POST /api HTTP/1.1\r\nCoNtEnT-LeNgTh: 999999\r\n\r\n").starts_with("HTTP/1.1 413 "),"Oversized mixed-case content length bypassed limit");
+        require(readFileAll(g.cfgPath)==originalConfig,"Invalid request mutated configuration");
+        require(request("/api",ansiToUtf8("模型名称|../escape")).starts_with("HTTP/1.1 400 "),"Model path traversal was accepted");
+        require(request("/api",ansiToUtf8("移动系数|nan")).starts_with("HTTP/1.1 201 ") && g.settings.snapshot().moveFactor==0,"Nonfinite input reached worker settings");
+        writeFileAll(g.cfgPath,std::string("\xef\xbb\xbf")+ansiToUtf8("移动方式=2\n"));
+        configInit();configSyncAll(false);
+        require(g.settings.snapshot().moveMode==2,"UTF-8 BOM hid the first configuration key");
+        const std::string gbkTrailBackslash("\x81\x5c",2);
+        require(jsonEscape(gbkTrailBackslash)==gbkTrailBackslash,"GBK trail byte was mistaken for a JSON escape");
+        require(request("/api",ansiToUtf8("不存在的参数|1")).starts_with("HTTP/1.1 400 "),"Unknown keys were accepted");
         std::filesystem::remove(directory/L"圣人视觉识别系统.html");
         require(request("/models.json?engine=3").find("HTTP/1.1 404 ")==0,"Missing panel protection broken");
         require(request("/model-catalog.json").find("HTTP/1.1 404 ")==0,"Catalog missing-panel protection broken");
-        std::filesystem::remove_all(directory);WSACleanup();
+        std::filesystem::remove_all(cleanupDirectory);WSACleanup();
         std::cout<<"Production HTTP socket routing passed: engines 1/2/3, UTF-8, invalid queries, root/index/config/API, engine 3 POST, 404 and missing panel protection.\n";
     } catch(const std::exception& error) {
-        if(!directory.empty()){std::error_code ignored;std::filesystem::remove_all(directory,ignored);}
+        if(!cleanupDirectory.empty()){
+            if(!g.cfgPath.empty()) SetFileAttributesW(g.cfgPath.c_str(),FILE_ATTRIBUTE_NORMAL);
+            std::error_code ignored;std::filesystem::remove_all(cleanupDirectory,ignored);
+        }
         WSACleanup();std::cerr<<error.what()<<'\n';return 1;
     }
 }

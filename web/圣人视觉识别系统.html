@@ -2233,6 +2233,7 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
                         <div id="配置列表" aria-label="已保存的配置"><p class="empty-config">暂无保存配置</p></div>
                         <div class="config-actions"><button type="button" onclick="导入选中配置()">载入选中配置</button><button type="button" class="delete-config-btn" onclick="删除配置()">删除</button></div>
                         <p class="storage-hint">先选配置，再载入 · 双击也可载入</p>
+                        <p class="storage-hint" id="配置读写状态" role="status"></p>
                     </div>
                 </section>
 <section class="config-group model-card" id="panel-model" aria-labelledby="heading-model">
@@ -3084,6 +3085,7 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
         let 当前模型选择 = typeof 模型名称 !== 'undefined' ? 模型名称 : '';
         let 当前推理引擎 = typeof 推理引擎 !== 'undefined' ? Number(推理引擎) : 1;
         let 模型引擎目录 = new Map();
+        let 模型目录路径 = '';
         function 设置引擎按钮(engines) {
             ['NCNN', 'ONNX', 'TensorRT'].forEach((id, index) => {
                 const radio = document.getElementById(id);
@@ -3104,6 +3106,7 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
                 status.textContent = 当前模型选择 ? '已保存模型未找到，请重新选择模型' : '请先选择模型，再选择推理引擎';
             }
             if (name && !engines.includes(当前推理引擎)) status.textContent += '，请选择可用的推理引擎';
+            if (模型目录路径) status.textContent += '；目录：' + 模型目录路径;
         }
         function 模型选项(name, label = name) {
             const option = document.createElement('option');
@@ -3122,13 +3125,16 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
             status.textContent = '正在读取模型…';
             try {
                 const response = await fetch('/model-catalog.json', {cache:'no-store'});
-                if (!response.ok) throw new Error('模型列表读取失败');
-                const data = await response.json();
+                const data = await response.json().catch(() => null);
+                if (!response.ok) throw new Error(data && data.error
+                    ? data.error + (data.directory ? '；目录：' + data.directory : '')
+                    : '模型列表读取失败（HTTP ' + response.status + '）');
                 if (requestId !== 模型列表请求序号) return;
-                if (!Array.isArray(data.models) || data.models.some(model => !model || typeof model.name !== 'string' || !model.name
+                if (!data || !Array.isArray(data.models) || data.models.some(model => !model || typeof model.name !== 'string' || !model.name
                     || !Array.isArray(model.engines) || !model.engines.length || model.engines.some(engine => ![1,2,3].includes(engine))))
                     throw new Error('模型列表格式错误');
                 模型引擎目录 = new Map(data.models.map(model => [model.name, model.engines]));
+                模型目录路径 = typeof data.directory === 'string' ? data.directory : '';
                 const names = [...模型引擎目录.keys()];
                 const selectedName = names.find(name => name.toLowerCase() === String(current).toLowerCase());
                 const available = selectedName !== undefined;
@@ -3146,7 +3152,7 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
                 if (requestId === 模型列表请求序号) {
                     模型引擎目录 = new Map();
                     select.replaceChildren(模型选项('', '模型列表读取失败'));
-                    status.textContent = '暂时无法读取模型列表，请点击刷新模型重试';
+                    status.textContent = (error.message || '暂时无法读取模型列表') + '；修复后点击刷新模型重试';
                 }
             }
         }
@@ -3389,6 +3395,15 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
             发送消息给服务器("准星类别", 准星类别);
         }
 
+        function 显示配置错误(error) {
+            document.getElementById('配置读写状态').textContent = '配置操作失败：' + (error.message || '无法连接服务器');
+        }
+        async function 检查配置响应(response) {
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || ('HTTP ' + response.status));
+            document.getElementById('配置读写状态').textContent = '';
+            return data;
+        }
         function 发送消息给服务器(参数名, 发送的消息) {
             if (分组配置字段.has(参数名) && 热键配置组.length) {
                 const value = 参数名 === '框内移动'
@@ -3400,7 +3415,7 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
             fetch(apiEndpoint, {
                 method: 'POST',
                 body: 参数名 + "|" + 发送的消息
-            }).catch(err => console.log("发送失败", err));
+            }).then(检查配置响应).catch(显示配置错误);
         }
 
         async function 发送消息给服务器并获取返回值(参数名, 发送的消息) {
@@ -3411,9 +3426,9 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
                         body: 参数名 + "|" + 发送的消息
                     }
                 );
-                return response.json();
+                return await 检查配置响应(response);
             } catch (error) {
-                console.log("服务器连接失败");
+                显示配置错误(error);
                 return null;
             }
         }

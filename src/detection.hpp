@@ -1,4 +1,5 @@
 #pragma once
+#include "FilePaths.h"
 
 // ============================================================================
 // YOLO Object Detection
@@ -54,8 +55,8 @@ public:
     /// @param labelsPath Path to the class names file
     /// @param useGPU Whether to use GPU for inference
     /// @param version YOLO version (Auto for runtime detection)
-    YOLODetector(const std::string& modelPath,
-                 const std::string& labelsPath,
+    YOLODetector(const std::filesystem::path& modelPath,
+                 const std::filesystem::path& labelsPath,
                  bool useGPU = false,
                  YOLOVersion version = YOLOVersion::Auto)
         : OrtSessionBase(modelPath, useGPU),
@@ -154,6 +155,16 @@ public:
     void setMaxDetections(size_t limit) { maxDetections_ = limit; }
 
 protected:
+    static std::vector<int64_t> checkedOutputShape(const std::vector<Ort::Value>& tensors, size_t index) {
+        if (index >= tensors.size() || !tensors[index].IsTensor())
+            throw std::runtime_error("Missing YOLO detection output tensor");
+        const auto info = tensors[index].GetTensorTypeAndShapeInfo();
+        auto shape = info.GetShape();
+        if (info.GetElementType() != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT || shape.size() != 3 ||
+            shape[0] != 1 || shape[1] < 0 || shape[2] < 0 || shape[1] > INT_MAX || shape[2] > INT_MAX)
+            throw std::runtime_error("YOLO detection output must be float32 [1,*,*]");
+        return shape;
+    }
     Ort::Value inputTensor_{nullptr};
     cv::Size tensorSize_;
     float* tensorData_ = nullptr;
@@ -175,7 +186,7 @@ protected:
 
     /// @brief Detect YOLO version from output tensors
     YOLOVersion detectVersion(const std::vector<Ort::Value>& outputTensors) {
-        const std::vector<int64_t> outputShape = outputTensors[0].GetTensorTypeAndShapeInfo().GetShape();
+        const std::vector<int64_t> outputShape = checkedOutputShape(outputTensors, 0);
         return version::detectFromOutputShape(outputShape, outputTensors.size());
     }
 
@@ -211,9 +222,10 @@ protected:
                                                        float iouThreshold) {
         auto& detections = detections_;
         detections.clear();
+        const std::vector<int64_t> outputShape = checkedOutputShape(outputTensors, 0);
         const float* rawOutput = outputTensors[0].GetTensorData<float>();
-        const std::vector<int64_t> outputShape = outputTensors[0].GetTensorTypeAndShapeInfo().GetShape();
 
+        if (outputShape[1] < 5) throw std::runtime_error("Invalid YOLO feature count");
         const size_t numFeatures = outputShape[1];
         const size_t numDetections = outputShape[2];
 
@@ -350,10 +362,11 @@ protected:
                                                  float iouThreshold) {
         auto& detections = detections_;
         detections.clear();
+        const std::vector<int64_t> outputShape = checkedOutputShape(outputTensors, 0);
         const float* rawOutput = outputTensors[0].GetTensorData<float>();
-        const std::vector<int64_t> outputShape = outputTensors[0].GetTensorTypeAndShapeInfo().GetShape();
 
         const size_t numDetections = outputShape[1];
+        if (outputShape[2] < 6) throw std::runtime_error("Invalid YOLOv7 feature count");
         const size_t numFeatures = outputShape[2];
 
         if (numDetections == 0) return detections;
@@ -429,9 +442,10 @@ protected:
                                                   float /*iouThreshold*/) {
         auto& detections = detections_;
         detections.clear();
+        const std::vector<int64_t> outputShape = checkedOutputShape(outputTensors, 0);
         const float* rawOutput = outputTensors[0].GetTensorData<float>();
-        const std::vector<int64_t> outputShape = outputTensors[0].GetTensorTypeAndShapeInfo().GetShape();
 
+        if (outputShape[2] != 6) throw std::runtime_error("Invalid end-to-end YOLO output shape");
         const int numDetections = static_cast<int>(outputShape[1]);
 
         // Pre-compute scale and padding
@@ -476,11 +490,13 @@ protected:
             return postprocessStandard(originalSize, resizedShape, outputTensors, confThreshold, iouThreshold);
         }
 
+        const std::vector<int64_t> boxShape = checkedOutputShape(outputTensors, 0);
+        const std::vector<int64_t> scoreShape = checkedOutputShape(outputTensors, 1);
         const float* boxOutput = outputTensors[0].GetTensorData<float>();
         const float* scoreOutput = outputTensors[1].GetTensorData<float>();
-        const std::vector<int64_t> boxShape = outputTensors[0].GetTensorTypeAndShapeInfo().GetShape();
-        const std::vector<int64_t> scoreShape = outputTensors[1].GetTensorTypeAndShapeInfo().GetShape();
 
+        if (boxShape[2] != 4 || boxShape[1] != scoreShape[1] || scoreShape[2] <= 0)
+            throw std::runtime_error("Invalid YOLO-NAS boxes/scores shapes");
         const int numDetections = static_cast<int>(boxShape[1]);
         const int numClasses = static_cast<int>(scoreShape[2]);
 
@@ -545,42 +561,42 @@ protected:
 /// @brief YOLOv7 detector (forces V7 postprocessing)
 class YOLOv7Detector : public YOLODetector {
 public:
-    YOLOv7Detector(const std::string& modelPath, const std::string& labelsPath, bool useGPU = false)
+    YOLOv7Detector(const std::filesystem::path& modelPath, const std::filesystem::path& labelsPath, bool useGPU = false)
         : YOLODetector(modelPath, labelsPath, useGPU, YOLOVersion::V7) {}
 };
 
 /// @brief YOLOv8 detector (forces standard postprocessing)
 class YOLOv8Detector : public YOLODetector {
 public:
-    YOLOv8Detector(const std::string& modelPath, const std::string& labelsPath, bool useGPU = false)
+    YOLOv8Detector(const std::filesystem::path& modelPath, const std::filesystem::path& labelsPath, bool useGPU = false)
         : YOLODetector(modelPath, labelsPath, useGPU, YOLOVersion::V8) {}
 };
 
 /// @brief YOLOv10 detector (forces V10 end-to-end postprocessing)
 class YOLOv10Detector : public YOLODetector {
 public:
-    YOLOv10Detector(const std::string& modelPath, const std::string& labelsPath, bool useGPU = false)
+    YOLOv10Detector(const std::filesystem::path& modelPath, const std::filesystem::path& labelsPath, bool useGPU = false)
         : YOLODetector(modelPath, labelsPath, useGPU, YOLOVersion::V10) {}
 };
 
 /// @brief YOLOv11 detector (forces standard postprocessing)
 class YOLOv11Detector : public YOLODetector {
 public:
-    YOLOv11Detector(const std::string& modelPath, const std::string& labelsPath, bool useGPU = false)
+    YOLOv11Detector(const std::filesystem::path& modelPath, const std::filesystem::path& labelsPath, bool useGPU = false)
         : YOLODetector(modelPath, labelsPath, useGPU, YOLOVersion::V11) {}
 };
 
 /// @brief YOLO-NAS detector (forces NAS postprocessing)
 class YOLONASDetector : public YOLODetector {
 public:
-    YOLONASDetector(const std::string& modelPath, const std::string& labelsPath, bool useGPU = false)
+    YOLONASDetector(const std::filesystem::path& modelPath, const std::filesystem::path& labelsPath, bool useGPU = false)
         : YOLODetector(modelPath, labelsPath, useGPU, YOLOVersion::NAS) {}
 };
 
 /// @brief YOLOv26 detector (forces V26 end-to-end postprocessing)
 class YOLO26Detector : public YOLODetector {
 public:
-    YOLO26Detector(const std::string& modelPath, const std::string& labelsPath, bool useGPU = false)
+    YOLO26Detector(const std::filesystem::path& modelPath, const std::filesystem::path& labelsPath, bool useGPU = false)
         : YOLODetector(modelPath, labelsPath, useGPU, YOLOVersion::V26) {}
 };
 
@@ -594,8 +610,8 @@ public:
 /// @param version YOLO version (Auto for runtime detection)
 /// @param useGPU Whether to use GPU
 /// @return Unique pointer to detector
-inline std::unique_ptr<YOLODetector> createDetector(const std::string& modelPath,
-                                                    const std::string& labelsPath,
+inline std::unique_ptr<YOLODetector> createDetector(const std::filesystem::path& modelPath,
+                                                    const std::filesystem::path& labelsPath,
                                                     YOLOVersion version = YOLOVersion::Auto,
                                                     bool useGPU = false) {
     switch (version) {

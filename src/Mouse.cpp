@@ -1,4 +1,5 @@
 #include "Inference.h"
+#include "FilePaths.h"
 //  极致性能优化的神经网络推理 DLL (AVX2 + FMA 完整版)
 //  编译: cl /O2 /arch:AVX2 /fp:fast /GS- /GL /LD /MT
 //
@@ -40,7 +41,9 @@ static std::shared_mutex g_netMutex;
 // ===================================================================
 //  mc_create : 一次性文件读取 + 转置重排 + Layer3 padding
 // ===================================================================
-int saga::mc_create(const char* path)
+int saga::mc_create(const char* path) { return mc_create(file_paths::wide(path ? path : "", CP_ACP).c_str()); }
+
+int saga::mc_create(const wchar_t* path)
 {
     struct NetOrig {
         float w1[128];      // [64][2]
@@ -51,7 +54,7 @@ int saga::mc_create(const char* path)
         float b3[20];
     } net_orig;
 
-    FILE* f = fopen(path, "rb");
+    FILE* f = file_paths::open(path, L"rb");
     if (!f) return 0;
 
     if (fread(&net_orig, sizeof(NetOrig), 1, f) != 1) {

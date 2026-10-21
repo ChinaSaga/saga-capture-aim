@@ -1,4 +1,5 @@
 #pragma once
+#include "FilePaths.h"
 
 // ============================================================================
 // YOLO Core Utilities
@@ -72,16 +73,16 @@ inline size_t vectorProduct(const std::vector<int64_t>& shape) {
 /// @brief Load class names from a file (one class name per line)
 /// @param path Path to the class names file
 /// @return Vector of class names
-inline std::vector<std::string> getClassNames(const std::string& path) {
+inline std::vector<std::string> getClassNames(const std::filesystem::path& path) {
     std::vector<std::string> classNames;
-    const std::string p = trimString(path);
+    const auto p = path;
     if (p.empty()) {
         return classNames;
     }
-    std::ifstream infile(p);
+    std::ifstream infile(file_paths::io(p));
     
     if (!infile) {
-        std::cerr << "[ERROR] Failed to open class names file: " << p << std::endl;
+        std::cerr << "[ERROR] Failed to open class names file: " << file_paths::narrow(p.wstring(), CP_UTF8) << std::endl;
         return classNames;
     }
     

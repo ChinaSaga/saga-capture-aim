@@ -282,7 +282,10 @@ static void canvasDrawImpl(const std::vector<unsigned char>* encoded, const Capt
         Ellipse(g_memDC, px(half - lockRange), py(half - lockRange),
             px(half + lockRange), py(half + lockRange));
         MoveToEx(g_memDC, px(half), py(half), nullptr);
-        LineTo(g_memDC, px(half + g.moveDx), py(half + g.moveDy));
+        EnterCriticalSection(&g_moveLock);
+        const int moveDx = g.moveDx, moveDy = g.moveDy;
+        LeaveCriticalSection(&g_moveLock);
+        LineTo(g_memDC, px(half + moveDx), py(half + moveDy));
         SelectObject(g_memDC, oldPen); DeleteObject(pen);
         drawBigPoint(px(half), py(half), RGB(255,222,89));
         drawBigPoint(px(half + g.boxDx), py(half + g.boxDy), RGB(255,222,89));
@@ -366,9 +369,9 @@ void soundInit()
 void soundPlayCamp(int camp)
 {
     if (camp != 1 && camp != 2) return;
-    std::string p = g.runDir + "\\声音_切换阵营" + (camp == 1 ? "1" : "2") + ".wav";
+    const auto p = file_paths::io(g.runDir / (L"声音_切换阵营" + std::to_wstring(camp) + L".wav"));
     if (fileExists(p))
-        PlaySoundA(p.c_str(), nullptr, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
+        PlaySoundW(p.c_str(), nullptr, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
 }
 
 // ============================================================================
@@ -638,7 +641,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         else if (id == 102 && code == BN_CLICKED)     // 按钮_移动10次
         {
-            trajMove10(100.0f * g.moveFactor, 0.0f);
+            trajMove10(100.0f * g.settings.snapshot().moveFactor, 0.0f);
         }
         else if (id == 103 && code == BN_CLICKED)     // 按钮_移动120像素
         {
@@ -831,9 +834,9 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         // 状态栏：中心尺寸 / 采集帧率 / 推理帧率 / 显卡名称 / 推理耗时
         char head[160];
         snprintf(head, sizeof(head), "中心 %d × %d    采集 %d FPS    推理 %d FPS",
-            g.imgSize, g.imgSize, g.frameFps, displayInferFps());
+            g.imgSize.load(), g.imgSize.load(), g.frameFps.load(), displayInferFps());
         char tail[48];
-        snprintf(tail, sizeof(tail), "    %.3f ms", g.inferMsPrecise);
+        snprintf(tail, sizeof(tail), "    %.3f ms", g.inferMsPrecise.load());
 
         const RECT statusRect{ 24, 65, 676, 94 };
         std::string line = head;
@@ -854,7 +857,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         textAt(dc, "数据：EXE / 人手数据 · 训练后自动生效", {696,738,1056,760}, g_uiFont, RGB(119,132,153));
         textAt(dc, "截图：EXE / 模型名 / 时间戳.jpg · JPEG 95%", {696,763,1056,785}, g_uiFont, RGB(119,132,153));
         char status[192];
-        snprintf(status, sizeof(status), "最近距离 %d     优先锁定 %.2f", g.nearestDist.load(), g.prioRatio);
+        snprintf(status, sizeof(status), "最近距离 %d     优先锁定 %.2f", g.nearestDist.load(), g.prioRatio.load());
         textAt(dc, status, {24,749,664,779}, g_uiFont, RGB(101,118,142));
         EndPaint(h, &ps);
         return 0;
@@ -864,24 +867,24 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
     {
         // 圣人自用_配置保存：按原版格式写 [默认] 段（键名=控件名，组合框存选中项索引），
         // 这样易语言版读同一个 配置保存.ini 也能正常恢复。
-        std::string ini = g.runDir + "\\配置保存.ini";
+        const auto ini = g.runDir / L"配置保存.ini";
         int selDev = (int)SendMessageA(g_cbDevice, CB_GETCURSEL, 0, 0);
         int selFmt = (int)SendMessageA(g_cbFormat, CB_GETCURSEL, 0, 0);
         int selSz  = (int)SendMessageA(g_cbSize,   CB_GETCURSEL, 0, 0);
-        WritePrivateProfileStringA("默认", "组合框_设备名",   std::to_string(selDev).c_str(), ini.c_str());
-        WritePrivateProfileStringA("默认", "组合框_视频码率", std::to_string(selFmt).c_str(), ini.c_str());
+        file_paths::writeProfile("默认", "组合框_设备名",   std::to_string(selDev).c_str(), ini.c_str());
+        file_paths::writeProfile("默认", "组合框_视频码率", std::to_string(selFmt).c_str(), ini.c_str());
         if (selSz >= 0)
-            WritePrivateProfileStringA("默认", "组合框_视频大小", std::to_string(selSz).c_str(), ini.c_str());
-        WritePrivateProfileStringA("默认", "选择框_实时刷新", g.showImg.load() ? "真" : "假", ini.c_str());
+            file_paths::writeProfile("默认", "组合框_视频大小", std::to_string(selSz).c_str(), ini.c_str());
+        file_paths::writeProfile("默认", "选择框_实时刷新", g.showImg.load() ? "真" : "假", ini.c_str());
 
         // 本程序自己的补充记忆（原版没有这一段，不影响易语言读取 [默认]）
         char dev[256] = {}, fmt[256] = {};
         GetWindowTextA(g_cbDevice, dev, sizeof(dev));
         GetWindowTextA(g_cbFormat, fmt, sizeof(fmt));
-        WritePrivateProfileStringA("窗口", "设备", dev, ini.c_str());
-        WritePrivateProfileStringA("窗口", "格式", fmt, ini.c_str());
-        WritePrivateProfileStringA("窗口", "大小", std::to_string(g.imgSize).c_str(), ini.c_str());
-        WritePrivateProfileStringA("窗口", "刷新", g.showImg.load() ? "1" : "0", ini.c_str());
+        file_paths::writeProfile("窗口", "设备", dev, ini.c_str());
+        file_paths::writeProfile("窗口", "格式", fmt, ini.c_str());
+        file_paths::writeProfile("窗口", "大小", std::to_string(g.imgSize).c_str(), ini.c_str());
+        file_paths::writeProfile("窗口", "刷新", g.showImg.load() ? "1" : "0", ini.c_str());
 
         exitApplicationNow();
     }
@@ -986,10 +989,10 @@ bool uiCreate(HINSTANCE hInst)
     g.imgSize = 320;
 
     // 恢复上次的窗口配置（1. 原版 [默认] 段  2. 本程序补充的 [窗口] 段）
-    std::string ini = g.runDir + "\\配置保存.ini";
+    const auto ini = g.runDir / L"配置保存.ini";
 
     char szBuf[32] = {};
-    GetPrivateProfileStringA("默认", "组合框_视频大小", "", szBuf, sizeof(szBuf), ini.c_str());
+    file_paths::profileString("默认", "组合框_视频大小", "", szBuf, sizeof(szBuf), ini.c_str());
     int defSz = -1;
     if (szBuf[0]) defSz = atoi(szBuf);
     if (defSz >= 0 && defSz <= 15)
@@ -999,7 +1002,7 @@ bool uiCreate(HINSTANCE hInst)
     }
 
     char rfBuf[32] = {};
-    GetPrivateProfileStringA("默认", "选择框_实时刷新", "", rfBuf, sizeof(rfBuf), ini.c_str());
+    file_paths::profileString("默认", "选择框_实时刷新", "", rfBuf, sizeof(rfBuf), ini.c_str());
     bool rfSet = false;
     if (rfBuf[0])
     {
@@ -1008,18 +1011,18 @@ bool uiCreate(HINSTANCE hInst)
     }
 
     char dev[256] = {}, fmt[256] = {};
-    GetPrivateProfileStringA("窗口", "设备", "", dev, sizeof(dev), ini.c_str());
-    GetPrivateProfileStringA("窗口", "格式", "", fmt, sizeof(fmt), ini.c_str());
+    file_paths::profileString("窗口", "设备", "", dev, sizeof(dev), ini.c_str());
+    file_paths::profileString("窗口", "格式", "", fmt, sizeof(fmt), ini.c_str());
     if (dev[0]) { SendMessageA(g_cbDevice, CB_ADDSTRING, 0, (LPARAM)dev); SendMessageA(g_cbDevice, CB_SETCURSEL, 0, 0); }
     if (fmt[0]) { SendMessageA(g_cbFormat, CB_ADDSTRING, 0, (LPARAM)fmt); SendMessageA(g_cbFormat, CB_SETCURSEL, 0, 0); }
     if (!(defSz >= 0 && defSz <= 15))
     {
-        int sz = GetPrivateProfileIntA("窗口", "大小", 320, ini.c_str());
+        int sz = file_paths::profileInt("窗口", "大小", 320, ini.c_str());
         if (sz >= 160 && sz <= 640) { g.imgSize = sz; SendMessageA(g_cbSize, CB_SETCURSEL, (sz - 160) / 32, 0); }
     }
     if (!rfSet)
     {
-        int rf = GetPrivateProfileIntA("窗口", "刷新", 0, ini.c_str());
+        int rf = file_paths::profileInt("窗口", "刷新", 0, ini.c_str());
         g.showImg = (rf != 0);
     }
     CheckDlgButton(h, 300, g.showImg.load() ? BST_CHECKED : BST_UNCHECKED);

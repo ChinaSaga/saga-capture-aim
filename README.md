@@ -69,7 +69,7 @@ NCNN、OpenCV、ONNXRuntime、DirectML 及 VC 运行库。
 | `人手数据\mouse.bin`（兼容旧的 `mouse.bin`） | 主界面点击“点我开始记录人手数据”和“点我开始训练人手模型”生成 | 缺失时仍可进入界面采集训练；训练成功后自动替换并加载，无需重启。使用说明见 [人手轨迹\README.md](人手轨迹/README.md) |
 | 红蓝球采集与 CPU 训练 | 已编入 EXE 的原生 C++ 功能 | 两个按钮直接使用，无需安装 Python、PyTorch 或其它训练环境 |
 | `模型数据\<模型名>.param` + `模型数据\<模型名>.bin` | 用户自备 | NCNN 模型（`推理引擎=1`） |
-| `模型数据\<模型名>.onnx` + `模型数据\空类别.txt` | 用户自备 | ONNX 模型（`推理引擎=2`，缺类别文件会写空文件） |
+| `模型数据\<模型名>.onnx` + `模型数据\空类别.txt` | 用户自备 | ONNX 模型（`推理引擎=2`，类别文件可选，无需模型目录写权限） |
 | `模型数据\<模型名>.trt` | 本机 `ONNX转TRT工具.exe` 从原 ONNX 生成 | N卡专用推理（`推理引擎=3`）；支持范围见 TensorRT 使用说明 |
 | TensorRT / CUDA 运行库 | 随构建复制 | 仅 N卡专用推理或转换工具使用，普通 NCNN / ONNX 路径不要求 NVIDIA 显卡 |
 | `圣人自用.js` | 首次启动自动按默认值生成 | 全部配置键值对 |
@@ -121,7 +121,6 @@ D:\C++采集卡源码
 ├── .deps\                            本地 SDK 与下载缓存（不入库）
 ├── RuntimeDependencies.targets        构建后自动复制第三方 DLL
 ├── .gitignore / .gitattributes        入库规则：排除产物、DLL、模型、私有目录
-├── 圣人自用.sample.js                 配置模板（入库版本；真实 `圣人自用.js` 被忽略）
 ├── src\                               全部源码（应用层 + 引擎层 + Makcu）
 │   ├── 应用层：main / Ui / Util / Capture / Aim / Input / Net / DriverSetup / RuntimeLog
 │   ├── drv\                           打进 EXE 的 CH343 驱动（INF/CAT/SYS/DLL）
@@ -131,7 +130,7 @@ D:\C++采集卡源码
 │   ├── 头-only：App.h / Inference.h / AimLock.h / CapturePixels.h /
 │   │            TensorPixels.h / NcnnPostprocess.h / FrameWait.h
 │   ├── ONNX 侧：preprocessing.hpp detection.hpp nms.hpp session_base.hpp …
-│   └── Makcu\                         串口协议 + Cat(网络键鼠，暂未启用) + 自带 asio
+│   └── Makcu\                         串口协议 + CAT 网络键鼠 + 自带 asio
 ├── web\圣人视觉识别系统.html           网页控制面板（部署到 EXE 同目录，同源 API）
 ├── 人手轨迹\                          采集/训练说明与保留的 Python 参考脚本；EXE 使用 src 内的原生 C++ 实现
 ├── x64\Release\                       构建输出（EXE + PDB + 运行时 DLL + 配置，不入库）
@@ -150,6 +149,7 @@ D:\C++采集卡源码
 
 | 文档 | 看什么 |
 |---|---|
+| [项目审查-2026-10-21](docs/项目审查-2026-10-21.md) | 并发、网络边界、推理异常与配置保存修复；验证方法和范围 |
 | [CHANGELOG.md](CHANGELOG.md) | 按日期汇总更新及详细说明入口 |
 | [docs/TensorRT使用说明.md](docs/TensorRT使用说明.md) | N卡专用引擎、模型转换、目录刷新与实测范围 |
 | [docs/依赖更新-2026-10-02.md](docs/依赖更新-2026-10-02.md) | 库版本、维护分支、构建部署与新旧依赖对照 |
@@ -189,7 +189,7 @@ YOLOs-CPP 上游为 AGPL-3.0，MAKCU 上游为 GPL-3.0，参考许可证保留�
 
 1. **编码「内 GBK、外 UTF-8」**：全工程 `/source-charset:utf-8 /execution-charset:.936`。
    源码存 UTF-8，中文常量编成 GBK；`圣人自用.js`／HTTP 走 UTF-8（`ansiToUtf8` / `utf8ToAnsi` 转换）。
-   **不要改成 `/utf-8`**。
+   文件路径独立使用 Unicode 宽字符，支持中文/特殊字符目录及长路径；INI 保存使用 UTF-16 LE。**不要改成 `/utf-8`**。
 2. **不可省的三个开关**：`/arch:AVX2`（AVX2+FMA 内联指令）、`/EHsc`（Makcu 有 try/catch）、
    `/fp:fast`（数值路径，改了会出现 1 ULP 级差异）。
 3. **几个硬性数值是用户明确要求保留的**：鼠标轨迹分段等待 **0.885 ms**、截图 **JPEG 质量 95**、

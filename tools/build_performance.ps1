@@ -3,7 +3,8 @@ param(
     [string]$Headers = 'src',
     [string]$Name = 'benchmark_onnx',
     [string]$OutputDirectory = '.workbuddy/performance/bin',
-    [string]$VisualStudio = 'C:/Program Files/Microsoft Visual Studio/18/Community'
+    [string]$VisualStudio = 'C:/Program Files/Microsoft Visual Studio/18/Community',
+    [string[]]$AdditionalSources = @()
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -19,13 +20,21 @@ $out = Join-Path $root $OutputDirectory
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 $env:INCLUDE = "$vc/include;$sdk/Include/$sdkVersion/ucrt;$sdk/Include/$sdkVersion/um;$sdk/Include/$sdkVersion/shared;$sdk/Include/$sdkVersion/winrt"
 $env:LIB = "$vc/lib/x64;$sdk/Lib/$sdkVersion/ucrt/x64;$sdk/Lib/$sdkVersion/um/x64"
+$AdditionalSources = @($AdditionalSources | Where-Object { ![string]::IsNullOrWhiteSpace($_) })
+$sourceFiles = @((Join-Path $root $Source)) + @($AdditionalSources | ForEach-Object { Join-Path $root $_ })
+$objectOutput = if ($AdditionalSources.Count) { "/Fo$out/" } else { "/Fo$out/$Name.obj" }
 $compilerArgs = @('/nologo','/O2','/Ob3','/Gy','/MD','/EHsc','/std:c++20','/arch:AVX2','/fp:fast','/source-charset:utf-8','/execution-charset:.936', '/DNDEBUG',
     "/I$(Join-Path $root $Headers)","/I$($deps.SagaOpenCvDir)/include","/I$($deps.SagaOrtDir)/include",
     "/I$($deps.SagaNcnnDir)/include","/I$($deps.SagaNcnnDir)/include/ncnn",
     "/I$($deps.SagaTensorRtDir)/include","/I$($deps.SagaCudaDir)/include",
-    "/Fo$out/$Name.obj", "/Fe$out/$Name.exe", (Join-Path $root $Source), '/link', '/OPT:REF',
+    $objectOutput, "/Fe$out/$Name.exe") + $sourceFiles + @('/link', '/OPT:REF',
     "/LIBPATH:$($deps.SagaOpenCvDir)/x64/vc16/lib","/LIBPATH:$($deps.SagaOrtDir)/lib",
     "/LIBPATH:$($deps.SagaNcnnDir)/lib",'ncnn.lib',$deps.SagaOpenCvLibrary,'onnxruntime.lib','dxgi.lib')
+# Regression fixtures use assert for checks and sometimes setup. /DNDEBUG
+# must never silently remove those checks while reporting a successful test.
+if ([IO.Path]::GetFileName($Source) -like 'test_*.cpp') {
+    $compilerArgs = @('/UNDEBUG') + ($compilerArgs | Where-Object { $_ -ne '/DNDEBUG' })
+}
 & "$vc/bin/Hostx64/x64/cl.exe" @compilerArgs
 if ($LASTEXITCODE -ne 0) { throw "Benchmark build failed: $LASTEXITCODE" }
 # Keep native dependencies beside the EXE so unrelated PATH DLLs cannot win.

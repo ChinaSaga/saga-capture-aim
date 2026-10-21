@@ -8,6 +8,7 @@ void hotkeyThread()
 {
     while (g.running.load())
     {
+        const auto settings = g.settings.snapshot();
         // Query a configured button once per scan (Ferrum performs serial I/O).
         struct CachedKey { int key; bool pressed; } cache[20]{};
         int cached = 0;
@@ -38,17 +39,17 @@ void hotkeyThread()
 
         // 准星追踪（原版为"只置真不自动复位"的锁存行为，由准星监控线程复位）
         bool track = g.crossTrack.load();
-        if (!track && g.crossBind[0] > 0) { readKey(g.crossBind[0], track); }
-        if (!track && g.crossBind[1] > 0) { readKey(g.crossBind[1], track); }
-        if (!track && g.crossBind[2] > 0) { readKey(g.crossBind[2], track); }
-        if (!track && g.crossBind[3] > 0) { readKey(g.crossBind[3], track); }
+        if (!track && settings.crossBind[0] > 0) { readKey(settings.crossBind[0], track); }
+        if (!track && settings.crossBind[1] > 0) { readKey(settings.crossBind[1], track); }
+        if (!track && settings.crossBind[2] > 0) { readKey(settings.crossBind[2], track); }
+        if (!track && settings.crossBind[3] > 0) { readKey(settings.crossBind[3], track); }
         g.crossTrack = track;
 
         bool tdown = false;
-        if (!tdown && g.triggerKey[0] > 0) { readKey(g.triggerKey[0], tdown); }
-        if (!tdown && g.triggerKey[1] > 0) { readKey(g.triggerKey[1], tdown); }
-        if (!tdown && g.triggerKey[2] > 0) { readKey(g.triggerKey[2], tdown); }
-        if (!tdown && g.triggerKey[3] > 0) { readKey(g.triggerKey[3], tdown); }   // 原版此处无延时
+        if (!tdown && settings.triggerKey[0] > 0) { readKey(settings.triggerKey[0], tdown); }
+        if (!tdown && settings.triggerKey[1] > 0) { readKey(settings.triggerKey[1], tdown); }
+        if (!tdown && settings.triggerKey[2] > 0) { readKey(settings.triggerKey[2], tdown); }
+        if (!tdown && settings.triggerKey[3] > 0) { readKey(settings.triggerKey[3], tdown); }   // 原版此处无延时
         g.triggerDown = tdown;
 
         sleepMs(2);
@@ -64,13 +65,14 @@ void crosshairWatchThread()
     RunTimer timer;
     while (g.running.load())
     {
-        if (g.aimContinuous == "true")
+        const auto settings = g.settings.snapshot();
+        if (settings.aimContinuous)
         {
             if (g.aimKeyDown.load())
             {
                 if (!first)
                 {
-                    if (timer.ms() > (double)g.adsTime) g.crossTrack = true;
+                    if (timer.ms() > (double)settings.adsTime) g.crossTrack = true;
                 }
                 if (first)
                 {
@@ -84,7 +86,7 @@ void crosshairWatchThread()
                 g.crossTrack = false;
             }
         }
-        sleepMs(g.aimContinuous == "true" ? 5 : 50);
+        sleepMs(settings.aimContinuous ? 5 : 50);
     }
 }
 
@@ -98,6 +100,7 @@ void campWatchThread()
     RunTimer t;
     while (g.running.load())
     {
+        const auto settings = g.settings.snapshot();
         if (g.camp.load() != 0)
         {
             bool st = false;
@@ -135,28 +138,29 @@ void lockTypeUpdateThread()
     int lastCamp = 0;
     while (g.running.load())
     {
+        const auto settings = g.settings.snapshot();
         int camp = g.camp.load();
-        const std::string* src = nullptr;
+        const bool* src = nullptr;
 
         if (camp == 0)
         {
-            src = g.type;
+            src = settings.type;
         }
         else if (camp == 1)
         {
-            src = g.team1;
+            src = settings.team1;
             if (lastCamp != camp) { lastCamp = camp; soundPlayCamp(1); }
         }
         else if (camp == 2)
         {
-            src = g.team2;
+            src = settings.team2;
             if (lastCamp != camp) { lastCamp = camp; soundPlayCamp(2); }
         }
 
         if (src)
         {
             for (int i = 0; i < 10; ++i)
-                g.classEnabled[i] = (src[i] == "true");
+                g.classEnabled[i] = src[i];
         }
 
         sleepMs(20);

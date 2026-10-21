@@ -40,7 +40,10 @@ struct InferenceBuffer {
     
     /// @brief Ensure blob has required capacity
     void ensureCapacity(int height, int width, int channels = 3) {
-        size_t required = static_cast<size_t>(height * width * channels);
+        if (height <= 0 || width <= 0 || channels <= 0)
+            throw std::runtime_error("Invalid inference buffer dimensions");
+        const size_t required = static_cast<size_t>(height) * static_cast<size_t>(width) * static_cast<size_t>(channels);
+        if (required > blob.max_size()) throw std::runtime_error("Inference buffer is too large");
         if (blob.size() < required) {
             blob.resize(required);
         }

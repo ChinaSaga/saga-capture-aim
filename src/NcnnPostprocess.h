@@ -45,6 +45,8 @@ void ensure_buffers(int num_anchors, int num_classes)
 public:
     void reset() { g_last_num_anchors = 0; g_last_num_classes = 0; }
     int run(ncnn::Mat& out, float scale, int pad_x, int pad_y, int img_w, int img_h, float conf_thres, float nms_thres, DetectObject* out_objects) {
+        if (out.empty() || !out_objects || out.elempack != 1 || out.elemsize != sizeof(float) ||
+            (out.dims != 2 && !(out.dims == 3 && out.c == 1)) || scale <= 0) return -4;
         const int num_anchors = out.w;
         const int num_classes = out.h - 4;
         if (num_classes <= 0 || num_anchors <= 0) return -4;

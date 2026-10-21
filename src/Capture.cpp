@@ -1,6 +1,8 @@
 #include "App.h"
 #include "Inference.h"
 #include "FrameWait.h"
+#include "UdpFrameAssembler.h"
+#include <limits>
 #include "RuntimeLog.h"
 
 
@@ -17,7 +19,7 @@ static int imageWidth(const std::vector<unsigned char>& d)
     {
         int w = 0;
         std::memcpy(&w, &d[18], 4);
-        return abs(w);
+        return w > 0 && w <= 32768 ? w : 0;
     }
     if (d.size() > 4 && d[0] == 0xFF && d[1] == 0xD8)
     {
@@ -100,6 +102,9 @@ void frameThreadUdp()
 
     std::vector<unsigned char> buf(4096);
     std::vector<unsigned char> acc;
+    UdpFrameAssembler assembler;
+    DWORD timeout = 200;
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
     RunTimer t;
     t.start();
     int count = 0;
@@ -109,28 +114,28 @@ void frameThreadUdp()
         sockaddr_in from;
         int fromLen = sizeof(from);
         int len = recvfrom(s, (char*)buf.data(), (int)buf.size(), 0, (sockaddr*)&from, &fromLen);
-        if (len != -1)
-        {
-            acc.insert(acc.end(), buf.begin(), buf.begin() + len);
-            if (len != 1472)                       // 非满包 = 一帧结束
-            {
-                EnterCriticalSection(&g_frameLock);
-                g_frame.swap(acc); // Publish in O(1); reuse the previous frame's allocation.
-                ++g_frameSeq;
-                g_lastFrameTime = nowMs();
-                LeaveCriticalSection(&g_frameLock);
-                WakeAllConditionVariable(&g_publishedFrameReady);
-                acc.clear();
-
-                if (++count >= 100)
-                {
-                    int w = imageWidth(g_frame);
-                    if (w > 0) g.imgSize = w;
-                    double ms = t.ms();
-                    if (ms > 0) g.frameFps = (int)std::round(100000.0 / ms);
-                    t.start();
-                    count = 0;
-                }
+        if (len < 0) {
+            const int error = WSAGetLastError();
+            if (error != WSAETIMEDOUT && error != WSAEMSGSIZE && error != WSAECONNRESET) break;
+            assembler.reset();
+            continue;
+        }
+        // A late UDP stream must not overwrite local capture dimensions/statistics.
+        if (g.captureRunning) { assembler.reset(); continue; }
+        const std::uint64_t peer = (std::uint64_t(from.sin_addr.s_addr) << 16) | from.sin_port;
+        if (assembler.push(buf.data(), static_cast<size_t>(len), peer, GetTickCount64(), acc)) {
+            const int width = imageWidth(acc);
+            EnterCriticalSection(&g_frameLock);
+            g_frame.swap(acc);
+            ++g_frameSeq;
+            g_lastFrameTime = nowMs();
+            LeaveCriticalSection(&g_frameLock);
+            WakeAllConditionVariable(&g_publishedFrameReady);
+            if (++count >= 100) {
+                if (width > 0) g.imgSize = width;
+                const double ms = t.ms();
+                if (ms > 0) g.frameFps = (int)std::round(100000.0 / ms);
+                t.start(); count = 0;
             }
         }
     }
@@ -153,19 +158,19 @@ bool startCapture(const char* dev, int w, int h, const char* codec, int fps)
     saga::set_capture_log([](const char* text) { runtime_log::write("[capture] %s", text); });
     std::string name = dev ? dev : "";
     std::string cc = codec ? codec : "";
-    std::string ini = g.runDir + "\\监控双机.ini";
+    const auto ini = g.runDir / L"监控双机.ini";
     char buf[512] = {};
 
     if (name.empty() || cc.empty())
     {
-        GetPrivateProfileStringA("保留参数", "名称", "Live Gamer Ultra 2.1-Video", buf, sizeof(buf), ini.c_str());
+        file_paths::profileString("保留参数", "名称", "Live Gamer Ultra 2.1-Video", buf, sizeof(buf), ini.c_str());
         name = buf;
-        GetPrivateProfileStringA("保留参数", "编码", "NV12", buf, sizeof(buf), ini.c_str());
+        file_paths::profileString("保留参数", "编码", "NV12", buf, sizeof(buf), ini.c_str());
         cc = buf;
-        w = GetPrivateProfileIntA("保留参数", "宽", 1920, ini.c_str());
-        h = GetPrivateProfileIntA("保留参数", "高", 1080, ini.c_str());
-        fps = GetPrivateProfileIntA("保留参数", "帧率", 240, ini.c_str());
-        int cr = GetPrivateProfileIntA("保留参数", "截图范围", 320, ini.c_str());
+        w = file_paths::profileInt("保留参数", "宽", 1920, ini.c_str());
+        h = file_paths::profileInt("保留参数", "高", 1080, ini.c_str());
+        fps = file_paths::profileInt("保留参数", "帧率", 240, ini.c_str());
+        int cr = file_paths::profileInt("保留参数", "截图范围", 320, ini.c_str());
         if (cr >= 160 && cr <= 640)
         {
             g.imgSize = cr;
@@ -191,12 +196,12 @@ bool startCapture(const char* dev, int w, int h, const char* codec, int fps)
     }
 
     // ---- 写回 监控双机.ini ----
-    WritePrivateProfileStringA("保留参数", "宽", std::to_string(w).c_str(), ini.c_str());
-    WritePrivateProfileStringA("保留参数", "高", std::to_string(h).c_str(), ini.c_str());
-    WritePrivateProfileStringA("保留参数", "编码", cc.c_str(), ini.c_str());
-    WritePrivateProfileStringA("保留参数", "名称", name.c_str(), ini.c_str());
-    WritePrivateProfileStringA("保留参数", "帧率", std::to_string(fps).c_str(), ini.c_str());
-    WritePrivateProfileStringA("保留参数", "截图范围", std::to_string(g.imgSize).c_str(), ini.c_str());
+    file_paths::writeProfile("保留参数", "宽", std::to_string(w).c_str(), ini.c_str());
+    file_paths::writeProfile("保留参数", "高", std::to_string(h).c_str(), ini.c_str());
+    file_paths::writeProfile("保留参数", "编码", cc.c_str(), ini.c_str());
+    file_paths::writeProfile("保留参数", "名称", name.c_str(), ini.c_str());
+    file_paths::writeProfile("保留参数", "帧率", std::to_string(fps).c_str(), ini.c_str());
+    file_paths::writeProfile("保留参数", "截图范围", std::to_string(g.imgSize).c_str(), ini.c_str());
 
     // 记住这次成功启动的参数，供「切换中心识别范围」时按新裁剪尺寸原样重启
     g_lastDev = name;
@@ -314,7 +319,7 @@ void frameThreadShotSave()
         long long now = nowMs();
         g_nowMs = now;
 
-        if (g.autoShot == "true" && g.aimKeyDown.load())
+        if (g.settings.snapshot().autoShot && g.aimKeyDown.load())
         {
             if (now - g.lastDetectTime < 125 && now - lastWrite > 80)
             {
@@ -337,8 +342,8 @@ void frameThreadShotSave()
                         std::chrono::system_clock::now().time_since_epoch()).count();
                     char name[32];
                     snprintf(name, sizeof(name), "%lld.jpg", ts);
-                    std::string dir = g.runDir + "\\" + g.selectedModelName();
-                    CreateDirectoryA(dir.c_str(), nullptr);
+                    const auto dir = file_paths::io(g.runDir / file_paths::wide(g.selectedModelName()));
+                    CreateDirectoryW(dir.c_str(), nullptr);
                     // The capture lease already contains top-down BGR; preserve
                     // its stride and encode directly, without copying/decoding BMP.
                     try {
@@ -352,7 +357,7 @@ void frameThreadShotSave()
                         decoded.release();
                         frame = {};
                         if (encoded) {
-                            FILE* file = fopen((dir + "\\" + name).c_str(), "wb");
+                            FILE* file = file_paths::open(dir / file_paths::wide(name), L"wb");
                             if (file) {
                                 fwrite(jpeg.data(), 1, jpeg.size(), file);
                                 fclose(file);

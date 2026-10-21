@@ -15,7 +15,7 @@
 // 接口_文件存在提示检测
 static void requireFile(const std::string& name)
 {
-    if (!fileExists(g.runDir + "\\" + name))
+    if (!fileExists(g.runDir / file_paths::wide(name)))
     {
         MessageBoxA(nullptr, (name + "不存在!请下载").c_str(), "系统提示", MB_OK | MB_SETFOREGROUND);
         ExitProcess(0);
@@ -30,7 +30,7 @@ static bool missingDeps()
     //   · HPSocket4C.dll 由手写 Winsock 替代 → 不需要
     static const char* need[] = { "DirectML.dll", "ncnn.dll", "onnxruntime.dll", SAGA_OPENCV_RUNTIME_DLL };
     for (const char* n : need)
-        if (!fileExists(g.runDir + "\\" + n)) return true;
+        if (!fileExists(g.runDir / file_paths::wide(n))) return true;
     return false;
 }
 
@@ -54,26 +54,28 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
     srand((unsigned)(GetTickCount64() ^ (unsigned long long)GetCurrentProcessId()));
 
     // ---------------- 运行目录 ----------------
-    char path[MAX_PATH];
-    GetModuleFileNameA(nullptr, path, MAX_PATH);
-    std::string exe = path;
-    g.runDir = exe.substr(0, exe.find_last_of("\\/"));
-    g.cfgPath = g.runDir + "\\圣人自用.js";
+    try {
+        g.runDir = file_paths::executableDirectory();
+        g.cfgPath = file_paths::io(g.runDir / L"圣人自用.js");
+    } catch (const std::exception&) {
+        MessageBoxW(nullptr, L"无法确定程序所在目录。", L"启动失败", MB_OK | MB_ICONERROR);
+        return 1;
+    }
 
     runtime_log::initialize();
     LOG("[crash] 自动崩溃记录 %s（EXE目录/崩溃报告）", initializeCrashDiagnostics() ? "已启用" : "初始化失败");
-    LOG("[01] runDir=%s", g.runDir.c_str());
+    runtime_log::writeWide(L"[01] runDir=" + g.runDir.wstring());
     LOG("[build] CH343 async/skip-absent v4; main-close/IP-reprompt/Esc-ignore v5; %s %s", __DATE__, __TIME__);
     const OrtApiBase* ortBase = OrtGetApiBase();
     LOG("[runtime] ONNX Runtime=%s; required API=%u", ortBase ? ortBase->GetVersionString() : "unavailable", ORT_API_VERSION);
-    char ortDllPath[MAX_PATH]{};
-    if (HMODULE ortModule = GetModuleHandleA("onnxruntime.dll")) {
-        GetModuleFileNameA(ortModule, ortDllPath, MAX_PATH);
-        LOG("[runtime] onnxruntime.dll=%s", ortDllPath);
+    wchar_t ortDllPath[32768]{};
+    if (HMODULE ortModule = GetModuleHandleW(L"onnxruntime.dll")) {
+        GetModuleFileNameW(ortModule, ortDllPath, _countof(ortDllPath));
+        runtime_log::writeWide(std::wstring(L"[runtime] onnxruntime.dll=") + ortDllPath);
     }
 
     g.running = true;
-    SetDllDirectoryA(g.runDir.c_str());
+    SetDllDirectoryW(file_paths::io(g.runDir).c_str());
 
     // Saga.dll 依赖 COM（DirectShow 设备枚举），且它自己会 CoUninitialize 拆掉公寓，
     // 所以主线程先占住一个计数（MTA 模式与 DLL 内部一致）
@@ -82,9 +84,10 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
         LOG("[01b] CoInitializeEx hr=0x%08X", (unsigned)hrCom);
     }
 
-    CreateDirectoryA((g.runDir + "\\配置保存").c_str(), nullptr);
-    if (!CreateDirectoryA(g.modelDirectory().c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS)
+    CreateDirectoryW(file_paths::io(g.runDir / L"配置保存").c_str(), nullptr);
+    if (!CreateDirectoryW(g.modelDirectory().c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS)
         LOG("[model] Cannot create model directory, error=%lu", GetLastError());
+    runtime_log::writeWide(L"[model] directory=" + g.modelDirectory().wstring());
 
     // ---------------- 依赖文件检测（原版：缺文件弹框后 进程_结束）----------------
     if (missingDeps())

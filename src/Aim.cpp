@@ -33,13 +33,17 @@ static RunTimer g_durTimer;       // 集_持续时间
 
 void aimMoveOnce()
 {
+    static std::mutex consumerMutex;
+    std::unique_lock consumer(consumerMutex, std::try_to_lock);
+    if (!consumer.owns_lock()) return;
+    const auto settings = g.settings.snapshot();
     // ---- 锁定频率 / 延时频率 门控 ----
-    if (g.delayFreq != 0)
+    if (settings.delayFreq != 0)
     {
         if (g.delayStarted)
         {
             double dms = g_delayTimer.ms();
-            if (dms < (double)g.delayFreq) return;    // 延时期间不移动
+            if (dms < (double)settings.delayFreq) return;    // 延时期间不移动
             g.delayStarted = false;
             g.aimStarted = true;
         }
@@ -53,7 +57,7 @@ void aimMoveOnce()
         else
         {
             double ams = g_durTimer.ms();
-            if (ams >= (double)g.lockFreq && !g.delayStarted)
+            if (ams >= (double)settings.lockFreq && !g.delayStarted)
             {
                 g.delayStarted = true;
                 g_delayTimer.start();
@@ -61,23 +65,19 @@ void aimMoveOnce()
         }
     }
 
-    if (!g.aimKeyDown.load()) return;
-    if (g.moveProfileToken.load() != g.aimProfiles.token()) return;
-    if (g.moveDx == 0 && g.moveDy == 0) return;
+    // Consume before device I/O: a new frame published during the trajectory
+    // belongs to the next call and must never be erased after this move.
+    EnterCriticalSection(&g_moveLock);
+    const bool valid = g.aimKeyDown && !g.inferPaused &&
+        g.moveProfileToken == g.aimProfiles.token() && g.moveEpoch == g.inferenceEpoch &&
+        nowMs() - g_lastFrameTime < 125 && nowMs() - g.moveFrameTime < 125;
+    const float fx = valid ? (float)g.moveDx : 0.f;
+    const float fy = valid ? (float)g.moveDy : 0.f;
+    g.moveDx = g.moveDy = 0;
+    LeaveCriticalSection(&g_moveLock);
+    if (fx == 0 && fy == 0) return;
 
-    float fx, fy;
-    if (g.threadMove == "true")
-    {
-        EnterCriticalSection(&g_moveLock);
-        fx = (float)g.moveDx; fy = (float)g.moveDy;
-        LeaveCriticalSection(&g_moveLock);
-    }
-    else
-    {
-        fx = (float)g.moveDx; fy = (float)g.moveDy;
-    }
-
-    switch (g.moveDelay)
+    switch (settings.moveDelay)
     {
     case 10: trajMove10(fx, fy); break;
     case 5:  trajMove5 (fx, fy); break;
@@ -86,8 +86,6 @@ void aimMoveOnce()
     default: trajMove10(fx, fy); break;   // 没选择移动延时默认 10 次
     }
 
-    g.moveDx = 0;
-    g.moveDy = 0;
 }
 
 // ============================================================================
@@ -98,14 +96,8 @@ void mouseMoveThread()
     optThread();                 // S_优化_Thread
     while (g.running.load())
     {
-        if (g.threadMove == "true")
-        {
-            if (g.aimKeyDown.load())
-            {
-                if (g.nearestDist.load() != 0) aimMoveOnce();
-            }
-            g.nearestDist = 0;               // 移动完清除一次
-        }
+        const auto settings = g.settings.snapshot();
+        if (settings.threadMove) aimMoveOnce();
         sleepMs(1);
     }
 }
@@ -119,10 +111,13 @@ void triggerThread()
     long long lastShot = 0;
     while (g.running.load())
     {
-        if (g.triggerFire.load() && g.triggerDown.load())
+        const auto settings = g.settings.snapshot();
+        if (g.triggerFire && g.triggerDown && !g.inferPaused &&
+            g.triggerEpoch == g.inferenceEpoch && nowMs() - g_lastFrameTime < 125 &&
+            nowMs() - g.resultFrameTime < 125)
         {
             long long t = nowMs();
-            if (t - lastShot > g.shotInterval)
+            if (t - lastShot > settings.shotInterval)
             {
                 makcuDown(1);
                 sleepMs(randInt(88, 138));
@@ -162,8 +157,11 @@ static void clearInferenceResult()
 }
 void inferPause(bool paused)
 {
-    if (paused) clearInferenceResult();
     g.inferPaused = paused;
+    if (paused) {
+        ++g.inferenceEpoch;
+        clearInferenceResult();
+    }
 }
 
 // ============================================================================
@@ -187,6 +185,7 @@ void aimThread(int engineWanted)
     // （两个推理线程共用同一个 aimThread，写成 static 会互相打架）
     aimlock::Memory lockMem;
     std::uint64_t lastProfileToken = 0;
+    std::uint64_t lastInferenceEpoch = 0;
 
     RunTimer runTimer, inferTimer;
     runTimer.start();
@@ -206,7 +205,8 @@ void aimThread(int engineWanted)
     std::string loadedModel;
     bool modelReady = false;
     bool firstInference = true;
-    float accuracy = g.conf;
+    auto settings = g.settings.snapshot();
+    float accuracy = settings.conf;
     if (accuracy < 0.1f) accuracy = 0.1f;
     int   detectCount = 0;
     int   prevNearestRange = 0;        // 局_画框最近范围（上一帧距离）
@@ -242,15 +242,25 @@ void aimThread(int engineWanted)
         }
         if (g.inferPaused.load()) { sleepMs(2); continue; }   // 切换识别范围中：等新画面
         const bool directCapture = g.captureRunning.load();
+        long long inputFrameTime = 0;
         if (!directCapture) {
             EnterCriticalSection(&g_frameLock);
             const bool freshFrame = waitForFrameSequence(g_publishedFrameReady,
                 g_frameLock, g_frameSeq, localSeq, 50);
-            if (freshFrame) { localFrame = g_frame; localSeq = g_frameSeq; }
+            if (freshFrame) { localFrame = g_frame; localSeq = g_frameSeq; inputFrameTime = g_lastFrameTime.load(); }
             LeaveCriticalSection(&g_frameLock);
             if (!freshFrame || g.inferPaused.load() || g.engine != engineWanted) continue;
         }
 
+        settings = g.settings.snapshot();
+        const auto inferenceEpoch = g.inferenceEpoch.load();
+        if (lastInferenceEpoch != inferenceEpoch) {
+            lockMem = {}; pidX = {}; pidY = {};
+            prevNearestRange = nearestX = nearestY = 0;
+            nearestRect = {};
+            detectCount = 0; runTimer.start();
+            lastInferenceEpoch = inferenceEpoch;
+        }
         // ---------------- 模型加载 ----------------
         const std::string req = g.selectedModelName();
         if (g.engine != engineWanted) continue;
@@ -262,8 +272,8 @@ void aimThread(int engineWanted)
             modelReady = false;
             if (engineWanted == 1)
             {
-                std::string par = g.modelDirectory() + "\\" + req + ".param";
-                std::string bin = g.modelDirectory() + "\\" + req + ".bin";
+                const auto par = g.modelDirectory() / file_paths::wide(req + ".param");
+                const auto bin = g.modelDirectory() / file_paths::wide(req + ".bin");
                 if (fileExists(bin) && fileExists(par))
                 {
                     // 原版先用模型名"上锁"再加载：加载失败也不会反复重试
@@ -271,7 +281,9 @@ void aimThread(int engineWanted)
                     int rc = sagaNcnnCreate(par.c_str(), bin.c_str(), 1, 0);
                     if (rc != 0)
                     {
-                        msgBox("模型加载失败，错误码：" + std::to_string(rc));
+                        const auto detail = utf8ToAnsi(saga::ncnn_last_error());
+                        runtime_log::write("[infer] NCNN 加载失败：%s", detail.c_str());
+                        msgBox("模型加载失败，错误码：" + std::to_string(rc) + "\n" + detail);
                         sleepMs(100);
                         continue;
                     }
@@ -285,12 +297,12 @@ void aimThread(int engineWanted)
             }
             else if (engineWanted == 2)
             {
-                std::string onnx = g.modelDirectory() + "\\" + req + ".onnx";
+                const auto onnx = g.modelDirectory() / file_paths::wide(req + ".onnx");
                 if (fileExists(onnx))
                 {
                     // The model and labels share the dedicated model directory.
-                    std::string txt = g.modelDirectory() + "\\空类别.txt";
-                    if (!fileExists(txt)) writeFileAll(txt, "");
+                    const auto txt = g.modelDirectory() / L"空类别.txt";
+                    // Labels are optional; loading a model must not require write permission.
 
                     loadedModel = req;                                // 同上，先上锁
                     int rc = sagaOnnxCreate(onnx.c_str(), txt.c_str(), true);
@@ -313,7 +325,7 @@ void aimThread(int engineWanted)
             }
             else if (engineWanted == 3)
             {
-                const std::string enginePath = g.modelDirectory() + "\\" + req + ".trt";
+                const auto enginePath = g.modelDirectory() / file_paths::wide(req + ".trt");
                 if (!fileExists(enginePath)) {
                     msgBox("模型:" + req + "的trt文件不存在!请先用ONNX转TRT工具转换，再放入程序同目录的模型数据文件夹。");
                     continue;
@@ -336,6 +348,7 @@ void aimThread(int engineWanted)
         // ---------------- 帧率统计（每 100 次）----------------
         // Timeouts are not inference frames; acquire before counting a sample.
         if (directCapture && !captureAcquire(captureFrame, captureSequence, 50)) continue;
+        if (directCapture) inputFrameTime = g_lastFrameTime.load();
         if (g.engine != engineWanted || g.inferPaused.load()) {
             captureFrame = {};
             continue;
@@ -343,7 +356,7 @@ void aimThread(int engineWanted)
         detectCount++;
         if (detectCount >= 100)
         {
-            accuracy = (g.crossClass == 0) ? g.conf : g.crossConf;
+            accuracy = (settings.crossClass == 0) ? settings.conf : settings.crossConf;
             if (accuracy < 0.1f) accuracy = 0.1f;
 
             double statMs = runTimer.ms();
@@ -360,13 +373,13 @@ void aimThread(int engineWanted)
             const auto detect = engineWanted == 1 ? ncnnDetectBgr :
                 engineWanted == 2 ? onnxDetectBgr : trtDetectBgr;
             n = detect(captureFrame.bmp + 54, captureFrame.width, captureFrame.height,
-                captureFrame.stride, accuracy, g.nms, objs);
+                captureFrame.stride, accuracy, settings.nms, objs);
         } else if (engineWanted == 1) {
-            n = sagaNcnnDetect(localFrame.data(), (int)localFrame.size(), accuracy, g.nms, objs);
+            n = sagaNcnnDetect(localFrame.data(), (int)localFrame.size(), accuracy, settings.nms, objs);
         } else if (engineWanted == 2) {
-            n = sagaOnnxDetect(localFrame.data(), (int)localFrame.size(), accuracy, g.nms, objs);
+            n = sagaOnnxDetect(localFrame.data(), (int)localFrame.size(), accuracy, settings.nms, objs);
         } else {
-            n = saga::trt_detect(localFrame.data(), (int)localFrame.size(), accuracy, g.nms, objs);
+            n = saga::trt_detect(localFrame.data(), (int)localFrame.size(), accuracy, settings.nms, objs);
         }
         captureFrame = {};
         const double inferCost = inferTimer.ms();      // 亚毫秒精度，界面换算显示用帧率
@@ -392,9 +405,11 @@ void aimThread(int engineWanted)
             }
         }
         // A model/engine change during inference must not publish the old result.
-        if (g.engine != engineWanted || g.inferPaused.load() || g.selectedModelName() != req) continue;
+        if (g.engine != engineWanted || g.inferPaused.load() ||
+            g.inferenceEpoch != inferenceEpoch || g.selectedModelName() != req) continue;
         g.inferMs = (int)inferCost;
         g.inferMsPrecise = inferCost;
+        g.resultFrameTime = inputFrameTime;
         if (n < 0 && engineWanted == 3) {
             modelReady = false;
             clearInferenceResult();
@@ -452,13 +467,13 @@ void aimThread(int engineWanted)
         int centerX = roundToInt(g.imgSize * 0.5);
         int centerY = roundToInt(g.imgSize * 0.5);
 
-        if (g.crossClass > 0 && g.crossTrack.load())
+        if (settings.crossClass > 0 && g.crossTrack.load())
         {
             for (int i = 0; i < n; ++i)
             {
                 int cls = objs[i].label + 1;
                 if (cls < 1 || cls > 10) continue;
-                if (cls == g.crossClass)
+                if (cls == settings.crossClass)
                 {
                     crossCount++;
                     if (crossCount >= 2)          // 有且只有 1 个才采用
@@ -480,7 +495,7 @@ void aimThread(int engineWanted)
         {
             int cls = objs[i].label + 1;
             if (cls < 1 || cls > 10) continue;
-            if (objs[i].prob < g.conf) continue;
+            if (objs[i].prob < settings.conf) continue;
             if (!g.classEnabled[cls - 1]) continue;
 
             int tx = roundToInt(((double)objs[i].x + objs[i].x + objs[i].width) * 0.5) - centerX;
@@ -533,7 +548,7 @@ void aimThread(int engineWanted)
         // ---------------- 没人时清空 PID ----------------
         if (!g.aimKeyDown.load() || idx == 0)
         {
-            if (g.moveMode == 2) { pidX = PidCtx(); pidY = PidCtx(); }
+            if (settings.moveMode == 2) { pidX = PidCtx(); pidY = PidCtx(); }
         }
         else
         {
@@ -574,11 +589,14 @@ void aimThread(int engineWanted)
             nearestRect = t.rect;
             keepGoing = false;
         }
-        else if (picked.held)
+        else
         {
-            // 失锁确认中：这一帧不移动，避免瞬间跳到旁边那个人身上
+            // No current target: revoke any unconsumed movement from an older frame.
+            EnterCriticalSection(&g_moveLock);
             g.moveDx = 0;
             g.moveDy = 0;
+            LeaveCriticalSection(&g_moveLock);
+            g.nearestDist = 0;
         }
 
         g.boxDx = nearestX;
@@ -589,6 +607,7 @@ void aimThread(int engineWanted)
         // 【修复点】原版只在"选到目标"分支里清 扳机开火，没目标时会残留上一帧
         // 的真值导致持续开火；这里统一先清零。
         g.triggerFire = false;
+        g.triggerEpoch = inferenceEpoch;
 
         if (!keepGoing)
         {
@@ -597,63 +616,61 @@ void aimThread(int engineWanted)
                 roundToInt(nearestRect.x + nearestRect.width),
                 roundToInt(nearestRect.y + nearestRect.height));
 
-            if (crossCount == 1 && g.crossTrack.load() && g.crossTrigger == "true")
+            if (crossCount == 1 && g.crossTrack.load() && settings.crossTrigger)
             {
                 g.prioRatio = crossRatio;
-                if (crossRatio < (double)g.triggerRange && crossRatio > 0) g.triggerFire = true;
+                if (crossRatio < (double)settings.triggerRange && crossRatio > 0) g.triggerFire = true;
             }
 
-            if (g.centerTrigger == "true")
+            if (settings.centerTrigger)
             {
                 g.prioRatio = crossRatio;
-                if (crossRatio < (double)g.triggerRange && crossRatio > 0) g.triggerFire = true;
+                if (crossRatio < (double)settings.triggerRange && crossRatio > 0) g.triggerFire = true;
             }
 
             // 中心点范围仅限制优先锁定类别；其它类别继续追向锁定位置 XY。
             if (targets[picked.index].lockType == 1 &&
                 crossRatio > 0 && crossRatio <= (double)profile.centerRange / 100.0)
+            {
+                EnterCriticalSection(&g_moveLock);
+                g.moveDx = g.moveDy = 0;
+                LeaveCriticalSection(&g_moveLock);
                 continue;
+            }
 
             // ---- 移动量计算 ----
-            if (g.moveMode == 1)
+            if (settings.moveMode == 1)
             {
                 if (g.nearestDist.load() <= 100)
                 {
-                    if (nearestX < 0) nearestX = truncToInt(nearestX * g.moveFactor);
-                    if (nearestY < 0) nearestY = truncToInt(nearestY * g.moveFactor);
-                    if (nearestX > 0) nearestX = truncToInt(nearestX * g.moveFactor + 0.9999);
-                    if (nearestY > 0) nearestY = truncToInt(nearestY * g.moveFactor + 0.9999);
+                    if (nearestX < 0) nearestX = truncToInt(nearestX * settings.moveFactor);
+                    if (nearestY < 0) nearestY = truncToInt(nearestY * settings.moveFactor);
+                    if (nearestX > 0) nearestX = truncToInt(nearestX * settings.moveFactor + 0.9999);
+                    if (nearestY > 0) nearestY = truncToInt(nearestY * settings.moveFactor + 0.9999);
                 }
                 else
                 {
                     double scale = (double)g.nearestDist.load() / 100.0;
-                    if (nearestX < 0) nearestX = truncToInt(nearestX * g.moveFactor / scale);
-                    if (nearestY < 0) nearestY = truncToInt(nearestY * g.moveFactor / scale);
-                    if (nearestX > 0) nearestX = truncToInt(nearestX * g.moveFactor / scale + 0.9999);
-                    if (nearestY > 0) nearestY = truncToInt(nearestY * g.moveFactor / scale + 0.9999);
+                    if (nearestX < 0) nearestX = truncToInt(nearestX * settings.moveFactor / scale);
+                    if (nearestY < 0) nearestY = truncToInt(nearestY * settings.moveFactor / scale);
+                    if (nearestX > 0) nearestX = truncToInt(nearestX * settings.moveFactor / scale + 0.9999);
+                    if (nearestY > 0) nearestY = truncToInt(nearestY * settings.moveFactor / scale + 0.9999);
                 }
             }
-            else if (g.moveMode == 2)
+            else if (settings.moveMode == 2)
             {
-                nearestX = roundToInt(pidPosition(pidX, (double)nearestX, g.kp, g.ki));
-                nearestY = roundToInt(pidPosition(pidY, (double)nearestY, g.kp, g.ki));
+                nearestX = roundToInt(pidPosition(pidX, (double)nearestX, settings.kp, settings.ki));
+                nearestY = roundToInt(pidPosition(pidY, (double)nearestY, settings.kp, settings.ki));
             }
 
-            if (g.threadMove == "true")
-            {
-                EnterCriticalSection(&g_moveLock);
-                g.moveDx = nearestX;
-                g.moveDy = nearestY;
-                g.moveProfileToken = profileSnapshot.token;
-                LeaveCriticalSection(&g_moveLock);
-            }
-            else
-            {
-                g.moveDx = nearestX;
-                g.moveDy = nearestY;
-                g.moveProfileToken = profileSnapshot.token;
-                aimMoveOnce();
-            }
+            EnterCriticalSection(&g_moveLock);
+            g.moveDx = nearestX;
+            g.moveDy = nearestY;
+            g.moveProfileToken = profileSnapshot.token;
+            g.moveEpoch = inferenceEpoch;
+            g.moveFrameTime = inputFrameTime;
+            LeaveCriticalSection(&g_moveLock);
+            if (!settings.threadMove) aimMoveOnce();
         }
 
         // The next iteration waits for a fresh frame; no fixed per-frame delay.

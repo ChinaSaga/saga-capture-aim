@@ -24,7 +24,9 @@
 // Shared detection result.
 #include "Inference.h"
 #include "ModelPaths.h"
+#include "FilePaths.h"
 #include "AimProfiles.h"
+#include "RuntimeSettings.h"
 
 
 // ============================================================================
@@ -44,7 +46,7 @@ struct LockTarget
     double distance = 0;       // 目前距离
     int    lockType = 0;       // 1优先 2其次 3再次 99其它 0空
     SRect  rect;
-    float  conf = 0;           // 置信度
+    float  conf = 0;
 };
 
 // 易语言 二维画框_数组[99][5]，下标 [i][1..5]，1 基
@@ -61,35 +63,37 @@ struct DrawBox
 struct AppState
 {
     aim_profiles::Store aimProfiles;
+    RuntimeSettingsStore settings;
+    std::atomic<std::uint64_t> inferenceEpoch{1};
+    std::atomic<std::uint64_t> triggerEpoch{0};
+    std::atomic<long long> resultFrameTime{0};
+    std::uint64_t moveEpoch = 0; // Protected by g_moveLock.
+    long long moveFrameTime = 0; // Protected by g_moveLock.
     std::atomic<std::uint64_t> moveProfileToken{0};
     // ---- 运行控制 ----
     std::atomic<bool> running{ false };        // 全_死循环
     std::atomic<bool> inferPaused{ false };    // 切换识别范围期间暂停推理（等新画面到位）
-    std::string       runDir;                  // 全_运行目录
-    std::string modelDirectory() const { return model_paths::gbkDirectory(runDir); }
-    std::string       cfgPath;                 // 全_配置文件
+    std::filesystem::path runDir;                  // 全_运行目录
+    std::filesystem::path modelDirectory() const { return file_paths::io(model_paths::directory(runDir)); }
+    std::filesystem::path cfgPath;                 // 全_配置文件
     std::string       hostIp = "127.0.0.1";    // 文本_推理机ip
     int               shotPort = 6666;         // 整数_截图端口
     int               localPort = 8888;        // 整数_本地端口
 
     // ---- 帧率统计 ----
-    int inferFps = 0;                          // 整数_推理帧率
-    int frameFps = 0;                          // 整数_图片帧率
-    int inferMs  = 0;                          // 整数_推理毫秒
-    double inferMsPrecise = 0.0;               // 亚毫秒精度的单次推理耗时（仅界面显示用）
+    std::atomic<int>  inferFps{0};                          // 整数_推理帧率
+    std::atomic<int>  frameFps{0};                          // 整数_图片帧率
+    std::atomic<int>  inferMs{0};                          // 整数_推理毫秒
+    std::atomic<double> inferMsPrecise{0.0};               // 亚毫秒精度的单次推理耗时（仅界面显示用）
 
     // ---- 图片 ----
-    int  imgSize = 320;                        // 全_图片宽高
+    std::atomic<int>   imgSize{320};                        // 全_图片宽高
     std::atomic<bool> noConvert{false};        // 全_图片无需转换（后台采集初始化会写入）
     std::atomic<bool> showImg{ false };        // 全_是否显示图片
 
     // ---- 识别参数 ----
-    float conf      = 0.55f;                   // 小数_置信度
-    float nms       = 0.25f;                   // 小数_交并比
-    float crossConf = 0.20f;                   // 小数_准星精度
     int   lockRange = 256;                     // 整数_锁定范围
     int   centerRange = 50;                    // 仅优先锁定类别的中心点停移范围 (内部 /100.0)
-    int   crossClass = 5;                      // 整数_准星类别 (0=关闭)
     mutable std::mutex modelMutex;
     std::string modelName = "三角洲行动";      // 文本_模型名称，读写须持 modelMutex
     std::string selectedModelName() const {
@@ -102,37 +106,15 @@ struct AppState
     int prioLock = 1, secondLock = 2, thirdLock = 3;              // 整数_优先/其次/再次锁定
     int prioLockPos = 50, secondLockPos = 50, thirdLockPos = 50;  // 整数_*锁定位置
 
-    // ---- 移动 ----
-    int   moveMode  = 0;                       // 整数_移动方式 0/1/2
-    int   moveDelay = 5;                       // 整数_移动延时 1/3/5/10
-    float moveFactor = 0.618f;                 // 小数_移动系数
-    float kp = 0, ki = 0;                      // 小数_Kp / 小数_Ki
-
-    // ---- 频率 ----
-    int lockFreq  = 100;                       // 整数_锁定频率
-    int delayFreq = 200;                       // 整数_延时频率
-
     // ---- 热键 ----
     int aimMainKey = 2;                        // 整数_自瞄主键
     int aimSubKey1 = 0, aimSubKey2 = 0, aimSubKey3 = 0;
-    int crossBind[4] = { 0, 0, 0, 0 };         // 整数_准星绑定1~4
     std::atomic<int> rangePressKey{0};
     std::atomic<bool> rangePressActive{false};
-    int triggerKey[4] = { 0, 0, 0, 0 };        // 整数_扳机热键1~4
-
-    // ---- 扳机 ----
-    int   shotInterval = 80;                   // 整数_开枪间隔
-    float triggerRange = 0.66f;                // 小数_扳机范围
-    int   adsTime = 350;                       // 整数_开镜时间
 
     // ---- 开关（文本型 "true"/"false"）----
     std::string moveInBox     = "false";       // 文本_框内移动
-    std::string threadMove    = "false";       // 文本_线程移动
-    std::string aimContinuous = "true";        // 文本_自瞄连续按下
-    std::string autoShot      = "false";       // 文本_自动截图
     std::string alwaysOn      = "false";       // 文本_吸附常驻
-    std::string crossTrigger  = "false";       // 文本_准星扳机
-    std::string centerTrigger = "false";       // 文本_中心扳机
 
     // ---- 状态标志 ----
     std::atomic<bool> aimKeyDown{ false };     // 逻辑_自瞄热键是否按下
@@ -142,21 +124,18 @@ struct AppState
 
     // ---- 阵容 ----
     std::atomic<int> camp{ 0 };                // 整数_目前阵容 0/1/2
-    std::string type[10];                      // 文本_type0~9
-    std::string team1[10];                     // 文本_team1type0~9
-    std::string team2[10];                     // 文本_team2type0~9
 
     // ---- 程序集变量 ----
-    bool classEnabled[10] = {};                // 集_识别类型_数组[1..10]
+    std::atomic<bool> classEnabled[10]{};                // 集_识别类型_数组[1..10]
     int  classColor[10]   = {};                // 集_识别类型_颜色_数组
     DrawBox boxes[99];                         // 二维画框_数组[99]
     int  boxCount = 99;                        // 集_数组成员数
     bool canDraw = false;                      // 集_可以画框
     int  moveDx = 0, moveDy = 0;               // 集_移动距离x/y
-    int  boxDx  = 0, boxDy  = 0;               // 集_画框距离x/y
+    std::atomic<int> boxDx{0}, boxDy{0};               // 集_画框距离x/y
     std::atomic<int> nearestDist{ 0 };         // 集_最近距离
-    double prioRatio = 0;                      // 集_优先锁定比例
-    long long lastDetectTime = 0;              // 集_上一次识别到时间
+    std::atomic<double> prioRatio{0};                      // 集_优先锁定比例
+    std::atomic<long long> lastDetectTime{0};              // 集_上一次识别到时间
 
     bool delayStarted = false;                 // 集_延时启动
     bool aimStarted   = false;                 // 集_自瞄开始
@@ -171,8 +150,8 @@ extern CRITICAL_SECTION g_frameLock;
 extern CONDITION_VARIABLE g_publishedFrameReady;
 extern std::vector<unsigned char> g_frame;
 extern long long g_frameSeq;                  // 全_图片序号
-extern long long g_lastFrameTime;             // 全_图片上一次接收时间
-extern long long g_nowMs;                     // 全_现在时间
+extern std::atomic<long long> g_lastFrameTime;             // 全_图片上一次接收时间
+extern std::atomic<long long> g_nowMs;                     // 全_现在时间
 
 extern CRITICAL_SECTION g_drawLock;           // L_画框线程许可区
 extern CRITICAL_SECTION g_moveLock;           // L_移动线程许可区
@@ -196,16 +175,22 @@ double    round2(double v);                    // 四舍五入(v, 2)
 int       truncToInt(double v);                // 取整() —— 向下取整 floor
 int       roundToInt(double v);                // 小数→整数 的隐式赋值转换：四舍五入
 int       randInt(int lo, int hi);             // L_运算_取随机数()
-bool      fileExists(const std::string& path); // L_文件_是否存在()
+bool      fileExists(const std::filesystem::path& path);
+// Legacy driver installer paths originate in Win32 A APIs. Application
+// resources use the Unicode filesystem::path overload above.
+inline bool fileExists(const std::string& path) {
+    const DWORD attributes = GetFileAttributesA(path.c_str());
+    return attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY);
+}
 std::string trimStr(const std::string& s);
 std::string ansiToUtf8(const std::string& s);
 std::string utf8ToAnsi(const std::string& s);
-std::string readFileAll(const std::string& path);
-bool        writeFileAll(const std::string& path, const std::string& data);
+std::string readFileAll(const std::filesystem::path& path);
+bool        writeFileAll(const std::filesystem::path& path, const std::string& data);
 
 // 精易模块 S_优化_Main / S_优化_Thread
-void optMain();                                // 进程级：HIGH 优先级 + 全核心 + LFH
-void optThread();                              // 线程级：TIME_CRITICAL + 关动态提升
+void optMain();                                // 进程级：HIGH 优先级 + LFH
+void optThread();                              // 线程级：NORMAL 优先级 + 关动态提升
 
 // 位置式 PID（移动方式 2），对齐凌哥 L_PID控制结构：积分累积 + 上次输出
 struct PidCtx { double integral = 0; double prevOut = 0; };
@@ -218,9 +203,9 @@ bool          sagaEnumDevices(std::string& out);
 bool          sagaEnumFormats(const char* dev, std::string& out);
 bool          sagaSetCapture(const char* dev, int w, int h, const char* fourcc,
                              int fps, int crop, std::string& out);
-int           sagaNcnnCreate(const char* param, const char* bin, int useGpu, int gpuIdx);
+int           sagaNcnnCreate(const wchar_t* param, const wchar_t* bin, int useGpu, int gpuIdx);
 int           sagaNcnnDetect(const unsigned char* d, int n, float conf, float nms, DetectObject* o);
-int           sagaOnnxCreate(const char* model, const char* labels, bool useGpu);
+int           sagaOnnxCreate(const wchar_t* model, const wchar_t* labels, bool useGpu);
 int           sagaOnnxDetect(const unsigned char* d, int n, float conf, float nms, DetectObject* o);
 
 // ============================================================================

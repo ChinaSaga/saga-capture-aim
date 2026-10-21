@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <thread>
 #pragma comment(lib, "ws2_32.lib")
+// This fixture checks process/socket teardown without a live input device.
+void boxStopKeyboard() {}
 
 int main(int argc, char** argv)
 {

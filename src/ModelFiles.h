@@ -7,6 +7,7 @@
 #include <utility>
 #include <string>
 #include <vector>
+#include "FilePaths.h"
 
 namespace model_files {
 inline std::wstring fromGbk(const std::string& value) {
@@ -59,10 +60,12 @@ inline std::vector<Model> catalog(const std::filesystem::path& directory) {
     struct Files { std::wstring param, bin, onnx, trt; };
     std::map<std::wstring, Files> files;
     std::error_code error;
-    std::filesystem::directory_iterator iterator(directory, error), end;
+    std::filesystem::directory_iterator iterator(file_paths::io(directory), error), end;
     for (; !error && iterator != end; iterator.increment(error)) {
         std::error_code statusError;
-        if (!iterator->is_regular_file(statusError) || statusError) continue;
+        const bool regular = iterator->is_regular_file(statusError);
+        if (statusError) throw std::filesystem::filesystem_error("Cannot inspect model file", iterator->path(), statusError);
+        if (!regular) continue;
         const auto path = iterator->path();
         const auto extension = lowercase(path.extension().wstring());
         const auto name = path.stem().wstring();
@@ -73,6 +76,7 @@ inline std::vector<Model> catalog(const std::filesystem::path& directory) {
         else if (extension == L".onnx") files[key].onnx = name;
         else if (extension == L".trt") files[key].trt = name;
     }
+    if (error) throw std::filesystem::filesystem_error("Cannot read model directory", directory, error);
     std::vector<Model> result;
     for (const auto& [key, entry] : files) {
         Model model;

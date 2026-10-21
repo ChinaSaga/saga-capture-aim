@@ -77,7 +77,7 @@ int buttonIndex(int key) {
     for (int i = 0; i < 5; ++i) if (keys[i] == key) return i;
     return -1;
 }
-std::string settingsPath() { return g.runDir + "\\CAT盒子.ini"; }
+std::filesystem::path settingsPath() { return g.runDir / L"CAT盒子.ini"; }
 void releaseInjected(const std::shared_ptr<CatSession>& old) {
     releaseRepeat(old);
     for (int i = 0; i < 5; ++i) if (injectedButtons & (1u << i)) {
@@ -209,12 +209,12 @@ LRESULT CALLBACK configProc(HWND h, UINT m, WPARAM w, LPARAM l) {
 void boxStart() {
     char ip[128]{}, port[128]{}, uuid[128]{};
     const auto path = settingsPath();
-    GetPrivateProfileStringA("CAT", "IP", "", ip, 128, path.c_str());
-    GetPrivateProfileStringA("CAT", "Port", "", port, 128, path.c_str());
-    GetPrivateProfileStringA("CAT", "UUID", "", uuid, 128, path.c_str());
+    file_paths::profileString("CAT", "IP", "", ip, 128, path.c_str());
+    file_paths::profileString("CAT", "Port", "", port, 128, path.c_str());
+    file_paths::profileString("CAT", "UUID", "", uuid, 128, path.c_str());
     {
         std::lock_guard<std::mutex> lock(settingsMutex);
-        settings = {ip, port, uuid, GetPrivateProfileIntA("CAT", "Enabled", 0, path.c_str()) != 0};
+        settings = {ip, port, uuid, file_paths::profileInt("CAT", "Enabled", 0, path.c_str()) != 0};
         settings.enabled = settings.enabled && validCatSettings(settings);
         catConfigured = settings.enabled;
     }
@@ -271,10 +271,10 @@ void boxConfigure(HWND owner) {
     SetActiveWindow(owner);
     if (!dialog.accepted) return;
     const auto path = settingsPath();
-    bool saved = WritePrivateProfileStringA("CAT", "IP", dialog.value.ip.c_str(), path.c_str()) != 0;
-    saved = (WritePrivateProfileStringA("CAT", "Port", dialog.value.port.c_str(), path.c_str()) != 0) && saved;
-    saved = (WritePrivateProfileStringA("CAT", "UUID", dialog.value.uuid.c_str(), path.c_str()) != 0) && saved;
-    saved = (WritePrivateProfileStringA("CAT", "Enabled", dialog.value.enabled ? "1" : "0", path.c_str()) != 0) && saved;
+    bool saved = file_paths::writeProfile("CAT", "IP", dialog.value.ip.c_str(), path.c_str()) != 0;
+    saved = (file_paths::writeProfile("CAT", "Port", dialog.value.port.c_str(), path.c_str()) != 0) && saved;
+    saved = (file_paths::writeProfile("CAT", "UUID", dialog.value.uuid.c_str(), path.c_str()) != 0) && saved;
+    saved = (file_paths::writeProfile("CAT", "Enabled", dialog.value.enabled ? "1" : "0", path.c_str()) != 0) && saved;
     if (!saved) MessageBoxA(owner, "参数将在本次运行生效，但无法保存到程序目录。", "CAT 配置", MB_OK | MB_ICONWARNING);
     { std::lock_guard<std::mutex> lock(settingsMutex); settings = dialog.value; ++settingsVersion; catConfigured = settings.enabled; }
 }

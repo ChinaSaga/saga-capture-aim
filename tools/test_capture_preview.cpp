@@ -6,6 +6,7 @@
 
 AppState g;
 CRITICAL_SECTION g_drawLock;
+CRITICAL_SECTION g_moveLock;
 namespace runtime_log { void write(const char*, ...) {} }
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "user32.lib")
@@ -13,7 +14,7 @@ namespace runtime_log { void write(const char*, ...) {} }
 
 // Unrelated application services must never run in this preview-only test.
 int roundToInt(double value) { return static_cast<int>(std::round(value)); }
-bool fileExists(const std::string&) { std::abort(); }
+bool fileExists(const std::filesystem::path&) { std::abort(); }
 std::string trimStr(const std::string&) { std::abort(); }
 std::string ansiToUtf8(const std::string&) { std::abort(); }
 std::string utf8ToAnsi(const std::string&) { std::abort(); }
@@ -60,6 +61,7 @@ struct StalledRender {
 int main() {
     try {
         InitializeCriticalSection(&g_drawLock);
+        InitializeCriticalSection(&g_moveLock);
         g.showImg = true;
         g_panelBrush = CreateSolidBrush(RGB(247,249,252));
         g_uiFont = g_uiFontBold = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));

@@ -1,3 +1,5 @@
+#include "EncodedImage.h"
+#include "FilePaths.h"
 #include "Inference.h"
 #include "TrtRuntime.h"
 #include "preprocessing.hpp"
@@ -272,19 +274,16 @@ std::string lastError;
 }
 TrtTiming trtLastTiming() { return detector ? detector->timing : TrtTiming{}; }
 namespace saga {
-int trt_create(const char* path) { detector.reset(); try { auto value = std::make_unique<Detector>(); value->load(trt::widePath(path)); detector = std::move(value); lastError.clear(); return 0; } catch (const std::exception& e) { lastError = e.what(); return -1; } }
+int trt_create(const char* path) { return trt_create(file_paths::wide(path ? path : "", CP_ACP).c_str()); }
+int trt_create(const wchar_t* path) { detector.reset(); try { auto value = std::make_unique<Detector>(); value->load(file_paths::io(path)); detector = std::move(value); lastError.clear(); return 0; } catch (const std::exception& e) { lastError = e.what(); return -1; } }
 void trt_destroy() { detector.reset(); }
 const char* trt_last_error() { return lastError.c_str(); }
 int trt_detect(const unsigned char* data, int size, float conf, float iou, DetectObject* out) {
     if (!data || size < 1 || !out) { lastError = "Invalid TensorRT encoded image or result buffer"; return -1; }
     try { cv::Mat image;
-        if (size >= 54 && data[0] == 'B' && data[1] == 'M') {
-            int off, w, h, compression; short bpp; memcpy(&off, data+10, 4); memcpy(&w, data+18, 4); memcpy(&h, data+22, 4); memcpy(&bpp, data+28, 2); memcpy(&compression, data+30, 4);
-            if (off >= 54 && w > 0 && w <= 32768 && h < 0 && h >= -32768 && bpp == 24 && compression == 0) {
-                const size_t stride = (size_t(w) * 3 + 3) & ~size_t(3);
-                if (size_t(off) + stride * size_t(-h) <= size_t(size)) image = cv::Mat(-h, w, CV_8UC3, const_cast<unsigned char*>(data + off), stride);
-            }
-        }
+        encoded_image::BgrView view;
+        if (encoded_image::topDownBgr(data, static_cast<size_t>(size), view))
+            image = cv::Mat(view.height, view.width, CV_8UC3, const_cast<unsigned char*>(data + view.offset), view.stride);
         if (image.empty()) image = cv::imdecode(cv::Mat(1, size, CV_8UC1, const_cast<unsigned char*>(data)), cv::IMREAD_COLOR);
         if (image.empty()) { lastError = "Cannot decode TensorRT input image"; return -2; }
         return trtDetectBgr(image.data, image.cols, image.rows, image.step, conf, iou, out);

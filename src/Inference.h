@@ -22,6 +22,7 @@ namespace saga
 
     // ---- 模拟轨迹神经网络（Mouse.cpp）----
     int  mc_create(const char* path);
+    int  mc_create(const wchar_t* path);
     void mc_calc(float x, float y, float* out);
     void mc_destroy();
 
@@ -36,6 +37,7 @@ namespace saga
     // ---- NCNN 推理（NCNN.cpp）----
     int         ncnn_create(const char* param_path, const char* bin_path,
                             int use_GPU, int index_GPU);
+    int         ncnn_create(const wchar_t* param_path, const wchar_t* bin_path, int use_GPU, int index_GPU);
     int         ncnn_detect(const unsigned char* bmp_data, int bmp_size,
                             float conf_thres, float nms_thres, DetectObject* out_objects);
     void        ncnn_destroy();
@@ -43,6 +45,7 @@ namespace saga
 
     // ---- ONNXRuntime(DirectML) 推理（ONNX.cpp）----
     int         onnx_create(const char* model_path, const char* labelsPath, bool useGPU);
+    int         onnx_create(const wchar_t* model_path, const wchar_t* labelsPath, bool useGPU);
     int         onnx_detect(const unsigned char* bmp_data, int bmp_size,
                             float conf_thres, float nms_thres, DetectObject* out_objects);
     void        onnx_destroy();
@@ -50,6 +53,7 @@ namespace saga
 
     // ---- NVIDIA TensorRT inference (TensorRT.cpp), optional native runtime ----
     int         trt_create(const char* model_path);
+    int         trt_create(const wchar_t* model_path);
     int         trt_detect(const unsigned char* bmp_data, int bmp_size,
                            float conf_thres, float nms_thres, DetectObject* out_objects);
     void        trt_destroy();

@@ -1,9 +1,11 @@
+#include "EncodedImage.h"
 #include "NcnnPostprocess.h"
 #include "TensorPixels.h"
 #include "Inference.h"
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include "FilePaths.h"
 #include <opencv2/opencv.hpp>
 #include <immintrin.h>
 #include "net.h"
@@ -36,9 +38,9 @@ static int g_last_nh = -1;
 // ══════════════════════════════════════════
 // 解析输入尺寸
 // ══════════════════════════════════════════
-static void parse_input_size(const char* param_path)
+static void parse_input_size(const wchar_t* param_path)
 {
-    std::ifstream f(param_path);
+    std::ifstream f(file_paths::io(param_path));
     if (!f.is_open()) return;
     std::string line;
     while (std::getline(f, line))
@@ -49,6 +51,7 @@ static void parse_input_size(const char* param_path)
         auto pos = line.find("0=");
         if (pos == std::string::npos) continue;
         int anchor_total = std::stoi(line.substr(pos + 2));
+        if (anchor_total <= 0 || anchor_total > 1376256) throw std::runtime_error("Invalid NCNN input dimensions");
         imgWH = static_cast<int>(std::sqrt(anchor_total * 1024.0 / 21.0));
         break;
     }
@@ -59,10 +62,14 @@ static void parse_input_size(const char* param_path)
 // ══════════════════════════════════════════
 namespace saga
 {
+    int ncnn_create(const char* param, const char* bin, int gpu, int index) {
+        return ncnn_create(file_paths::wide(param ? param : "", CP_ACP).c_str(), file_paths::wide(bin ? bin : "", CP_ACP).c_str(), gpu, index);
+    }
     
-        int ncnn_create(const char* param_path, const char* bin_path,
+        int ncnn_create(const wchar_t* param_path, const wchar_t* bin_path,
             int use_GPU, int index_GPU)
     {
+        try {
         // 清理旧实例
         if (g_net) { delete g_net; g_net = nullptr; }
         if (g_gpu_inited)
@@ -95,15 +102,17 @@ namespace saga
         g_net->opt.use_fp16_storage = true;
         g_net->opt.use_fp16_arithmetic = true;
 
-        if (g_net->load_param(param_path) != 0)
+        std::unique_ptr<FILE, decltype(&fclose)> param(file_paths::open(param_path, L"rb"), fclose);
+        if (!param || g_net->load_param(param.get()) != 0)
         {
-            g_last_error = "param load failed: " + std::string(param_path);
+            g_last_error = "param load failed: " + file_paths::narrow(param_path, CP_UTF8);
             delete g_net; g_net = nullptr;
             return -1;
         }
-        if (g_net->load_model(bin_path) != 0)
+        std::unique_ptr<FILE, decltype(&fclose)> bin(file_paths::open(bin_path, L"rb"), fclose);
+        if (!bin || g_net->load_model(bin.get()) != 0)
         {
-            g_last_error = "bin load failed: " + std::string(bin_path);
+            g_last_error = "bin load failed: " + file_paths::narrow(bin_path, CP_UTF8);
             delete g_net; g_net = nullptr;
             return -2;
         }
@@ -129,6 +138,11 @@ namespace saga
         parse_input_size(param_path);
         g_last_error = "";
         return 0;
+        } catch (const std::exception& error) {
+            g_last_error = error.what();
+            ncnn_destroy();
+            return -1;
+        }
     }
 
     
@@ -139,25 +153,12 @@ namespace saga
         if (!g_net || !bmp_data || bmp_size <= 0 || !out_objects) return -1;
 
         // ── 1. 解码: 24位BGR top-down BMP 直接包像素, 零拷贝 ----
+        try {
         cv::Mat img;
-        if (bmp_size >= 54 && bmp_data[0] == 'B' && bmp_data[1] == 'M')
-        {
-            const int biSize = *(const int*)(bmp_data + 14);
-            const int offBits = *(const int*)(bmp_data + 10);
-            const int w0 = *(const int*)(bmp_data + 18);
-            const int h0 = *(const int*)(bmp_data + 22);   // 负 = top-down
-            const int bpp = *(const short*)(bmp_data + 28);
-            const int comp = *(const int*)(bmp_data + 30);
-            const int st = (w0 * 3 + 3) & ~3;
-
-            if (biSize >= 40 && offBits >= 54 && w0 > 0 && h0 < 0 &&
-                bpp == 24 && comp == 0 &&
-                (size_t)offBits + (size_t)st * (-h0) <= (size_t)bmp_size)
-            {
-                img = cv::Mat(-h0, w0, CV_8UC3,
-                    (void*)(bmp_data + offBits), st);
-            }
-        }
+        encoded_image::BgrView view;
+        if (encoded_image::topDownBgr(bmp_data, static_cast<size_t>(bmp_size), view))
+            img = cv::Mat(view.height, view.width, CV_8UC3,
+                const_cast<unsigned char*>(bmp_data + view.offset), view.stride);
         if (img.empty())
         {
             // 兜底: 其他格式走通用解码
@@ -167,7 +168,10 @@ namespace saga
         }
 
         return ncnnDetectBgr(img.data, img.cols, img.rows, img.step, conf_thres, nms_thres, out_objects);
-
+        } catch (const std::exception& error) {
+            g_last_error = error.what();
+            return -1;
+        }
     }
 
     
@@ -180,6 +184,8 @@ namespace saga
             g_gpu_inited = false;
         }
         g_postprocess.reset();
+        g_input.release();
+        g_letterbox.release();
         g_last_nw = -1;
         g_last_nh = -1;
     }
@@ -193,6 +199,11 @@ namespace saga
 } // namespace saga
 
 int ncnnDetectBgr(const unsigned char* pixels, int width, int height, size_t stride, float conf_thres, float nms_thres, DetectObject* out_objects) {
+    if (!g_net || !pixels || !out_objects || width <= 0 || height <= 0 || stride < size_t(width) * 3) {
+        g_last_error = "Model is not ready or input frame is invalid";
+        return -1;
+    }
+    try {
     cv::Mat img(height, width, CV_8UC3, const_cast<unsigned char*>(pixels), stride);
         const int img_w = img.cols;
         const int img_h = img.rows;
@@ -229,10 +240,14 @@ int ncnnDetectBgr(const unsigned char* pixels, int width, int height, size_t str
             static_cast<float*>(g_input.channel(2)) + offset, imgWH);
 
         ncnn::Extractor ex = g_net->create_extractor();
-        ex.input(g_inputIndex, g_input);
+        if (ex.input(g_inputIndex, g_input) != 0) return -3;
         ncnn::Mat out;
         if (ex.extract(g_outputIndex, out) != 0) return -3;
 
         return g_postprocess.run(out, scale, pad_x, pad_y, img_w, img_h,
             conf_thres, nms_thres, out_objects);
+    } catch (const std::exception& error) {
+        g_last_error = error.what();
+        return -1;
+    }
 }

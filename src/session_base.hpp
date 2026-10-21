@@ -1,4 +1,5 @@
 #pragma once
+#include "FilePaths.h"
 
 // ============================================================================
 // YOLO ONNX Session Base
@@ -37,7 +38,7 @@ public:
     /// @param modelPath Path to the ONNX model file
     /// @param useGPU Whether to use GPU (CUDA or DirectML) for inference
     /// @param numThreads Number of intra-op threads (0 = auto)
-    OrtSessionBase(const std::string& modelPath, bool useGPU = false, int numThreads = 0)
+    OrtSessionBase(const std::filesystem::path& modelPath, bool useGPU = false, int numThreads = 0)
         : env_((requireCompatibleOrtRuntime(OrtGetApiBase()), ORT_LOGGING_LEVEL_WARNING), "YOLOS") {
         
         initSession(modelPath, useGPU, numThreads);
@@ -139,7 +140,7 @@ protected:
     }
 
 private:
-    void initSession(const std::string& modelPath, bool useGPU, int numThreads) {
+    void initSession(const std::filesystem::path& modelPath, bool useGPU, int numThreads) {
         sessionOptions_ = Ort::SessionOptions();
 
         sessionOptions_.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
@@ -192,11 +193,7 @@ private:
 
         // Load model
 #ifdef _WIN32
-        const int pathLength = MultiByteToWideChar(CP_ACP, 0, modelPath.c_str(), -1, nullptr, 0);
-        if (pathLength <= 0) throw std::runtime_error("Invalid model path");
-        std::wstring wModelPath(pathLength, L'\0');
-        MultiByteToWideChar(CP_ACP, 0, modelPath.c_str(), -1, wModelPath.data(), pathLength);
-        session_ = Ort::Session(env_, wModelPath.c_str(), sessionOptions_);
+        session_ = Ort::Session(env_, file_paths::io(modelPath).c_str(), sessionOptions_);
 #else
         session_ = Ort::Session(env_, modelPath.c_str(), sessionOptions_);
 #endif
@@ -204,6 +201,8 @@ private:
         // Get node counts
         numInputNodes_ = session_.GetInputCount();
         numOutputNodes_ = session_.GetOutputCount();
+        if (numInputNodes_ != 1 || numOutputNodes_ == 0)
+            throw std::runtime_error("Detection requires exactly one image input and at least one output.");
 
         Ort::AllocatorWithDefaultOptions allocator;
 
@@ -238,7 +237,18 @@ private:
 
         // Get input shape
         Ort::TypeInfo inputTypeInfo = session_.GetInputTypeInfo(0);
-        std::vector<int64_t> inputTensorShape = inputTypeInfo.GetTensorTypeAndShapeInfo().GetShape();
+        if (inputTypeInfo.GetONNXType() != ONNX_TYPE_TENSOR)
+            throw std::runtime_error("Detection input must be a float32 image tensor.");
+        const auto inputInfo = inputTypeInfo.GetTensorTypeAndShapeInfo();
+        std::vector<int64_t> inputTensorShape = inputInfo.GetShape();
+        if (inputInfo.GetElementType() != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT ||
+            inputTensorShape.size() != 4 ||
+            (inputTensorShape[0] != 1 && inputTensorShape[0] != -1) ||
+            (inputTensorShape[1] != 3 && inputTensorShape[1] != -1) ||
+            inputTensorShape[2] == 0 || inputTensorShape[3] == 0 ||
+            inputTensorShape[2] < -1 || inputTensorShape[3] < -1 ||
+            inputTensorShape[2] > 32768 || inputTensorShape[3] > 32768)
+            throw std::runtime_error("Detection expects float32 [1,3,H,W] input (dynamic dimensions are allowed).");
 
         if (inputTensorShape.size() >= 4) {
             isDynamicBatchSize_ = (inputTensorShape[0] == -1);
@@ -252,7 +262,7 @@ private:
             throw std::runtime_error("Invalid input tensor shape. Expected 4D tensor [N, C, H, W].");
         }
 
-        std::cout << "[INFO] Model loaded: " << modelPath << std::endl;
+        std::cout << "[INFO] Model loaded: " << file_paths::narrow(modelPath.wstring(), CP_UTF8) << std::endl;
         std::cout << "[INFO] Input shape: " << inputShape_.width << "x" << inputShape_.height
                   << (isDynamicInputShape_ ? " (dynamic)" : "") << std::endl;
         std::cout << "[INFO] Inputs: " << numInputNodes_ << ", Outputs: " << numOutputNodes_ << std::endl;

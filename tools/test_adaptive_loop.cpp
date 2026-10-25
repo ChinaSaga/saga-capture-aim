@@ -26,6 +26,7 @@ bool liveFrame=false;
 std::vector<int> observed;
 std::vector<int> warmed;
 int failWarmSize=0;
+bool fixedModelFixture=false;
 struct FrameSpec {
     int distance;
     bool key=true, target=true;
@@ -75,8 +76,8 @@ int detectPixels(const unsigned char* pixels, int width, DetectObject* out) {
 int ncnnDetectBgr(const unsigned char* pixels, int width, int, size_t, float, float, DetectObject* out) { return detectPixels(pixels,width,out); }
 int onnxDetectBgr(const unsigned char* pixels, int width, int, size_t, float, float, DetectObject* out) { return detectPixels(pixels,width,out); }
 int trtDetectBgr(const unsigned char* pixels, int width, int, size_t, float, float, DetectObject* out) { return detectPixels(pixels,width,out); }
-int sagaNcnnCreate(const wchar_t*, const wchar_t*, int, int) { std::abort(); }
-int sagaOnnxCreate(const wchar_t*, const wchar_t*, bool) { std::abort(); }
+int sagaNcnnCreate(const wchar_t*, const wchar_t*, int, int) { assert(fixedModelFixture);selected=g.manualCropSize;return 0; }
+int sagaOnnxCreate(const wchar_t*, const wchar_t*, bool) { assert(fixedModelFixture);selected=g.manualCropSize;return 0; }
 int sagaNcnnDetect(const unsigned char*, int, float, float, DetectObject*) { std::abort(); }
 int sagaOnnxDetect(const unsigned char*, int, float, float, DetectObject*) { std::abort(); }
 TrtTiming trtLastTiming() { std::abort(); }
@@ -87,7 +88,7 @@ int onnx_select_cached(const wchar_t*, const wchar_t*, bool, int size) {selected
 int trt_select_cached(const wchar_t*, int size) {selected=size;return 0;}
 void ncnn_destroy() {} void onnx_destroy() {} void trt_destroy() {}
 const char* ncnn_last_error() { return "fixture failure"; } const char* onnx_last_error() { return "fixture failure"; } const char* trt_last_error() { return "fixture failure"; }
-int trt_create(const wchar_t*) { std::abort(); }
+int trt_create(const wchar_t*) { assert(fixedModelFixture);selected=g.manualCropSize;return 0; }
 int trt_detect(const unsigned char*, int, float, float, DetectObject*) { std::abort(); }
 }
 long long nowMs() { return 1000; }
@@ -219,6 +220,17 @@ int main() {
             expected={512,416,416,416};
             for(int engine:{1,2,3}) run(engine);
         }
+    }
+    fixedModelFixture=true;
+    for(auto ext:{L".onnx",L".param",L".bin",L".trt"}) std::ofstream(g.modelDirectory()/(std::wstring(L"fixed")+ext)).put('x');
+    g.modelName="fixed"; g.manualCropSize=416;
+    scenario={{0,false},{0,true,true,900,900},{0,true,false},{0,false}};
+    for(int engine:{1,2,3}) {
+        crop=512;g.imgSize=512;g.adaptiveCapture=true;
+        frameIndex=0;observed.clear();warmed.clear();g.engine=engine;g.aimPhysicalDown=false;g.running=true;
+        aimThread(engine);
+        assert(observed==std::vector<int>(scenario.size(),416) && !g.adaptiveCapture);
+        assert(g.manualCropSize==416 && warmed.empty() && sent==0);
     }
     std::filesystem::remove_all(dir);
     std::cout<<"PASS production adaptive loop: all engines, target sizes, clipped targets, cached stages, shrink confirmation, lost/released recovery, matched model/frame, no device I/O\n";

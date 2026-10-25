@@ -18,6 +18,7 @@ $tests = @(
     @{ Name='test_wch_hardware_id' }, @{ Name='test_box_controller' },
     @{ Name='test_tensorrt_api' }, @{ Name='test_trt_converter' }, @{ Name='test_onnx_fp16' },
     @{ Name='test_ort_runtime_compatibility' }, @{ Name='test_app_exit' },
+    @{ Name='test_startup_session' }, @{ Name='test_process_watchdog' },
     @{ Name='test_runtime_log'; Sources=@('src/RuntimeLog.cpp') }
 )
 $started = !$StartAt

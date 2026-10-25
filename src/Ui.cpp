@@ -1,3 +1,4 @@
+#include "StartupSession.h"
 #include "App.h"
 #include "BoxController.h"
 #include "RuntimeLog.h"
@@ -113,6 +114,7 @@ static LRESULT CALLBACK controlProc(HWND h, UINT m, WPARAM w, LPARAM l,
 static HWND   g_cbDevice = nullptr;
 static HWND   g_cbFormat = nullptr;
 static HWND   g_cbSize = nullptr;
+static HWND   g_currentCropLabel = nullptr;
 static HWND   g_chkRefresh = nullptr;
 
 
@@ -557,17 +559,30 @@ static std::string fitTextWidth(HDC dc, const std::string& text, int maxWidth)
     return std::string();
 }
 
-// 把下拉框的显示退回「真正生效的识别范围」（g.imgSize）——取消时用。
-// 双机模式下 g.imgSize 可能是收到的画面宽度（不是 16 个档位之一），这时不动它。
+// 下拉框只保存单模型手动范围，自适应实时尺寸单独显示。
 static void sizeComboShowApplied()
 {
-    const int applied = g.imgSize;
+    const int applied = g.manualCropSize;
     if (applied >= 160 && applied <= 640 && (applied - 160) % 32 == 0) {
         const int index = (applied - 160) / 32;
-        // The 500 ms UI timer reads an atomic size; unchanged values never
-        // rewrite the combo or repaint it. No UI calls on the inference thread.
+        // Cancel/failed changes restore the manual setting without redundant writes.
         if (SendMessageA(g_cbSize, CB_GETCURSEL, 0, 0) != index)
             SendMessageA(g_cbSize, CB_SETCURSEL, index, 0);
+    }
+}
+
+static void currentCaptureShow()
+{
+    if (g_currentCropLabel) {
+        const int size = g.imgSize.load();
+        char label[96]{}, previous[96]{};
+        snprintf(label, sizeof(label), "当前截图范围：%d × %d 像素", size, size);
+        GetWindowTextA(g_currentCropLabel, previous, sizeof(previous));
+        if (strcmp(label, previous) != 0) SetWindowTextA(g_currentCropLabel, label);
+    }
+    if (g_cbSize && !captureTaskBusy) {
+        const BOOL enabled = !g.adaptiveCapture.load();
+        if (IsWindowEnabled(g_cbSize) != enabled) EnableWindow(g_cbSize, enabled);
     }
 }
 
@@ -578,7 +593,6 @@ static void sizeComboCommit()
     if (captureTaskBusy) return;
     if (g.adaptiveCapture) {
         sizeComboShowApplied();
-        MessageBoxA(g_hwnd, "当前模型组按目标距离和大小自动选择已有档位，最大档位为默认搜索范围。此处显示实时范围，无需手动设置。", "自适应截图", MB_OK | MB_ICONINFORMATION);
         return;
     }
     const int sel = (int)SendMessageA(g_cbSize, CB_GETCURSEL, 0, 0);
@@ -769,12 +783,13 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         for (int i = 0; i < 5; ++i) EnableWindow(GetDlgItem(h, captureControls[i]), captureControlsEnabled[i]);
         SetWindowTextA(GetDlgItem(h, 101), "开始采集");
         if (l) sizeComboShowApplied();
+        currentCaptureShow();
         if (!w) MessageBoxA(h, "采集初始化失败，请查看程序目录的运行日志.txt 中 [capture] 记录。", "采集提示", MB_OK | MB_ICONWARNING);
         return 0;
 
     case WM_TIMER:
         if (w == 1) {
-            if (g.adaptiveCapture && !captureTaskBusy) sizeComboShowApplied();
+            currentCaptureShow();
             if (captureTaskBusy && !captureTaskWarned && GetTickCount64() - captureTaskStarted >= 15000) {
                 captureTaskWarned = true;
                 SetWindowTextA(GetDlgItem(h, 101), "等待采集驱动…");
@@ -870,7 +885,6 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         const std::string hardware = std::string("本地推理 · ") + boxStatus();
         textAt(dc, hardware.c_str(), {696,26,1056,56}, g_uiFont, RGB(101,118,142),
             DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-        textAt(dc, "识别范围为中心裁剪尺寸", {696,365,1056,391}, g_uiFont, RGB(119,132,153));
         textAt(dc, "数据：EXE / 人手数据 · 训练后自动生效", {696,738,1056,760}, g_uiFont, RGB(119,132,153));
         textAt(dc, "截图：EXE / 模型名 / 时间戳.jpg · JPEG 95%", {696,763,1056,785}, g_uiFont, RGB(119,132,153));
         char status[192];
@@ -880,6 +894,10 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0;
     }
 
+    case WM_ENDSESSION:
+        if (w) exitApplicationNow();
+        return 0;
+
     case WM_CLOSE:
     {
         // 圣人自用_配置保存：按原版格式写 [默认] 段（键名=控件名，组合框存选中项索引），
@@ -887,7 +905,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         const auto ini = g.runDir / L"配置保存.ini";
         int selDev = (int)SendMessageA(g_cbDevice, CB_GETCURSEL, 0, 0);
         int selFmt = (int)SendMessageA(g_cbFormat, CB_GETCURSEL, 0, 0);
-        int selSz  = (int)SendMessageA(g_cbSize,   CB_GETCURSEL, 0, 0);
+        int selSz  = (g.manualCropSize.load() - 160) / 32;
         file_paths::writeProfile("默认", "组合框_设备名",   std::to_string(selDev).c_str(), ini.c_str());
         file_paths::writeProfile("默认", "组合框_视频码率", std::to_string(selFmt).c_str(), ini.c_str());
         if (selSz >= 0)
@@ -900,7 +918,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         GetWindowTextA(g_cbFormat, fmt, sizeof(fmt));
         file_paths::writeProfile("窗口", "设备", dev, ini.c_str());
         file_paths::writeProfile("窗口", "格式", fmt, ini.c_str());
-        file_paths::writeProfile("窗口", "大小", std::to_string(g.imgSize).c_str(), ini.c_str());
+        file_paths::writeProfile("窗口", "大小", std::to_string(g.manualCropSize.load()).c_str(), ini.c_str());
         file_paths::writeProfile("窗口", "刷新", g.showImg.load() ? "1" : "0", ini.c_str());
 
         exitApplicationNow();
@@ -967,6 +985,8 @@ bool uiCreate(HINSTANCE hInst)
     g_cbDevice = combo(200, 140);
     g_cbFormat = combo(201, 228);
     g_cbSize = combo(202, 316);
+    g_currentCropLabel = label("当前截图范围：--", 364);
+    SendMessageA(g_currentCropLabel, WM_SETFONT, (WPARAM)g_uiFont, TRUE);
     const auto button = [&](int id, const char* value, int x, int y, int width = 174) {
         HWND control = CreateWindowA("BUTTON", value, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
             x, y, width, 44, h, (HMENU)(INT_PTR)id, hInst, nullptr);
@@ -1043,6 +1063,8 @@ bool uiCreate(HINSTANCE hInst)
         g.showImg = (rf != 0);
     }
     CheckDlgButton(h, 300, g.showImg.load() ? BST_CHECKED : BST_UNCHECKED);
+    g.manualCropSize = g.imgSize.load();
+    currentCaptureShow();
     ShowWindow(h, SW_SHOW);
     UpdateWindow(h);
 
@@ -1112,13 +1134,16 @@ HWND uiGetHwnd()
 void uiSetShowImg(bool v)
 {
     g.showImg = v;
+    if (!startup_session::savePreview(g.runDir / L"配置保存.ini", v))
+        runtime_log::write("[ui] 无法保存实时显示状态，错误=%lu", GetLastError());
     if (g_hwnd) PostMessageA(g_hwnd, kSyncPreview, 0, 0);
 }
 
 void uiSetComboSizeIndex(int idx)
 {
-    if (idx < 0 || idx > 15 || !g_cbSize) return;
-    SendMessageA(g_cbSize, CB_SETCURSEL, idx, 0);
+    if (idx < 0 || idx > 15) return;
+    g.manualCropSize = idx * 32 + 160;
+    if (g_hwnd) PostMessageA(g_hwnd, kSyncSizeCombo, 0, 0);
 }
 
 // ============================================================================
@@ -1212,28 +1237,20 @@ bool uiInputBox(const char* prompt, const char* title, std::string& text)
     return g_inOk;
 }
 
-// ============================================================================
-//  _启动子程序 的命令行分支
-//  无命令行参数 → 直接打开主界面；本地默认地址为 127.0.0.1
-//  有命令行参数 → 取消实时刷新，并用 监控双机.ini 的参数自动开始采集（双机模式）
-// ============================================================================
-void uiStartupCommandLine()
+// Restore only a previously successful capture; no command-line-dependent UI state.
+void uiRestoreCapture()
 {
-    int n = 0;
-    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &n);
-    int argc = (argv && n > 0) ? n - 1 : 0;      // 取命令行 不包含程序自身路径
-    if (argv) LocalFree(argv);
-
-    if (argc == 0)
-    {
-        uiSetShowImg(true);
+    const auto capture = startup_session::load(g.runDir / L"配置保存.ini");
+    if (!capture.valid()) return;
+    const auto format = std::to_string(capture.width) + "x" + std::to_string(capture.height) + "@" +
+        std::to_string(capture.fps) + "@" + capture.codec;
+    for (const auto& item : {std::pair<HWND,std::string>{g_cbDevice,capture.device}, {g_cbFormat,format}}) {
+        SendMessageA(item.first, CB_RESETCONTENT, 0, 0);
+        SendMessageA(item.first, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(item.second.c_str()));
+        SendMessageA(item.first, CB_SETCURSEL, 0, 0);
     }
-    else
-    {
-        uiSetShowImg(false);
-        // Select capture mode before the main thread decides whether to start
-        // a UDP input worker; background initialization may not have finished.
-        g.noConvert = true;
-        queueCaptureTask(g_hwnd, [] { return startCapture("", 0, 0, "", 0); });
-    }
+    g.noConvert = true;
+    queueCaptureTask(g_hwnd, [capture] {
+        return startCapture(capture.device.c_str(), capture.width, capture.height, capture.codec.c_str(), capture.fps);
+    });
 }

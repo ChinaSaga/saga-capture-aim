@@ -411,6 +411,18 @@ void aimThread(int engineWanted)
         // previously marked a failed load as loaded and could use a null object.
         if (!modelReady) { sleepMs(50); continue; }
 
+        if (!modelGroup && directCapture && g.imgSize != g.manualCropSize) {
+            std::lock_guard<std::mutex> selection(g.modelMutex);
+            if (g.modelName != req || g.engine != engineWanted || g.inferenceEpoch != inferenceEpoch) continue;
+            const int fixedSize = g.manualCropSize.load();
+            if (!captureSetCrop(fixedSize)) { sleepMs(2); continue; }
+            g.imgSize = fixedSize;
+            clearInferenceResult();
+            lockMem = {}; pidX = {}; pidY = {};
+            inferenceEpoch = ++g.inferenceEpoch;
+            lastInferenceEpoch = inferenceEpoch;
+        }
+
         if (modelGroup) {
             if (!g.aimPhysicalDown || (!directCapture && nowMs() - inputFrameTime > 125)) {
                 requestedSize = searchSize;
@@ -441,9 +453,10 @@ void aimThread(int engineWanted)
             captureFrame = {};
             continue;
         }
-        if (directCapture && modelGroup && (captureFrame.width != activeSize || captureFrame.height != activeSize)) {
+        const int expectedCrop = modelGroup ? activeSize : g.manualCropSize.load();
+        if (directCapture && (captureFrame.width != expectedCrop || captureFrame.height != expectedCrop)) {
             captureFrame = {};
-            captureSetCrop(activeSize);
+            captureSetCrop(expectedCrop);
             continue;
         }
         const int frameSize = modelGroup ? activeSize : directCapture ? captureFrame.width : g.imgSize.load();

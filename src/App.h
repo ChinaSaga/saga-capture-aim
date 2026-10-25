@@ -88,6 +88,7 @@ struct AppState
 
     // ---- 图片 ----
     std::atomic<int>   imgSize{320};                        // 全_图片宽高
+    std::atomic<int>   manualCropSize{320};                 // 单模型手动范围，不随自适应切换
     std::atomic<bool> adaptiveCapture{false};
     std::atomic<bool> noConvert{false};        // 全_图片无需转换（后台采集初始化会写入）
     std::atomic<bool> showImg{ false };        // 全_是否显示图片
@@ -243,7 +244,7 @@ void frameThreadRender();       // 线程_死循环转换图片
 void frameThreadShotSave();     // 线程_截图保存
 void frameThreadF1();           // 线程_截图显示
 
-// 接口_开始采集：dev/codec 为空时从 监控双机.ini 读全部参数
+// 接口_开始采集：使用明确的设备和格式参数，成功后保存启动恢复状态。
 bool startCapture(const char* dev, int w, int h, const char* codec, int fps);
 
 // 组合框_视频大小：切换中心识别范围（采集中也立即生效）
@@ -285,7 +286,7 @@ HWND uiGetHwnd();
 void uiSetShowImg(bool v);                     // 同步 选择框_实时刷新
 void uiSetComboSizeIndex(int idx);             // 同步 组合框_视频大小
 bool uiInputBox(const char* prompt, const char* title, std::string& text);
-void uiStartupCommandLine();                   // _启动子程序 的命令行分支
+void uiRestoreCapture();                       // 恢复上次成功采集的设备和格式
 void canvasDraw(const std::vector<unsigned char>& frame);   // 画板绘制
 void soundInit();
 void soundPlayCamp(int camp);

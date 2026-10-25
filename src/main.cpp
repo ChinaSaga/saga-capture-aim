@@ -46,10 +46,13 @@ static void LOG(const char* format, Args... arguments)
 int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
 {
     g_startTick = GetTickCount64();
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
     // Native pixel rendering prevents blurry bitmap scaling on high-DPI displays.
     SetProcessDPIAware();
     int toolResult = 0;
+    if (process_watchdog::commandLine(toolResult)) return toolResult;
     if (runHumanTrajectoryCommandLine(hInst, toolResult)) return toolResult;
+    const bool watchdogReady = process_watchdog::start();
     // 易语言的随机数命令会在运行期初始化；C 运行库默认种子固定，必须显式播种。
     srand((unsigned)(GetTickCount64() ^ (unsigned long long)GetCurrentProcessId()));
 
@@ -63,6 +66,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
     }
 
     runtime_log::initialize();
+    LOG("[watchdog] 崩溃自动重启 %s", watchdogReady ? "已启用" : "启动失败");
     LOG("[crash] 自动崩溃记录 %s（EXE目录/崩溃报告）", initializeCrashDiagnostics() ? "已启用" : "初始化失败");
     runtime_log::writeWide(L"[01] runDir=" + g.runDir.wstring());
     LOG("[build] CH343 async/skip-absent v4; main-close/IP-reprompt/Esc-ignore v5; %s %s", __DATE__, __TIME__);
@@ -146,6 +150,10 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
     LOG("[07] 准备创建窗口");
     if (!uiCreate(hInst)) { LOG("[ER] uiCreate 失败"); return 0; }
     LOG("[08] 窗口创建完成");
+    configApplyStartupDefaults();
+    configSyncAll(true);
+    LOG("[09] configSyncAll 完成, port=%d", g.localPort);
+    uiRestoreCapture();
     // Driver installation and serial handshaking must never delay the window.
     // The serial API publishes its connection atomically; until ready, input
     // and motion calls safely return without touching an unfinished connection.
@@ -156,18 +164,6 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
         MessageBoxA(nullptr, "尚无可用的人手轨迹模型。\n请点击“点我开始记录人手数据”，记录后点击“点我开始训练人手模型”。\n训练成功后自动使用新模型，无需重启程序。",
             "人手轨迹", MB_OK | MB_SETFOREGROUND);
     soundInit();
-
-    // ---------------- 命令行分支（原版 _启动子程序 里的 取命令行 判断）----------------
-    // 无参数 → 直接显示画面；有参数 → 隐藏画面 + 用 监控双机.ini 自动开始采集
-    uiStartupCommandLine();
-    LOG("[08b] 命令行分支完成: ip=%s showImg=%d", g.hostIp.c_str(), (int)g.showImg.load());
-
-    // ---------------- 变量对应 ----------------
-    // 对齐原版「接口_初始化默认设置」：启动时本地 HTTP 端口固定为 8888，
-    // 同时把配置哈希表中的旧值覆盖掉，再执行变量同步与保存。
-    configApplyStartupDefaults();
-    configSyncAll(true);
-    LOG("[09] configSyncAll 完成, port=%d", g.localPort);
 
     // ---------------- HTTP ----------------
     std::thread(httpServerThread).detach();

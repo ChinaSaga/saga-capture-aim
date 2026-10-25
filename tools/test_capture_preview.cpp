@@ -24,7 +24,12 @@ void makcuMove(float, float) { std::abort(); }
 bool trajReady() { std::abort(); }
 bool trajReloadIfChanged() { std::abort(); }
 void trajMove10(float, float) { std::abort(); }
-bool startCapture(const char*, int, int, const char*, int) { std::abort(); }
+static std::atomic<int> restoredCaptures{0};
+bool startCapture(const char* device, int width, int height, const char* codec, int fps) {
+    if (std::string(device)!="fixture-device" || width!=1920 || height!=1080 ||
+        std::string(codec)!="NV12" || fps!=240) std::abort();
+    ++restoredCaptures;return true;
+}
 bool applyCropSize(int) { std::abort(); }
 void boxStopKeyboard() { std::abort(); }
 void boxConfigure(HWND) { std::abort(); }
@@ -39,6 +44,12 @@ static void require(bool value, const char* message) {
 }
 static WNDPROC comboProcedure = nullptr;
 static int comboWrites = 0;
+static WNDPROC labelProcedure = nullptr;
+static int labelWrites = 0;
+static LRESULT CALLBACK countLabelWrites(HWND window, UINT message, WPARAM w, LPARAM l) {
+    if (message == WM_SETTEXT) ++labelWrites;
+    return CallWindowProcA(labelProcedure, window, message, w, l);
+}
 static LRESULT CALLBACK countComboWrites(HWND window, UINT message, WPARAM w, LPARAM l) {
     if (message == CB_SETCURSEL) ++comboWrites;
     return CallWindowProcA(comboProcedure, window, message, w, l);
@@ -178,7 +189,7 @@ int main() {
         }
         comboProcedure = reinterpret_cast<WNDPROC>(SetWindowLongPtrA(g_cbSize,GWLP_WNDPROC,reinterpret_cast<LONG_PTR>(countComboWrites)));
         for (int size=160; size<=640; size+=32) {
-            g.imgSize=size;
+            g.manualCropSize=size;
             sizeComboShowApplied();
             require(SendMessageA(g_cbSize,CB_GETCURSEL,0,0)==(size-160)/32,"Live crop display mismatch");
             const int writes=comboWrites;
@@ -186,6 +197,57 @@ int main() {
             require(comboWrites==writes,"Unchanged crop must not rewrite the UI");
         }
         require(comboWrites==16,"Exactly one update per new stage expected");
+        g.manualCropSize=416; sizeComboShowApplied();
+        g_currentCropLabel=CreateWindowA("STATIC","",WS_CHILD,0,210,360,26,window,nullptr,GetModuleHandleA(nullptr),nullptr);
+        require(g_currentCropLabel!=nullptr,"Create live crop label");
+        labelProcedure=reinterpret_cast<WNDPROC>(SetWindowLongPtrA(g_currentCropLabel,GWLP_WNDPROC,reinterpret_cast<LONG_PTR>(countLabelWrites)));
+        const int manualWrites=comboWrites;
+        g.adaptiveCapture=true;
+        for(int size=160;size<=640;size+=32) {
+            g.imgSize=size; currentCaptureShow();
+            char actual[96]{},expectedLabel[96]{};
+            GetWindowTextA(g_currentCropLabel,actual,sizeof(actual));
+            snprintf(expectedLabel,sizeof(expectedLabel),"当前截图范围：%d × %d 像素",size,size);
+            require(strcmp(actual,expectedLabel)==0,"Live label must track adaptive size");
+            const int writes=labelWrites;
+            for(int repeat=0;repeat<100;++repeat) currentCaptureShow();
+            require(labelWrites==writes,"Unchanged live label must not repaint");
+            require(g.manualCropSize==416 && SendMessageA(g_cbSize,CB_GETCURSEL,0,0)==8,"Adaptive range changed manual selection");
+        }
+        require(comboWrites==manualWrites && labelWrites==16,"Adaptive updates must write only the live label");
+        require(!IsWindowEnabled(g_cbSize),"Adaptive mode must disable manual range");
+        sizeComboCommit(); // No task or popup in adaptive mode.
+        g.adaptiveCapture=false; currentCaptureShow();
+        require(IsWindowEnabled(g_cbSize),"Single model must restore manual range control");
+        const auto sessionDir=std::filesystem::temp_directory_path()/(L"saga-restore-ui-"+std::to_wstring(GetCurrentProcessId()));
+        require(std::filesystem::create_directory(sessionDir),"Create startup fixture directory");
+        g.runDir=sessionDir; g_hwnd=window;
+        g_cbDevice=CreateWindowA("COMBOBOX","",WS_CHILD|CBS_DROPDOWNLIST,0,0,200,200,window,nullptr,wc.hInstance,nullptr);
+        g_cbFormat=CreateWindowA("COMBOBOX","",WS_CHILD|CBS_DROPDOWNLIST,0,0,200,200,window,nullptr,wc.hInstance,nullptr);
+        uiRestoreCapture();
+        require(!captureTaskBusy && restoredCaptures==0,"Fresh install must not auto-start capture");
+        require(startup_session::save(sessionDir/L"配置保存.ini",{"fixture-device","NV12",1920,1080,240},416),"Save restore fixture");
+        for(bool preview:{false,true}) {
+            uiSetShowImg(preview);
+            uiRestoreCapture();
+            require(g.showImg==preview && g.noConvert,"Restore must preserve preview and select capture input");
+            const auto deadline=GetTickCount64()+3000;
+            bool completed=false;
+            while(GetTickCount64()<deadline && !completed) {
+                MSG message{};
+                if(PeekMessageA(&message,window,kCaptureTaskDone,kCaptureTaskDone,PM_REMOVE)) {
+                    require(message.wParam!=0,"Restore task failed");
+                    wndProc(window,message.message,message.wParam,message.lParam);
+                    completed=true;
+                } else Sleep(1);
+            }
+            require(completed && !captureTaskBusy,"Startup capture task must complete asynchronously");
+            require(file_paths::profileInt("默认","选择框_实时刷新",9,(sessionDir/L"配置保存.ini").c_str())==int(preview),"Preview toggle must persist immediately");
+        }
+        require(restoredCaptures==2,"Each launch must restore capture exactly once");
+        DestroyWindow(g_cbDevice);DestroyWindow(g_cbFormat);g_cbDevice=g_cbFormat=nullptr;g_hwnd=nullptr;
+        std::filesystem::remove(sessionDir/L"配置保存.ini");std::filesystem::remove(sessionDir);
+        DestroyWindow(g_currentCropLabel);g_currentCropLabel=nullptr;
         DestroyWindow(g_cbSize); g_cbSize=nullptr;
         SelectObject(target, oldBitmap);
         DeleteObject(bitmap); DeleteDC(target); DestroyWindow(window);

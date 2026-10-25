@@ -195,6 +195,8 @@
     <ClInclude Include="src\drv\CH343SER.INF" />
     <ClInclude Include="src\WchHardwareId.h" />
     <ClInclude Include="src\AppExit.h" />
+    <ClInclude Include="src\ProcessWatchdog.h" />
+    <ClInclude Include="src\StartupSession.h" />
     <ClInclude Include="src\LanFirewall.h" />
     <ClInclude Include="src\WebAccess.h" />
     <ClInclude Include="src\RuntimeLog.h" />

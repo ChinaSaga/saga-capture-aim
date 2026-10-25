@@ -1,3 +1,4 @@
+#include "StartupSession.h"
 #include "App.h"
 #include "Inference.h"
 #include "FrameWait.h"
@@ -147,8 +148,7 @@ void frameThreadUdp()
 
 // ============================================================================
 //  接口_开始采集
-//  dev/codec 为空 → 从 监控双机.ini 的「保留参数」读名称/编码/宽/高/帧率/截图范围
-//  成功后启动采集线程，并把参数写回 监控双机.ini（与原版一致）
+//  成功后启动采集线程，并保存到 配置保存.ini 的采集恢复段。
 // ============================================================================
 // 上一次成功启动采集的参数：切换「中心识别范围」时原样重启用（裁剪尺寸换掉）
 static std::string g_lastDev, g_lastCodec;
@@ -159,34 +159,18 @@ bool startCapture(const char* dev, int w, int h, const char* codec, int fps)
     saga::set_capture_log([](const char* text) { runtime_log::write("[capture] %s", text); });
     std::string name = dev ? dev : "";
     std::string cc = codec ? codec : "";
-    const auto ini = g.runDir / L"监控双机.ini";
-    char buf[512] = {};
-
-    if (name.empty() || cc.empty())
-    {
-        file_paths::profileString("保留参数", "名称", "Live Gamer Ultra 2.1-Video", buf, sizeof(buf), ini.c_str());
-        name = buf;
-        file_paths::profileString("保留参数", "编码", "NV12", buf, sizeof(buf), ini.c_str());
-        cc = buf;
-        w = file_paths::profileInt("保留参数", "宽", 1920, ini.c_str());
-        h = file_paths::profileInt("保留参数", "高", 1080, ini.c_str());
-        fps = file_paths::profileInt("保留参数", "帧率", 240, ini.c_str());
-        int cr = file_paths::profileInt("保留参数", "截图范围", 320, ini.c_str());
-        if (cr >= 160 && cr <= 640)
-        {
-            g.imgSize = cr;
-            uiSetComboSizeIndex((cr - 160) / 32);
-        }
-    }
-
+    const auto ini = g.runDir / L"配置保存.ini";
     const auto modelName = file_paths::wide(g.selectedModelName());
-    if (model_files::isGroup(g.modelDirectory(), modelName)) {
+    const bool adaptive = model_files::isGroup(g.modelDirectory(), modelName);
+
+    if (name.empty() || cc.empty() || w <= 0 || h <= 0 || fps <= 0) return false;
+
+    if (adaptive) {
         const int largest = adaptive_capture::largestSize(model_files::groupSizes(g.modelDirectory() / modelName, g.engine.load()));
         if (largest) {
             g.imgSize = largest;
-            uiSetComboSizeIndex((largest - 160) / 32);
         }
-    }
+    } else g.imgSize = g.manualCropSize.load();
     // 引擎（原 Saga.dll）以 UTF-8 匹配设备名，所以设备名回传前要 ansiToUtf8。
     // setcjk_ex 现在自行配平 COM 初始化，并会对设备枚举失败返回错误文本。
     std::string nameUtf8 = ansiToUtf8(name);
@@ -204,13 +188,8 @@ bool startCapture(const char* dev, int w, int h, const char* codec, int fps)
         std::thread(frameThreadCapture).detach();
     }
 
-    // ---- 写回 监控双机.ini ----
-    file_paths::writeProfile("保留参数", "宽", std::to_string(w).c_str(), ini.c_str());
-    file_paths::writeProfile("保留参数", "高", std::to_string(h).c_str(), ini.c_str());
-    file_paths::writeProfile("保留参数", "编码", cc.c_str(), ini.c_str());
-    file_paths::writeProfile("保留参数", "名称", name.c_str(), ini.c_str());
-    file_paths::writeProfile("保留参数", "帧率", std::to_string(fps).c_str(), ini.c_str());
-    file_paths::writeProfile("保留参数", "截图范围", std::to_string(g.imgSize).c_str(), ini.c_str());
+    if (!startup_session::save(ini, {name, cc, w, h, fps}, g.manualCropSize.load()))
+        runtime_log::write("[capture] 无法保存启动恢复状态，错误=%lu", GetLastError());
 
     // 记住这次成功启动的参数，供「切换中心识别范围」时按新裁剪尺寸原样重启
     g_lastDev = name;
@@ -248,16 +227,18 @@ bool applyCropSize(int size)
 {
     if (g.adaptiveCapture) return false;
     if (size < 160 || size > 640) return false;
-    if (size == g.imgSize) return true;
+    if (size == g.imgSize) { g.manualCropSize = size; return true; }
 
     // 没在采集中（或还没有可用的采集参数）：只改数值，不用重建
     if (!g.captureRunning.load() || g_lastDev.empty())
     {
         g.imgSize = size;
+        g.manualCropSize = size;
         return true;
     }
 
     const int previous = g.imgSize;
+    const int previousManual = g.manualCropSize;
 
     // 1) 先暂停推理：重启期间不要把旧裁剪的画面配着新宽高去推理
     //    （inferPause 同时清掉画框与移动意图，避免旧坐标继续留在画面上）
@@ -265,11 +246,13 @@ bool applyCropSize(int size)
 
     // 2) 用新裁剪尺寸重建采集图（引擎内部 stop + 重建，裁剪随 configure 一起生效）
     g.imgSize = size;
+    g.manualCropSize = size;
     bool ok = startCapture(g_lastDev.c_str(), g_lastW, g_lastH, g_lastCodec.c_str(), g_lastFps);
     if (!ok)
     {
         // 建图失败：退回原尺寸再建一次，至少把画面救回来
         g.imgSize = previous;
+        g.manualCropSize = previousManual;
         startCapture(g_lastDev.c_str(), g_lastW, g_lastH, g_lastCodec.c_str(), g_lastFps);
         inferPause(false);
         return false;

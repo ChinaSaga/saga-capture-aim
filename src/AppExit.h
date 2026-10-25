@@ -1,6 +1,7 @@
 #pragma once
 #include <windows.h>
 #include "BoxController.h"
+#include "ProcessWatchdog.h"
 
 // Explicit user-requested close: end this process and all its worker threads.
 // Detached capture/serial workers may hold locks during static/DLL teardown;
@@ -8,6 +9,7 @@
 // Windows reclaims this process's sockets, serial handles and windows.
 [[noreturn]] inline void exitApplicationNow()
 {
+    process_watchdog::normalExit();
     boxStopKeyboard();
     TerminateProcess(GetCurrentProcess(), 0);
     ExitProcess(0); // Defensive fallback if self-termination fails.

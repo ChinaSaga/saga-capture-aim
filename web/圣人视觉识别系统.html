@@ -199,7 +199,7 @@ select:disabled { opacity: .65; }
 #热键文本显示 { display: block; width: 100%; padding: 6px 8px; border-radius: 6px; color: var(--primary-color); background: var(--soft-bg); font-size: 10px; line-height: 1.5; text-align: center; overflow-wrap: anywhere; }
 .model-tools { display: flex; align-items: center; gap: 7px; margin-top: 8px; }
 .model-tools button { flex: 0 0 auto; background: var(--soft-bg); color: var(--primary-color); padding: 5px 9px; font-size: 11px; }
-#模型列表状态 { color: var(--muted); font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
+#模型列表状态, #模型实时范围 { color: var(--muted); font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
 .model-help { color: var(--muted); font-size: 10px; margin: 4px 0 10px; }
 .model-help summary { cursor: pointer; padding: 4px 0; }
 .model-help p { line-height: 1.7; padding: 5px 0; }
@@ -2244,6 +2244,7 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
                         </select>
                     </div>
                     <div class="model-tools"><button type="button" onclick="刷新模型列表()">刷新模型</button><span id="模型列表状态" aria-live="polite"></span></div>
+                    <div id="模型实时范围" aria-live="polite"></div>
                     <div class="radio-container">
                         <div class="radio-item engine-disabled">
                             <input type="radio" id="NCNN" name="推理引擎" value="NCNN" disabled>
@@ -3085,6 +3086,7 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
         let 当前模型选择 = typeof 模型名称 !== 'undefined' ? 模型名称 : '';
         let 当前推理引擎 = typeof 推理引擎 !== 'undefined' ? Number(推理引擎) : 1;
         let 模型引擎目录 = new Map();
+        let 模型组目录 = new Map();
         let 模型目录路径 = '';
         function 设置引擎按钮(engines) {
             ['NCNN', 'ONNX', 'TensorRT'].forEach((id, index) => {
@@ -3106,6 +3108,13 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
                 status.textContent = 当前模型选择 ? '已保存模型未找到，请重新选择模型' : '请先选择模型，再选择推理引擎';
             }
             if (name && !engines.includes(当前推理引擎)) status.textContent += '，请选择可用的推理引擎';
+            const group = 模型组目录.get(name);
+            if (group) {
+                const sizes = group.sizes && group.sizes[当前推理引擎] || [];
+                status.textContent += engines.includes(当前推理引擎)
+                    ? '；自适应截图：当前引擎可用 ' + sizes.length + ' 档（' + sizes.join(' / ') + '）；默认搜索范围及上限为 ' + Math.max(...sizes) + '；根据目标距离和大小留出余量，目标过大或贴边立即放大，连续 3 帧适合才缩小；缺档向上回退，松键或失锁回到最大可用档位；只有一档时始终使用该档位'
+                    : '；当前引擎没有可用尺寸模型，NCNN 需要同名 param 和 bin';
+            }
             if (模型目录路径) status.textContent += '；目录：' + 模型目录路径;
         }
         function 模型选项(name, label = name) {
@@ -3113,6 +3122,14 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
             option.value = name;
             option.textContent = label;
             return option;
+        }
+        function 更新实时截图(obj) {
+            const element = document.getElementById('模型实时范围');
+            if (!element) return;
+            const size = Number(obj['截图范围']);
+            const label = Number.isInteger(size) && size >= 160 && size <= 640
+                ? (obj['自适应截图'] === true ? '当前自适应截图：' : '当前截图：') + size + ' × ' + size : '';
+            if (element.textContent !== label) element.textContent = label;
         }
         async function 刷新模型列表() {
             const requestId = ++模型列表请求序号;
@@ -3131,14 +3148,15 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
                     : '模型列表读取失败（HTTP ' + response.status + '）');
                 if (requestId !== 模型列表请求序号) return;
                 if (!data || !Array.isArray(data.models) || data.models.some(model => !model || typeof model.name !== 'string' || !model.name
-                    || !Array.isArray(model.engines) || !model.engines.length || model.engines.some(engine => ![1,2,3].includes(engine))))
+                    || !Array.isArray(model.engines) || (!model.engines.length && model.adaptive !== true) || model.engines.some(engine => ![1,2,3].includes(engine))))
                     throw new Error('模型列表格式错误');
                 模型引擎目录 = new Map(data.models.map(model => [model.name, model.engines]));
+                模型组目录 = new Map(data.models.filter(model => model.adaptive === true).map(model => [model.name, model]));
                 模型目录路径 = typeof data.directory === 'string' ? data.directory : '';
                 const names = [...模型引擎目录.keys()];
                 const selectedName = names.find(name => name.toLowerCase() === String(current).toLowerCase());
                 const available = selectedName !== undefined;
-                const options = names.map(name => 模型选项(name));
+                const options = names.map(name => 模型选项(name, 模型组目录.has(name) ? name + '（自适应）' : name));
                 if (!available) {
                     const placeholder = 模型选项('', names.length ? '请选择模型' : '未找到模型');
                     placeholder.disabled = true;
@@ -3151,6 +3169,7 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
             } catch (error) {
                 if (requestId === 模型列表请求序号) {
                     模型引擎目录 = new Map();
+                    模型组目录 = new Map();
                     select.replaceChildren(模型选项('', '模型列表读取失败'));
                     status.textContent = (error.message || '暂时无法读取模型列表') + '；修复后点击刷新模型重试';
                 }
@@ -3438,6 +3457,7 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
                 const response = await fetch(apiEndpoint);
                 if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                 const obj = await response.json();
+                更新实时截图(obj);
                 const 实际帧率 = Number(obj["推理帧率"]);
                 const 换算速度 = Number(obj["推理速度FPS"]);
                 const 推理耗时 = Number(obj["推理耗时毫秒"]);
@@ -3480,6 +3500,7 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
                 }
             } catch (error) {
                 document.getElementById('推理帧率').innerHTML = '失败';
+                更新实时截图({});
             }
         }
         setInterval(fetchData, 1000);

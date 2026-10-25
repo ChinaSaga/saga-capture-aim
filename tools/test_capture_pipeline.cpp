@@ -96,12 +96,23 @@ int validate() {
         }
         for (DWORD compression : {DWORD(BI_RGB), MEDIASUBTYPE_RGB24.Data1}) {
             info.bmiHeader.biCompression = compression;
-            for (int crop : {320, 640}) {
-                if (!receiver.configure(type, 1920, 1080, crop)) return 5;
+            if (!receiver.configure(type, 1920, 1080, 320)) return 5;
+            CaptureFrame held;
+            std::vector<BYTE> heldBytes;
+            std::vector<int> crops;
+            for (int size=160; size<=640; size+=32) crops.push_back(size);
+            for (int size=608; size>=160; size-=32) crops.push_back(size);
+            for (int crop : crops) {
+                if (!receiver.setCrop(crop) || receiver.setCrop(641) || receiver.setCrop(0)) return 9;
                 receiver.BufferCB(0, sample.data(), static_cast<long>(sample.size()));
                 CaptureFrame frame;
                 unsigned long long seq = 0;
                 if (!captureAcquire(frame, seq, 0)) return 6;
+                if (frame.width != crop || frame.height != crop || frame.size != 54 + frame.stride*crop) return 10;
+                int headerWidth = 0, headerHeight = 0;
+                std::memcpy(&headerWidth, frame.bmp+18, 4); std::memcpy(&headerHeight, frame.bmp+22, 4);
+                if (headerWidth != crop || headerHeight != -crop) return 11;
+                if (held.owner && std::memcmp(held.bmp,heldBytes.data(),heldBytes.size())) return 12;
                 for (int y = 0; y < crop; ++y) {
                     const BYTE* row = frame.bmp + 54 + y * frame.stride;
                     for (int x = 0; x < crop; ++x) {
@@ -114,14 +125,17 @@ int validate() {
                         }
                     }
                 }
-                receiver.clear();
+                held = frame;
+                heldBytes.assign(frame.bmp, frame.bmp+frame.size);
                 ++rgbCases;
             }
+            receiver.clear();
+            if (receiver.setCrop(320)) return 13;
         }
     }
     info.bmiHeader.biCompression = BI_RLE8;
     if (receiver.configure(type, 1920, 1080, 320)) return 8;
-    std::printf("PASS %u full-frame RGB24 cases (standard/driver headers, both orientations, 320/640 crops)\n", rgbCases);
+    std::printf("PASS %u full-frame RGB24 cases (standard/driver headers, both orientations, every 32-pixel crop from 160 to 640)\n", rgbCases);
     std::printf("PASS %u scalar-exact planar cases, output sentinels and malformed frame publication checks\n", cases);
     return 0;
 }

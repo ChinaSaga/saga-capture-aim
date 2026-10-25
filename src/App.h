@@ -88,6 +88,7 @@ struct AppState
 
     // ---- 图片 ----
     std::atomic<int>   imgSize{320};                        // 全_图片宽高
+    std::atomic<bool> adaptiveCapture{false};
     std::atomic<bool> noConvert{false};        // 全_图片无需转换（后台采集初始化会写入）
     std::atomic<bool> showImg{ false };        // 全_是否显示图片
 
@@ -118,6 +119,7 @@ struct AppState
 
     // ---- 状态标志 ----
     std::atomic<bool> aimKeyDown{ false };     // 逻辑_自瞄热键是否按下
+    std::atomic<bool> aimPhysicalDown{false};
     std::atomic<bool> crossTrack{ false };     // 逻辑_准星追踪
     std::atomic<bool> triggerDown{ false };    // 逻辑_扳机按下
     std::atomic<bool> triggerFire{ false };    // 逻辑_扳机开火
@@ -131,6 +133,7 @@ struct AppState
     DrawBox boxes[99];                         // 二维画框_数组[99]
     int  boxCount = 99;                        // 集_数组成员数
     bool canDraw = false;                      // 集_可以画框
+    int drawSize = 0; // Protected by g_drawLock, dimensions of the published boxes.
     int  moveDx = 0, moveDy = 0;               // 集_移动距离x/y
     std::atomic<int> boxDx{0}, boxDy{0};               // 集_画框距离x/y
     std::atomic<int> nearestDist{ 0 };         // 集_最近距离

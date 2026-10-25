@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 #include "FilePaths.h"
+#include "AdaptiveCapture.h"
 
 namespace model_files {
 inline std::wstring fromGbk(const std::string& value) {
@@ -55,17 +56,41 @@ inline bool parseEngine(const std::string& query, int& engine) {
 struct Model {
     std::string name;
     std::array<std::string, 3> engineNames;
+    bool group = false;
+    std::array<std::vector<int>, 3> sizes;
 };
-inline std::vector<Model> catalog(const std::filesystem::path& directory) {
+inline bool isGroup(const std::filesystem::path& directory, const std::wstring& name) {
+    if (name.empty() || name == L"." || name == L".." || name.find_first_of(L"/\\:") != std::wstring::npos) return false;
+    std::error_code error;
+    return std::filesystem::is_directory(file_paths::io(directory / name), error);
+}
+inline std::vector<int> groupSizes(const std::filesystem::path& directory, int engine) {
+    std::vector<int> sizes;
+    for (int size = adaptive_capture::minSize; size <= adaptive_capture::maxSize; size += adaptive_capture::sizeStep) {
+        const auto base = directory / std::to_wstring(size);
+        const auto exists = [&](const wchar_t* extension) {
+            std::error_code error;
+            return std::filesystem::is_regular_file(file_paths::io(base.wstring() + extension), error);
+        };
+        if ((engine == 1 && exists(L".param") && exists(L".bin")) ||
+            (engine == 2 && exists(L".onnx")) || (engine == 3 && exists(L".trt"))) sizes.push_back(size);
+    }
+    return sizes;
+}
+inline std::vector<Model> catalog(const std::filesystem::path& directory, bool includeGroups = true) {
     struct Files { std::wstring param, bin, onnx, trt; };
     std::map<std::wstring, Files> files;
+    std::vector<std::filesystem::path> folders;
     std::error_code error;
     std::filesystem::directory_iterator iterator(file_paths::io(directory), error), end;
     for (; !error && iterator != end; iterator.increment(error)) {
         std::error_code statusError;
         const bool regular = iterator->is_regular_file(statusError);
         if (statusError) throw std::filesystem::filesystem_error("Cannot inspect model file", iterator->path(), statusError);
-        if (!regular) continue;
+        if (!regular) {
+            if (includeGroups && iterator->is_directory(statusError)) folders.push_back(iterator->path());
+            continue;
+        }
         const auto path = iterator->path();
         const auto extension = lowercase(path.extension().wstring());
         const auto name = path.stem().wstring();
@@ -85,6 +110,28 @@ inline std::vector<Model> catalog(const std::filesystem::path& directory) {
         for (const auto& name : model.engineNames) if (!name.empty()) { model.name = name; break; }
         if (!model.name.empty()) result.push_back(std::move(model));
     }
+    for (const auto& path : folders) {
+        Model model;
+        model.name = utf8(path.filename().wstring());
+        model.group = true;
+        bool any = false;
+        for (int engine = 1; engine <= 3; ++engine) {
+            auto& sizes = model.sizes[engine-1];
+            sizes = groupSizes(path, engine);
+            any = any || !sizes.empty();
+            if (!sizes.empty()) model.engineNames[engine-1] = model.name;
+        }
+        if (!any) continue;
+        // A folder owns its name, including when a legacy file shares that stem.
+        const auto key = lowercase(path.filename().wstring());
+        result.erase(std::remove_if(result.begin(), result.end(), [&](const Model& old) {
+            return lowercase(file_paths::wide(old.name, CP_UTF8)) == key;
+        }), result.end());
+        result.push_back(std::move(model));
+    }
+    std::sort(result.begin(), result.end(), [](const Model& a, const Model& b) {
+        return lowercase(file_paths::wide(a.name, CP_UTF8)) < lowercase(file_paths::wide(b.name, CP_UTF8));
+    });
     return result;
 }
 inline std::vector<std::string> list(const std::filesystem::path& directory, int engine) {
@@ -126,7 +173,22 @@ inline std::string catalogJson(const std::filesystem::path& directory) {
             if (!firstEngine) result += ',';
             firstEngine = false; result += std::to_string(engine);
         }
-        result += "]}";
+        result += "]";
+        if (model.group) {
+            result += ",\"adaptive\":true,\"sizes\":{";
+            for (int engine = 1; engine <= 3; ++engine) {
+                if (engine > 1) result += ',';
+                result += "\"" + std::to_string(engine) + "\":[";
+                bool firstSize = true;
+                for (int size : model.sizes[engine-1]) {
+                    if (!firstSize) result += ',';
+                    firstSize = false; result += std::to_string(size);
+                }
+                result += ']';
+            }
+            result += '}';
+        }
+        result += '}';
     }
     return result + "]}";
 }

@@ -6,25 +6,28 @@
 #include <commctrl.h>
 #include <shellapi.h>
 #include <filesystem>
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <thread>
 #include <vector>
 #include "TrtBuild.h"
-#include "ModelPaths.h"
 #pragma comment(lib, "comdlg32.lib")
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "shell32.lib")
+#pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 namespace {
 constexpr UINT kLog = WM_APP + 1, kFinished = WM_APP + 2;
-constexpr int kInput = 101, kOutput = 102, kBrowseInput = 103, kBrowseOutput = 104;
+constexpr int kInput = 101, kBrowseInput = 103;
 constexpr int kSize = 105, kStart = 106, kLogEdit = 107;
+constexpr int kReplace = 1001, kSkipExisting = 1002;
 
 struct Result { bool success; std::wstring text; };
 struct Ui {
     struct Placement { HWND window; int x, y, width, height; };
-    HWND input{}, output{}, size{}, start{}, log{}, progress{}, status{};
+    HWND input{}, size{}, start{}, log{}, progress{}, status{};
+    std::vector<std::filesystem::path> inputs;
     HFONT font{};
     unsigned dpi = 96;
     std::vector<Placement> placements;
@@ -78,59 +81,134 @@ void append(HWND edit, const std::wstring& message) {
     SendMessageW(edit, EM_REPLACESEL, FALSE, reinterpret_cast<LPARAM>(line.c_str()));
     SendMessageW(edit, EM_SCROLLCARET, 0, 0);
 }
-bool pick(HWND window, bool save, std::wstring& selected) {
-    std::vector<wchar_t> filename(32768);
-    if (!selected.empty()) wcsncpy_s(filename.data(), filename.size(), selected.c_str(), _TRUNCATE);
+std::filesystem::path executableDirectory() {
+    wchar_t executable[32768]{};
+    const DWORD length = GetModuleFileNameW(nullptr, executable, 32768);
+    return length && length < 32768 ? std::filesystem::path(executable).parent_path() : std::filesystem::path{};
+}
+std::filesystem::path modelDirectory() {
+    const auto directory = executableDirectory();
+    return directory.empty() ? directory : directory / L"模型数据";
+}
+void showInputs(Ui& ui) {
+    std::wstring list;
+    for (const auto& path : ui.inputs) {
+        if (!list.empty()) list += L"\r\n";
+        list += path.wstring();
+    }
+    SetWindowTextW(ui.input, list.c_str());
+    const auto status = L"已选择 " + std::to_wstring(ui.inputs.size()) + L" 个模型，点击开始转换。";
+    SetWindowTextW(ui.status, status.c_str());
+}
+bool pick(HWND window, std::vector<std::filesystem::path>& selected) {
+    std::vector<wchar_t> filename(1024 * 1024);
+    const auto directory = selected.empty() ? modelDirectory() : selected.front().parent_path();
     OPENFILENAMEW dialog{};
     dialog.lStructSize = sizeof(dialog); dialog.hwndOwner = window;
     dialog.lpstrFile = filename.data(); dialog.nMaxFile = static_cast<DWORD>(filename.size());
-    dialog.lpstrFilter = save ? L"TensorRT 模型 (*.trt)\0*.trt\0所有文件\0*.*\0\0"
-                             : L"ONNX 模型 (*.onnx)\0*.onnx\0所有文件\0*.*\0\0";
-    dialog.lpstrDefExt = save ? L"trt" : L"onnx";
-    dialog.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | (save ? 0 : OFN_FILEMUSTEXIST);
-    if (!(save ? GetSaveFileNameW(&dialog) : GetOpenFileNameW(&dialog))) return false;
-    selected = filename.data();
+    dialog.lpstrFilter = L"ONNX 模型 (*.onnx)\0*.onnx\0\0";
+    dialog.lpstrInitialDir = directory.c_str();
+    dialog.lpstrDefExt = L"onnx";
+    dialog.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_FILEMUSTEXIST | OFN_ALLOWMULTISELECT;
+    if (!GetOpenFileNameW(&dialog)) {
+        if (CommDlgExtendedError()) MessageBoxW(window, L"模型选择失败，请减少一次选择的文件数量后重试。", L"选择模型", MB_OK | MB_ICONERROR);
+        return false;
+    }
+    selected.clear();
+    const std::filesystem::path first(filename.data());
+    const wchar_t* next = filename.data() + wcslen(filename.data()) + 1;
+    if (!*next) selected.push_back(first);
+    else for (; *next; next += wcslen(next) + 1) selected.push_back(first / next);
     return true;
 }
 void enable(HWND window, Ui& ui, bool enabled) {
-    for (int id : {kInput, kOutput, kBrowseInput, kBrowseOutput, kSize, kStart})
+    for (int id : {kInput, kBrowseInput, kSize, kStart})
         EnableWindow(GetDlgItem(window, id), enabled);
     SendMessageW(ui.progress, PBM_SETMARQUEE, !enabled, 40);
+}
+int conversionChoice(HWND window, size_t total, size_t existing) {
+    const std::wstring message = L"已选择 " + std::to_wstring(total) + L" 个 ONNX 模型，其中 " +
+        std::to_wstring(existing) + L" 个已有同名 TRT。\n\n"
+        L"代替并转换：转换全部模型，覆盖已有 TRT。\n"
+        L"不代替转换：保留已有 TRT，只转换缺少 TRT 的模型。\n"
+        L"不转换：取消本次操作。";
+    const TASKDIALOG_BUTTON buttons[] = {
+        {kReplace, L"代替并转换"}, {kSkipExisting, L"不代替转换"}, {IDCANCEL, L"不转换"}
+    };
+    TASKDIALOGCONFIG dialog{};
+    dialog.cbSize = sizeof(dialog);
+    dialog.hwndParent = window;
+    dialog.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW | TDF_SIZE_TO_CONTENT;
+    dialog.pszWindowTitle = L"选择转换方式";
+    dialog.pszMainInstruction = L"请选择本批模型的转换方式";
+    dialog.pszContent = message.c_str();
+    dialog.cButtons = static_cast<UINT>(std::size(buttons));
+    dialog.pButtons = buttons;
+    dialog.nDefaultButton = kSkipExisting;
+    int choice = IDCANCEL;
+    if (FAILED(TaskDialogIndirect(&dialog, &choice, nullptr, nullptr))) {
+        MessageBoxW(window, L"无法打开转换确认窗口，本次转换已取消。", L"转换模型", MB_OK | MB_ICONERROR);
+        return IDCANCEL;
+    }
+    return choice;
 }
 void start(HWND window, Ui& ui) {
     if (ui.busy) return;
     trt::ConversionOptions options;
-    options.input = text(ui.input); options.output = text(ui.output);
-    if (options.input.empty() || options.output.empty()) {
-        MessageBoxW(window, L"请先选择 ONNX 模型和保存位置。", L"转换模型", MB_OK | MB_ICONINFORMATION); return;
+    if (ui.inputs.empty()) {
+        MessageBoxW(window, L"请先选择一个或多个 ONNX 模型。", L"转换模型", MB_OK | MB_ICONINFORMATION); return;
     }
     if (!sizeValue(text(ui.size), options.dynamicWidth, options.dynamicHeight)) {
         MessageBoxW(window, L"动态尺寸请填写 宽x高，例如 416x416，宽高均不超过 4096；静态模型可以留空。", L"尺寸格式不正确", MB_OK | MB_ICONINFORMATION); return;
     }
-    std::error_code error;
-    if (std::filesystem::exists(options.output, error)) {
-        const std::wstring message = L"保存位置已有文件，是否覆盖？\n\n" + options.output.wstring();
-        if (MessageBoxW(window, message.c_str(), L"确认覆盖", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) != IDYES) return;
-        options.overwrite = true;
+    std::vector<trt::ConversionOptions> jobs;
+    size_t existing = 0;
+    for (const auto& input : ui.inputs) {
+        options.input = input;
+        options.output = input;
+        options.output.replace_extension(L".trt");
+        std::error_code error;
+        if (std::filesystem::exists(options.output, error)) ++existing;
+        jobs.push_back(options);
     }
+    const int choice = conversionChoice(window, jobs.size(), existing);
+    if (choice != kReplace && choice != kSkipExisting) return;
+    for (auto& job : jobs) job.overwrite = choice == kReplace;
     if (ui.worker.joinable()) ui.worker.join();
     ui.busy = true;
     SetWindowTextW(ui.log, L""); SetWindowTextW(ui.status, L"正在转换，首次构建可能需要几分钟……");
     enable(window, ui, false);
     try {
-        ui.worker = std::thread([window, options] {
-            std::string error;
-            bool success = false;
-            try {
-                success = trt::convertOnnx(options, [window](const std::string& message) {
-                    auto line = std::make_unique<std::wstring>(wide(message));
-                    if (PostMessageW(window, kLog, 0, reinterpret_cast<LPARAM>(line.get()))) line.release();
-                }, error);
-            } catch (const std::exception& exception) { error = exception.what(); }
-            catch (...) { error = "Unexpected conversion error."; }
+        ui.worker = std::thread([window, jobs] {
+            auto log = [window](const std::string& message) {
+                auto line = std::make_unique<std::wstring>(wide(message));
+                if (PostMessageW(window, kLog, 0, reinterpret_cast<LPARAM>(line.get()))) line.release();
+            };
+            size_t completed = 0, skipped = 0;
+            for (size_t index = 0; index < jobs.size(); ++index) {
+                const auto& options = jobs[index];
+                log("[" + std::to_string(index + 1) + "/" + std::to_string(jobs.size()) + "] " + utf8(options.input.wstring()));
+                std::string error;
+                bool success = false;
+                try {
+                    // Recheck each job so files created while this batch runs are also preserved.
+                    if (!options.overwrite && std::filesystem::exists(options.output)) {
+                        ++skipped;
+                        log("已跳过，保留已有 TRT：" + utf8(options.output.wstring()));
+                        continue;
+                    }
+                    success = trt::convertOnnx(options, log, error);
+                } catch (const std::exception& exception) { error = exception.what(); }
+                catch (...) { error = "Unexpected conversion error."; }
+                if (success) ++completed;
+                log(success ? "转换完成：" + utf8(options.output.wstring()) : "转换失败：" + utf8(options.input.wstring()) + "\r\n" + error);
+            }
             auto result = std::make_unique<Result>();
-            result->success = success;
-            result->text = success ? L"转换完成：\n" + options.output.wstring() : L"转换失败：\n" + wide(error);
+            const size_t failed = jobs.size() - completed - skipped;
+            result->success = failed == 0;
+            result->text = L"批量转换结束：成功 " + std::to_wstring(completed) + L" 个，跳过 " +
+                std::to_wstring(skipped) + L" 个，失败 " + std::to_wstring(failed) +
+                L" 个。\nTRT 保存在对应 ONNX 同目录，跳过的已有 TRT 保持不变，详情见转换记录。";
             if (PostMessageW(window, kFinished, 0, reinterpret_cast<LPARAM>(result.get()))) result.release();
         });
     } catch (const std::exception& exception) {
@@ -160,23 +238,36 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wParam, LPARAM lPar
             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Microsoft YaHei UI");
         control(window, *ui, L"STATIC", L"ONNX 转 TensorRT", 0, 0, 24, 18, 660, 28);
         control(window, *ui, L"STATIC", L"ONNX 模型", 0, 0, 24, 63, 100, 24);
-        ui->input = control(window, *ui, L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, kInput, 126, 58, 474, 32);
+        ui->input = control(window, *ui, L"EDIT", L"", ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL | WS_TABSTOP, kInput, 126, 58, 474, 77);
+        SendMessageW(ui->input, EM_SETLIMITTEXT, 4 * 1024 * 1024, 0);
         control(window, *ui, L"BUTTON", L"选择模型", WS_TABSTOP, kBrowseInput, 612, 58, 116, 32);
-        control(window, *ui, L"STATIC", L"保存为", 0, 0, 24, 108, 100, 24);
-        ui->output = control(window, *ui, L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, kOutput, 126, 103, 474, 32);
-        control(window, *ui, L"BUTTON", L"保存位置", WS_TABSTOP, kBrowseOutput, 612, 103, 116, 32);
         control(window, *ui, L"STATIC", L"动态输入尺寸", 0, 0, 24, 153, 124, 24);
         ui->size = control(window, *ui, L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, kSize, 158, 148, 160, 32);
         SendMessageW(ui->size, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(L"例如 416x416"));
         control(window, *ui, L"STATIC", L"静态模型留空；默认 FP16。", 0, 0, 334, 153, 360, 24);
         control(window, *ui, L"STATIC", L"推理精度：FP16。自动转换 ONNX，生成半精度 TRT 模型。", 0, 0, 24, 190, 704, 28);
-        control(window, *ui, L"STATIC", L"默认保存到程序旁的“模型数据”文件夹。原始 ONNX 文件会保留。", 0, 0, 24, 230, 700, 24);
+        control(window, *ui, L"STATIC", L"TRT 与 ONNX 同目录、同名保存。原始 ONNX 文件会保留。", 0, 0, 24, 230, 700, 24);
         ui->start = control(window, *ui, L"BUTTON", L"开始转换", BS_DEFPUSHBUTTON | WS_TABSTOP, kStart, 24, 270, 150, 38);
         ui->status = control(window, *ui, L"STATIC", L"选择模型后开始转换。", 0, 0, 192, 278, 520, 24);
         ui->progress = control(window, *ui, PROGRESS_CLASSW, L"", PBS_MARQUEE, 0, 24, 323, 704, 18);
         ui->log = control(window, *ui, L"EDIT", L"", ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL | WS_TABSTOP,
             kLogEdit, 24, 357, 704, 232);
         SendMessageW(ui->log, EM_SETLIMITTEXT, 4 * 1024 * 1024, 0);
+        const auto directory = modelDirectory();
+        std::error_code scanError;
+        if (!directory.empty()) {
+            std::filesystem::recursive_directory_iterator it(directory, scanError), end;
+            while (!scanError && it != end) {
+                std::error_code fileError;
+                if (it->is_regular_file(fileError) && _wcsicmp(it->path().extension().c_str(), L".onnx") == 0)
+                    ui->inputs.push_back(it->path());
+                it.increment(scanError);
+            }
+        }
+        std::sort(ui->inputs.begin(), ui->inputs.end());
+        showInputs(*ui);
+        if (directory.empty() || scanError)
+            SetWindowTextW(ui->status, L"未能完整扫描“模型数据”及子目录，请手动选择模型。");
         return 0;
     }
     if (!ui) return DefWindowProcW(window, message, wParam, lParam);
@@ -201,29 +292,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wParam, LPARAM lPar
         if (HIWORD(wParam) != BN_CLICKED) break;
         switch (LOWORD(wParam)) {
         case kBrowseInput: {
-            auto path = text(ui->input);
-            if (pick(window, false, path)) {
-                SetWindowTextW(ui->input, path.c_str());
-                wchar_t executable[32768]{};
-                const DWORD length = GetModuleFileNameW(nullptr, executable, 32768);
-                if (!length || length >= 32768) {
-                    MessageBoxW(window, L"无法定位转换工具目录，请手动选择保存位置。", L"保存位置", MB_OK | MB_ICONERROR);
-                    return 0;
-                }
-                const auto output = model_paths::defaultTrtOutput(std::filesystem::path(executable).parent_path(), path);
-                std::error_code error;
-                std::filesystem::create_directories(output.parent_path(), error);
-                if (error) {
-                    MessageBoxW(window, L"无法创建模型数据文件夹，请手动选择保存位置。", L"保存位置", MB_OK | MB_ICONERROR);
-                    return 0;
-                }
-                SetWindowTextW(ui->output, output.c_str());
-            }
-            return 0;
-        }
-        case kBrowseOutput: {
-            auto path = text(ui->output);
-            if (pick(window, true, path)) SetWindowTextW(ui->output, path.c_str());
+            if (pick(window, ui->inputs)) showInputs(*ui);
             return 0;
         }
         case kStart: start(window, *ui); return 0;
@@ -237,7 +306,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wParam, LPARAM lPar
         std::unique_ptr<Result> result(reinterpret_cast<Result*>(lParam));
         if (ui->worker.joinable()) ui->worker.join();
         ui->busy = false; enable(window, *ui, true);
-        SetWindowTextW(ui->status, result->success ? L"转换完成" : L"转换失败，详情见下方记录");
+        SetWindowTextW(ui->status, result->success ? L"本批处理完成，详情见下方记录" : L"部分或全部失败，详情见下方记录");
         append(ui->log, result->text);
         MessageBoxW(window, result->text.c_str(), result->success ? L"转换完成" : L"转换失败", MB_OK | (result->success ? MB_ICONINFORMATION : MB_ICONERROR));
         return 0;

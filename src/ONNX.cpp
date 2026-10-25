@@ -7,6 +7,7 @@
 #include <cmath>
 #include <vector>
 #include <string>
+#include <map>
 
 #include <opencv2/opencv.hpp>
 #include "detection.hpp"
@@ -17,6 +18,7 @@
 // Global state
 // ============================================================================
 static yolos::det::YOLODetector* g_detector = nullptr;
+static std::map<std::wstring, std::unique_ptr<yolos::det::YOLODetector>> g_detectors;
 static std::string               g_last_error;
 
 namespace saga
@@ -26,12 +28,24 @@ namespace saga
     }
      int onnx_create(const wchar_t* MODEL_PATH, const wchar_t* labelsPath, bool useGPU)
     {
-        // 无条件销毁旧实例
-        delete g_detector;
+        onnx_destroy();
+        return onnx_select_cached(MODEL_PATH, labelsPath, useGPU, 0);
+    }
+    int onnx_select_cached(const wchar_t* MODEL_PATH, const wchar_t* labelsPath, bool useGPU, int expectedSize)
+    {
         g_detector = nullptr;
         try {
             g_last_error.clear();
-            g_detector = new yolos::det::YOLODetector(MODEL_PATH, labelsPath, useGPU);
+            auto found = g_detectors.find(MODEL_PATH);
+            if (found == g_detectors.end()) {
+                auto value = std::make_unique<yolos::det::YOLODetector>(MODEL_PATH, labelsPath, useGPU);
+                if (expectedSize && (value->isDynamicInputShape() || value->getInputShape() != cv::Size(expectedSize, expectedSize)))
+                    throw std::runtime_error("ONNX input dimensions do not match the numeric model filename");
+                found = g_detectors.emplace(MODEL_PATH, std::move(value)).first;
+            }
+            if (expectedSize && (found->second->isDynamicInputShape() || found->second->getInputShape() != cv::Size(expectedSize, expectedSize)))
+                throw std::runtime_error("Cached ONNX input dimensions do not match the requested size");
+            g_detector = found->second.get();
             g_detector->setMaxDetections(99);
             return 0;
         } catch (const std::exception& e) {
@@ -72,8 +86,8 @@ namespace saga
 
      void onnx_destroy()
     {
-        delete g_detector;
         g_detector = nullptr;
+        g_detectors.clear();
     }
 
      const char* onnx_last_error()

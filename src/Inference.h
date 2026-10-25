@@ -58,6 +58,12 @@ namespace saga
                            float conf_thres, float nms_thres, DetectObject* out_objects);
     void        trt_destroy();
     const char* trt_last_error();
+
+    // Called only by the owning inference thread. Cached variants are released
+    // together on model-group/engine changes; expectedSize validates filenames.
+    int ncnn_select_cached(const wchar_t* param, const wchar_t* bin, int gpu, int index, int expectedSize);
+    int onnx_select_cached(const wchar_t* path, const wchar_t* labels, bool gpu, int expectedSize);
+    int trt_select_cached(const wchar_t* path, int expectedSize);
 }
 
 struct CaptureFrame {
@@ -67,6 +73,7 @@ struct CaptureFrame {
     size_t stride = 0;
 };
 bool captureAcquire(CaptureFrame& frame, unsigned long long& sequence, unsigned timeoutMs);
+bool captureSetCrop(int size); // Changes the next frame crop without rebuilding DirectShow.
 void canvasDrawCapture(const CaptureFrame& frame);
 int ncnnDetectBgr(const unsigned char*, int, int, size_t, float, float, DetectObject*);
 int onnxDetectBgr(const unsigned char*, int, int, size_t, float, float, DetectObject*);

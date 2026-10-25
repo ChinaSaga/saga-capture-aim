@@ -37,6 +37,12 @@ void webOpenLocalPage(HWND) { std::abort(); }
 static void require(bool value, const char* message) {
     if (!value) throw std::runtime_error(message);
 }
+static WNDPROC comboProcedure = nullptr;
+static int comboWrites = 0;
+static LRESULT CALLBACK countComboWrites(HWND window, UINT message, WPARAM w, LPARAM l) {
+    if (message == CB_SETCURSEL) ++comboWrites;
+    return CallWindowProcA(comboProcedure, window, message, w, l);
+}
 
 struct StalledRender {
     HANDLE ready = CreateEventA(nullptr, TRUE, FALSE, nullptr);
@@ -163,6 +169,24 @@ int main() {
         boardPaint(target);
         checkPreview(expected);
 
+        g_cbSize = CreateWindowA("COMBOBOX", "", WS_CHILD | CBS_DROPDOWNLIST,
+            0, 0, 200, 200, window, nullptr, GetModuleHandleA(nullptr), nullptr);
+        require(g_cbSize != nullptr,"Create size display fixture");
+        for (int size=160; size<=640; size+=32) {
+            const auto label=std::to_string(size);
+            SendMessageA(g_cbSize, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
+        }
+        comboProcedure = reinterpret_cast<WNDPROC>(SetWindowLongPtrA(g_cbSize,GWLP_WNDPROC,reinterpret_cast<LONG_PTR>(countComboWrites)));
+        for (int size=160; size<=640; size+=32) {
+            g.imgSize=size;
+            sizeComboShowApplied();
+            require(SendMessageA(g_cbSize,CB_GETCURSEL,0,0)==(size-160)/32,"Live crop display mismatch");
+            const int writes=comboWrites;
+            for(int repeat=0;repeat<100;++repeat) sizeComboShowApplied();
+            require(comboWrites==writes,"Unchanged crop must not rewrite the UI");
+        }
+        require(comboWrites==16,"Exactly one update per new stage expected");
+        DestroyWindow(g_cbSize); g_cbSize=nullptr;
         SelectObject(target, oldBitmap);
         DeleteObject(bitmap); DeleteDC(target); DestroyWindow(window);
         DeleteObject(g_panelBrush); DeleteCriticalSection(&g_drawLock);

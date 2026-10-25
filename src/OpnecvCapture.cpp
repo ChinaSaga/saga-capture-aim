@@ -341,33 +341,17 @@ public:
         Lock snapshot(g_snapshotLock);
         if (crop <= 0 || crop > width || crop > height || crop > 640) return false;
         if (!frame_layout(type, width, height, layout_)) return false;
-        crop_ = crop;
-        left_ = (width - crop) / 2;
-        stride_ = (static_cast<size_t>(crop) * 3 + 3) & ~size_t(3);
-        size_ = static_cast<int>(54 + stride_ * crop);
-        rows_.reset(new Row[crop]);
-        const int top = (height - crop) / 2;
-        unpairedFirst_ = (top & 1) != 0;
-        for (int y = 0; y < crop; ++y) {
-            const int logicalRow = top + y;
-            rows_[y].luma = static_cast<size_t>(layout_.bottomUp ? height - 1 - logicalRow : logicalRow) * layout_.pitch;
-            rows_[y].chroma = (static_cast<size_t>(height) + logicalRow / 2) * layout_.pitch;
-        }
+        width_ = width; height_ = height;
+        rows_.reset(new Row[640]);
+        cropLayout(crop);
         for (unsigned i = 0; i < kCaptureSlots; ++i) {
-            storage_[i].reset(static_cast<BYTE*>(_aligned_malloc(static_cast<size_t>(size_) + 64, 64)), FreeAligned{});
+            storage_[i].reset(static_cast<BYTE*>(_aligned_malloc(static_cast<size_t>(54 + 640 * 640 * 3) + 64, 64)), FreeAligned{});
             if (!storage_[i]) throw std::bad_alloc();
             // BMP pixels begin at +54; shifting the header by ten bytes aligns
             // the first pixel row to 64 bytes (common crop widths keep it so).
             buffers_[i] = storage_[i].get() + 10;
             std::memset(buffers_[i], 0, size_);
-            BITMAPFILEHEADER file = {};
-            file.bfType = 0x4d42; file.bfSize = size_; file.bfOffBits = 54;
-            BITMAPINFOHEADER info = {};
-            info.biSize = sizeof(info); info.biWidth = crop; info.biHeight = -crop;
-            info.biPlanes = 1; info.biBitCount = 24;
-            info.biSizeImage = static_cast<DWORD>(stride_ * crop);
-            std::memcpy(buffers_[i], &file, sizeof(file));
-            std::memcpy(buffers_[i] + sizeof(file), &info, sizeof(info));
+
         }
         switch (layout_.format) {
         case PixelFormat::Bgr24: kernel_ = convert<PixelFormat::Bgr24>; break;
@@ -403,6 +387,7 @@ public:
         for (; slot < kCaptureSlots; ++slot) if (storage_[slot].use_count() == 1) break;
         if (slot == kCaptureSlots) return S_OK; // Drop rather than queue stale frames.
         BYTE* completed = buffers_[slot];
+        writeHeader(completed);
         kernel_(*this, data, completed + 54);
         {
             Lock snapshot(g_snapshotLock);
@@ -418,16 +403,50 @@ public:
         return S_OK;
     }
 
+    bool setCrop(int crop) {
+        Lock producer(producerLock_);
+        if (!kernel_ || crop <= 0 || crop > 640 || crop > width_ || crop > height_) return false;
+        if (crop == crop_) return true;
+        cropLayout(crop);
+        Lock snapshot(g_snapshotLock);
+        g_captureFrame = {};
+        return true;
+    }
     void clear() {
         Lock producer(producerLock_);
         Lock snapshot(g_snapshotLock);
         g_captureFrame = {};
         for (auto& slot : storage_) slot.reset();
         rows_.reset();
+        kernel_ = nullptr; width_ = height_ = 0;
         WakeAllConditionVariable(&g_frameReady);
     }
     void set_event(HANDLE event) { firstFrame_ = event; }
 private:
+    void cropLayout(int crop) {
+        const int width = width_, height = height_;
+        crop_ = crop;
+        left_ = (width - crop) / 2;
+        stride_ = (static_cast<size_t>(crop) * 3 + 3) & ~size_t(3);
+        size_ = static_cast<int>(54 + stride_ * crop);
+        const int top = (height - crop) / 2;
+        unpairedFirst_ = (top & 1) != 0;
+        for (int y = 0; y < crop; ++y) {
+            const int logicalRow = top + y;
+            rows_[y].luma = static_cast<size_t>(layout_.bottomUp ? height - 1 - logicalRow : logicalRow) * layout_.pitch;
+            rows_[y].chroma = (static_cast<size_t>(height) + logicalRow / 2) * layout_.pitch;
+        }
+    }
+    void writeHeader(BYTE* completed) const {
+            BITMAPFILEHEADER file = {};
+            file.bfType = 0x4d42; file.bfSize = size_; file.bfOffBits = 54;
+            BITMAPINFOHEADER info = {};
+            info.biSize = sizeof(info); info.biWidth = crop_; info.biHeight = -crop_;
+            info.biPlanes = 1; info.biBitCount = 24;
+            info.biSizeImage = static_cast<DWORD>(stride_ * crop_);
+            std::memcpy(completed, &file, sizeof(file));
+            std::memcpy(completed + sizeof(file), &info, sizeof(info));
+    }
     struct Row { size_t luma, chroma; };
     struct FreeAligned { void operator()(BYTE* value) const { _aligned_free(value); } };
     using Kernel = void (*)(const FrameReceiver&, const BYTE*, BYTE*);
@@ -489,7 +508,7 @@ private:
     Kernel kernel_ = nullptr;
     FrameLayout layout_;
     size_t stride_ = 0;
-    int size_ = 0, crop_ = 0, left_ = 0;
+    int size_ = 0, crop_ = 0, left_ = 0, width_ = 0, height_ = 0;
     bool unpairedFirst_ = false;
 };
 HRESULT set_format(IAMStreamConfig* config, int width, int height, const GUID& subtype, int fps) {
@@ -555,6 +574,7 @@ public:
         }
         stop();
     }
+    bool setCrop(int size) { return receiver_.setCrop(size); }
     void stop() {
         // Stop streaming before releasing the two frame buffers.
         if (control_) { captureLog("停止旧采集图"); control_->Stop(); }
@@ -768,6 +788,8 @@ const char* saga::setcjk_ex(const char* deviceName, int width, int height, const
     CloseHandle(thread);
     return request.result;
 }
+
+bool captureSetCrop(int size) { return g_capture.setCrop(size); }
 
 bool captureAcquire(CaptureFrame& frame, unsigned long long& sequence, unsigned timeoutMs) {
     Lock snapshot(g_snapshotLock);

@@ -43,6 +43,7 @@ static bool g_hasFrame = false;
 static unsigned char g_presentPixels[kBoard * kBoard * 4] = {};
 static bool g_hasPresentedFrame = false;
 static double g_imageScale = 1.0;
+static int g_sourceWidth = 0; // Protected by g_canvasLock.
 static int g_imageX = 0, g_imageY = 0;
 static constexpr UINT kSyncPreview = WM_APP + 41;
 static constexpr UINT kSyncSizeCombo = WM_APP + 42;   // 取消时把下拉框显示退回生效值
@@ -176,6 +177,7 @@ static void boardDrawPixels(const cv::Mat& image)
             (size_t)kBoard * 4);
         cv::cvtColor(*pixels, destination, cv::COLOR_BGR2BGRA);
         if (trace) runtime_log::write("[preview] 首次颜色转换完成");
+        g_sourceWidth = image.cols;
         g_hasFrame = true;
     } catch (const cv::Exception&) {
         OutputDebugStringA("Preview decode failed.\n");
@@ -187,7 +189,11 @@ static void boardDrawImage(const std::vector<unsigned char>& encoded)
     g_hasFrame = false;
     if (!g_bits || encoded.empty()) return;
     try {
-        boardDrawPixels(cv::imdecode(encoded, cv::IMREAD_COLOR));
+        auto decoded = cv::imdecode(encoded, cv::IMREAD_COLOR);
+        const int size = g.imgSize;
+        if (g.adaptiveCapture && size > 0 && decoded.cols >= size && decoded.rows >= size)
+            decoded = decoded(cv::Rect((decoded.cols-size)/2, (decoded.rows-size)/2, size, size));
+        boardDrawPixels(decoded);
     } catch (const cv::Exception&) {
         OutputDebugStringA("Preview decode failed.\n");
     }
@@ -239,7 +245,7 @@ static void canvasDrawImpl(const std::vector<unsigned char>* encoded, const Capt
         HBRUSH oldBrush = (HBRUSH)SelectObject(g_memDC, GetStockObject(NULL_BRUSH));
         DrawBox drawSnapshot[99];
         EnterCriticalSection(&g_drawLock);
-        const bool canDraw = g.canDraw;
+        const bool canDraw = g.canDraw && (!g.adaptiveCapture || g.drawSize == g_sourceWidth);
         if (canDraw) std::memcpy(drawSnapshot, g.boxes, sizeof(drawSnapshot));
         LeaveCriticalSection(&g_drawLock);
         // GDI and label formatting must not hold up inference publication.
@@ -275,7 +281,7 @@ static void canvasDrawImpl(const std::vector<unsigned char>* encoded, const Capt
                 textAt(g_memDC, label, badge, g_font, RGB(8,18,32));
             }
         }
-        const int half = g.imgSize / 2;
+        const int half = g_sourceWidth / 2;
         const int lockRange = g.aimProfiles.active().profile.lockRange;
         HPEN pen = CreatePen(PS_SOLID, 1, RGB(255,222,89));
         auto oldPen = SelectObject(g_memDC, pen);
@@ -556,8 +562,13 @@ static std::string fitTextWidth(HDC dc, const std::string& text, int maxWidth)
 static void sizeComboShowApplied()
 {
     const int applied = g.imgSize;
-    if (applied >= 160 && applied <= 640 && (applied - 160) % 32 == 0)
-        SendMessageA(g_cbSize, CB_SETCURSEL, (WPARAM)((applied - 160) / 32), 0);
+    if (applied >= 160 && applied <= 640 && (applied - 160) % 32 == 0) {
+        const int index = (applied - 160) / 32;
+        // The 500 ms UI timer reads an atomic size; unchanged values never
+        // rewrite the combo or repaint it. No UI calls on the inference thread.
+        if (SendMessageA(g_cbSize, CB_GETCURSEL, 0, 0) != index)
+            SendMessageA(g_cbSize, CB_SETCURSEL, index, 0);
+    }
 }
 
 // 组合框_视频大小「确认」：把当前选中项真正切过去。
@@ -565,6 +576,11 @@ static void sizeComboShowApplied()
 static void sizeComboCommit()
 {
     if (captureTaskBusy) return;
+    if (g.adaptiveCapture) {
+        sizeComboShowApplied();
+        MessageBoxA(g_hwnd, "当前模型组按目标距离和大小自动选择已有档位，最大档位为默认搜索范围。此处显示实时范围，无需手动设置。", "自适应截图", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
     const int sel = (int)SendMessageA(g_cbSize, CB_GETCURSEL, 0, 0);
     if (sel < 0) return;
     queueCaptureTask(g_hwnd, [sel] { return applyCropSize(sel * 32 + 160); }, true);
@@ -758,6 +774,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
 
     case WM_TIMER:
         if (w == 1) {
+            if (g.adaptiveCapture && !captureTaskBusy) sizeComboShowApplied();
             if (captureTaskBusy && !captureTaskWarned && GetTickCount64() - captureTaskStarted >= 15000) {
                 captureTaskWarned = true;
                 SetWindowTextA(GetDlgItem(h, 101), "等待采集驱动…");
@@ -833,8 +850,8 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         textAt(dc, "圣人视觉 / C++", {24,18,664,56}, g_titleFont, RGB(27,43,68));
         // 状态栏：中心尺寸 / 采集帧率 / 推理帧率 / 显卡名称 / 推理耗时
         char head[160];
-        snprintf(head, sizeof(head), "中心 %d × %d    采集 %d FPS    推理 %d FPS",
-            g.imgSize.load(), g.imgSize.load(), g.frameFps.load(), displayInferFps());
+        snprintf(head, sizeof(head), "%s %d × %d    采集 %d FPS    推理 %d FPS",
+            g.adaptiveCapture ? "自适应" : "中心", g.imgSize.load(), g.imgSize.load(), g.frameFps.load(), displayInferFps());
         char tail[48];
         snprintf(tail, sizeof(tail), "    %.3f ms", g.inferMsPrecise.load());
 

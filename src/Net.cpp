@@ -192,6 +192,7 @@ void configSyncAll(bool save)
         if (previousModel != g.modelName || previousEngine != g.engine) {
             ++g.inferenceEpoch;
             g.triggerFire = false;
+            g.adaptiveCapture = model_files::isGroup(g.modelDirectory(), file_paths::wide(g.modelName));
         }
     }
     bufStr("框内移动", g.moveInBox);
@@ -332,6 +333,8 @@ static std::string buildJsonBody(const std::string& extraKey = "",
     const double inferenceSpeed = active && inferMs > 0.0 ? 1000.0 / inferMs : 0.0;
     j += "\"推理速度FPS\":" + std::to_string(inferenceSpeed) + ",";
     j += "\"推理耗时毫秒\":" + std::to_string(active ? inferMs : 0.0) + ",";
+    j += "\"自适应截图\":" + std::string(g.adaptiveCapture ? "true" : "false") + ",";
+    j += "\"截图范围\":" + std::to_string(g.imgSize.load()) + ",";
     j += "\"目前阵容\":\"" + std::to_string(g.camp.load()) + "\",";
     if (!extraKey.empty())
         j += "\"" + extraKey + "\":\"" + jsonEscape(extraVal) + "\",";

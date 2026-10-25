@@ -4,6 +4,7 @@
 #include "UdpFrameAssembler.h"
 #include <limits>
 #include "RuntimeLog.h"
+#include "ModelFiles.h"
 
 
 #include <chrono>
@@ -132,7 +133,7 @@ void frameThreadUdp()
             LeaveCriticalSection(&g_frameLock);
             WakeAllConditionVariable(&g_publishedFrameReady);
             if (++count >= 100) {
-                if (width > 0) g.imgSize = width;
+                if (width > 0 && !g.adaptiveCapture) g.imgSize = width;
                 const double ms = t.ms();
                 if (ms > 0) g.frameFps = (int)std::round(100000.0 / ms);
                 t.start(); count = 0;
@@ -178,6 +179,14 @@ bool startCapture(const char* dev, int w, int h, const char* codec, int fps)
         }
     }
 
+    const auto modelName = file_paths::wide(g.selectedModelName());
+    if (model_files::isGroup(g.modelDirectory(), modelName)) {
+        const int largest = adaptive_capture::largestSize(model_files::groupSizes(g.modelDirectory() / modelName, g.engine.load()));
+        if (largest) {
+            g.imgSize = largest;
+            uiSetComboSizeIndex((largest - 160) / 32);
+        }
+    }
     // 引擎（原 Saga.dll）以 UTF-8 匹配设备名，所以设备名回传前要 ansiToUtf8。
     // setcjk_ex 现在自行配平 COM 初始化，并会对设备枚举失败返回错误文本。
     std::string nameUtf8 = ansiToUtf8(name);
@@ -237,6 +246,7 @@ static bool waitFrameAfter(long long sequenceBefore, int timeoutMs)
 
 bool applyCropSize(int size)
 {
+    if (g.adaptiveCapture) return false;
     if (size < 160 || size > 640) return false;
     if (size == g.imgSize) return true;
 

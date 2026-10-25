@@ -22,6 +22,7 @@ int presses = 0, releases = 0;
 void makcuDown(int) { ++presses; }
 void makcuUp(int) { ++releases; }
 bool captureAcquire(CaptureFrame&, unsigned long long&, unsigned) { std::abort(); }
+bool captureSetCrop(int) { std::abort(); }
 int ncnnDetectBgr(const unsigned char*, int, int, size_t, float, float, DetectObject*) { std::abort(); }
 int onnxDetectBgr(const unsigned char*, int, int, size_t, float, float, DetectObject*) { std::abort(); }
 int trtDetectBgr(const unsigned char*, int, int, size_t, float, float, DetectObject*) { std::abort(); }
@@ -32,6 +33,9 @@ int sagaOnnxDetect(const unsigned char*, int, float, float, DetectObject*) { std
 TrtTiming trtLastTiming() { std::abort(); }
 namespace runtime_log { void write(const char*, ...) { std::abort(); } }
 namespace saga {
+int ncnn_select_cached(const wchar_t*, const wchar_t*, int, int, int) { std::abort(); }
+int onnx_select_cached(const wchar_t*, const wchar_t*, bool, int) { std::abort(); }
+int trt_select_cached(const wchar_t*, int) { std::abort(); }
 void ncnn_destroy() { std::abort(); } void onnx_destroy() { std::abort(); } void trt_destroy() { std::abort(); }
 const char* ncnn_last_error() { std::abort(); } const char* onnx_last_error() { std::abort(); } const char* trt_last_error() { std::abort(); }
 int trt_create(const wchar_t*) { std::abort(); }

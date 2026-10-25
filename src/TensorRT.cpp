@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <map>
 #include <stdexcept>
 #include <cstring>
 #include <immintrin.h>
@@ -269,14 +270,31 @@ public:
         return count;
     }
 };
-std::unique_ptr<Detector> detector;
+Detector* detector = nullptr;
+std::map<std::wstring, std::unique_ptr<Detector>> detectors;
 std::string lastError;
 }
 TrtTiming trtLastTiming() { return detector ? detector->timing : TrtTiming{}; }
 namespace saga {
 int trt_create(const char* path) { return trt_create(file_paths::wide(path ? path : "", CP_ACP).c_str()); }
-int trt_create(const wchar_t* path) { detector.reset(); try { auto value = std::make_unique<Detector>(); value->load(file_paths::io(path)); detector = std::move(value); lastError.clear(); return 0; } catch (const std::exception& e) { lastError = e.what(); return -1; } }
-void trt_destroy() { detector.reset(); }
+int trt_create(const wchar_t* path) { trt_destroy(); return trt_select_cached(path, 0); }
+int trt_select_cached(const wchar_t* path, int expectedSize) {
+    detector = nullptr;
+    try {
+        auto found = detectors.find(path);
+        if (found == detectors.end()) {
+            auto value = std::make_unique<Detector>();
+            value->load(file_paths::io(path));
+            if (expectedSize && value->shape != cv::Size(expectedSize, expectedSize))
+                throw std::runtime_error("TensorRT input dimensions do not match the numeric model filename");
+            found = detectors.emplace(path, std::move(value)).first;
+        }
+        if (expectedSize && found->second->shape != cv::Size(expectedSize, expectedSize))
+            throw std::runtime_error("Cached TensorRT input dimensions do not match the requested size");
+        detector = found->second.get(); lastError.clear(); return 0;
+    } catch (const std::exception& e) { lastError = e.what(); return -1; }
+}
+void trt_destroy() { detector = nullptr; detectors.clear(); }
 const char* trt_last_error() { return lastError.c_str(); }
 int trt_detect(const unsigned char* data, int size, float conf, float iou, DetectObject* out) {
     if (!data || size < 1 || !out) { lastError = "Invalid TensorRT encoded image or result buffer"; return -1; }

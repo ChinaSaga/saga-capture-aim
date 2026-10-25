@@ -1,5 +1,6 @@
 #include "ModelFiles.h"
 #include "ModelPaths.h"
+#include "AdaptiveCapture.h"
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -65,6 +66,53 @@ int main() {
         require(model_files::catalogJson(directory).find("{\"name\":\"CaseUnified\",\"engines\":[1,2,3]}") != std::string::npos, "Catalog JSON engine flags mismatch");
         std::filesystem::remove(directory/L"caseunified.bin"); std::filesystem::remove(directory/L"Caseunified.TrT");
         require(model_files::catalogJson(directory).find("{\"name\":\"CASEUNIFIED\",\"engines\":[2]}") != std::string::npos, "Deleted NCNN weight/TRT file did not disable engines");
+        std::filesystem::create_directory(directory/L"模型组");
+        for (const auto name : {L"320.onnx", L"416.onnx", L"640.onnx", L"640.trt", L"320.bin", L"416.param", L"640.param", L"640.bin"})
+            std::ofstream(directory/L"模型组"/name).put('x');
+        file(L"模型组.onnx");
+        auto groups = model_files::catalog(directory);
+        const auto groupName = model_files::utf8(L"模型组");
+        require(std::count_if(groups.begin(), groups.end(), [&](const auto& m) { return m.name == groupName; }) == 1, "Duplicate folder/legacy name");
+        const auto group = std::find_if(groups.begin(), groups.end(), [&](const auto& m) { return m.name == groupName; });
+        require(group != groups.end() && group->group && group->sizes[0] == std::vector<int>{640} &&
+            group->sizes[1] == std::vector<int>({320,416,640}) && group->sizes[2] == std::vector<int>{640}, "Group sizing or NCNN pairing failed");
+        require(model_files::isGroup(directory,L"模型组") && !model_files::isGroup(directory,L"../escape"), "Group path validation failed");
+        std::filesystem::remove(directory/L"模型组"/L"640.onnx");
+        groups = model_files::catalog(directory);
+        const auto incomplete = std::find_if(groups.begin(), groups.end(), [&](const auto& m) { return m.name == groupName; });
+        require(incomplete->engineNames[1] == groupName && incomplete->sizes[1] == std::vector<int>({320,416}),
+            "A group without 640 must remain available");
+        std::filesystem::remove(directory/L"模型组"/L"416.onnx");
+        require(model_files::groupSizes(directory/L"模型组",2)==std::vector<int>{320}, "Single-size group must be usable");
+        require(model_files::catalogJson(directory).find("\"2\":[320]")!=std::string::npos, "Single-size group missing from catalog");
+        using namespace adaptive_capture;
+        require(desiredSize(false,true,0,0)==640 && desiredSize(true,false,0,0)==640, "Idle/lost target must search at 640");
+        require(desiredSize(true,true,79.99,0)==160 && desiredSize(true,true,80,0)==192 &&
+            desiredSize(true,true,159.99,0)==320 && desiredSize(true,true,160,0)==352 &&
+            desiredSize(true,true,199.99,0)==416 && desiredSize(true,true,200,0)==416 &&
+            desiredSize(true,true,208,0)==448 && desiredSize(true,true,1e9,0)==640, "Strict size thresholds failed");
+        require(desiredSize(true,true,120,120)==352 && desiredSize(true,true,-120,-120)==352, "Euclidean distance must use both axes");
+        require(availableSize(320,{416,640})==416 && availableSize(320,{640})==640 &&
+            availableSize(416,{320,640})==640 && availableSize(640,{320,416})==416 &&
+            availableSize(640,{320})==320 && availableSize(320,{})==0, "Larger-size fallback or maximum cap failed");
+        std::filesystem::create_directory(directory/L"全档位");
+        std::vector<int> allSizes;
+        for (int size=160; size<=640; size+=32) {
+            allSizes.push_back(size);
+            for (const auto ext : {L".param",L".bin",L".onnx",L".trt"})
+                std::ofstream(directory/L"全档位"/(std::to_wstring(size)+ext)).put('x');
+            require(desiredSize(true,true,size/2.0-.01,0)==size, "Stage not reachable just below its distance limit");
+            require(desiredSize(true,true,size/2.0,0)==(std::min)(640,size+32), "Boundary must advance by 32");
+        }
+        for (const auto name : {L"128.onnx",L"176.onnx",L"672.onnx",L"abc.onnx",L"0160.onnx"})
+            std::ofstream(directory/L"全档位"/name).put('x');
+        for (int engine : {1,2,3}) require(model_files::groupSizes(directory/L"全档位",engine)==allSizes, "Must discover all and only 16 valid stages");
+        int previous=160;
+        for(int distance=0; distance<=1000; ++distance) {
+            const int size=desiredSize(true,true,distance,0);
+            require(validSize(size) && size>=previous, "Size must increase monotonically with distance");
+            previous=size;
+        }
         std::filesystem::remove_all(directory);
         std::cout << "Model discovery passed: Unicode, arbitrary names, empty/missing files, case pairing, sorting, directory exclusion, nonrecursive scan, query validation and JSON escaping.\n";
     } catch(const std::exception& error) {

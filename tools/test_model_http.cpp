@@ -118,6 +118,13 @@ int main() {
         std::filesystem::remove(modelDirectory/L"同时存在.bin");
         const auto withoutNcnn="{\"name\":\""+model_files::utf8(L"同时存在")+"\",\"engines\":[2,3]}";
         require(request("/model-catalog.json").find(withoutNcnn)!=std::string::npos,"Catalog HTTP must reflect deleted model files");
+        std::filesystem::create_directory(modelDirectory/L"no640");
+        for(const auto name:{L"320.param",L"320.bin",L"320.trt",L"320.onnx",L"416.onnx",L"512.onnx"})
+            std::ofstream(modelDirectory/L"no640"/name).put('x');
+        const auto cappedGroup=request("/model-catalog.json");
+        require(cappedGroup.find("\"name\":\"no640\",\"engines\":[1,2,3]")!=std::string::npos &&
+            cappedGroup.find("\"sizes\":{\"1\":[320],\"2\":[320,416,512],\"3\":[320]}")!=std::string::npos,
+            "HTTP catalog must enable single-stage and sub-640 groups independently per engine");
         for(const auto path:{"/models.json","/models.json?engine=4","/models.json?engine=3x","/models.json?engine=1&engine=3"})
             require(request(path).find("HTTP/1.1 400 ")==0,"Invalid model query did not return 400");
         require(request("/?ignored=1").find(page)!=std::string::npos,"Existing root page route broken");
@@ -185,6 +192,10 @@ int main() {
         const std::string gbkTrailBackslash("\x81\x5c",2);
         require(jsonEscape(gbkTrailBackslash)==gbkTrailBackslash,"GBK trail byte was mistaken for a JSON escape");
         require(request("/api",ansiToUtf8("不存在的参数|1")).starts_with("HTTP/1.1 400 "),"Unknown keys were accepted");
+        g.adaptiveCapture=true; g.imgSize=192;
+        const auto live=request("/api");
+        require(live.find(ansiToUtf8("\"自适应截图\":true"))!=std::string::npos &&
+            live.find(ansiToUtf8("\"截图范围\":192"))!=std::string::npos,"Live crop state missing from existing poll response");
         std::filesystem::remove(directory/L"圣人视觉识别系统.html");
         require(request("/models.json?engine=3").find("HTTP/1.1 404 ")==0,"Missing panel protection broken");
         require(request("/model-catalog.json").find("HTTP/1.1 404 ")==0,"Catalog missing-panel protection broken");

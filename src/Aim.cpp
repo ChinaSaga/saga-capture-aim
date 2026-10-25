@@ -3,6 +3,10 @@
 #include "AimLock.h"
 #include "FrameWait.h"
 #include "RuntimeLog.h"
+#include "ModelFiles.h"
+#include "AdaptiveCapture.h"
+#include "EncodedImage.h"
+#include <opencv2/imgcodecs.hpp>
 
 #include <cstdarg>
 
@@ -204,6 +208,26 @@ void aimThread(int engineWanted)
     CaptureFrame captureFrame;
     std::string loadedModel;
     bool modelReady = false;
+    bool modelGroup = false;
+    std::vector<int> groupSizes;
+    int activeSize = 0, requestedSize = 0, searchSize = 0;
+    adaptive_capture::Controller adaptiveRange;
+    bool remoteSizeWarned = false;
+    std::filesystem::path groupDirectory;
+    auto selectVariant = [&](int size) {
+        const auto base = groupDirectory / std::to_wstring(size);
+        if (engineWanted == 1) return saga::ncnn_select_cached((base.wstring()+L".param").c_str(), (base.wstring()+L".bin").c_str(), 1, 0, size);
+        if (engineWanted == 2) return saga::onnx_select_cached((base.wstring()+L".onnx").c_str(), (groupDirectory / L"空类别.txt").c_str(), true, size);
+        return saga::trt_select_cached((base.wstring()+L".trt").c_str(), size);
+    };
+    auto destroyModels = [&] {
+        if (engineWanted == 1) saga::ncnn_destroy();
+        else if (engineWanted == 2) saga::onnx_destroy();
+        else saga::trt_destroy();
+    };
+    auto modelError = [&] {
+        return utf8ToAnsi(engineWanted == 1 ? saga::ncnn_last_error() : engineWanted == 2 ? saga::onnx_last_error() : saga::trt_last_error());
+    };
     bool firstInference = true;
     auto settings = g.settings.snapshot();
     float accuracy = settings.conf;
@@ -253,9 +277,11 @@ void aimThread(int engineWanted)
         }
 
         settings = g.settings.snapshot();
-        const auto inferenceEpoch = g.inferenceEpoch.load();
+        auto inferenceEpoch = g.inferenceEpoch.load();
         if (lastInferenceEpoch != inferenceEpoch) {
             lockMem = {}; pidX = {}; pidY = {};
+            requestedSize = searchSize;
+            adaptiveRange.reset();
             prevNearestRange = nearestX = nearestY = 0;
             nearestRect = {};
             detectCount = 0; runTimer.start();
@@ -270,80 +296,142 @@ void aimThread(int engineWanted)
             firstInference = true;
             clearInferenceResult();
             modelReady = false;
-            if (engineWanted == 1)
+            destroyModels();
+            loadedModel = req; // Failed groups retry only after a selection/engine change.
+            modelGroup = model_files::isGroup(g.modelDirectory(), file_paths::wide(req));
             {
-                const auto par = g.modelDirectory() / file_paths::wide(req + ".param");
-                const auto bin = g.modelDirectory() / file_paths::wide(req + ".bin");
-                if (fileExists(bin) && fileExists(par))
-                {
-                    // 原版先用模型名"上锁"再加载：加载失败也不会反复重试
-                    loadedModel = req;
-                    int rc = sagaNcnnCreate(par.c_str(), bin.c_str(), 1, 0);
-                    if (rc != 0)
-                    {
-                        const auto detail = utf8ToAnsi(saga::ncnn_last_error());
-                        runtime_log::write("[infer] NCNN 加载失败：%s", detail.c_str());
-                        msgBox("模型加载失败，错误码：" + std::to_string(rc) + "\n" + detail);
-                        sleepMs(100);
-                        continue;
-                    }
-                    modelReady = true;
-                }
-                else
-                {
-                    msgBox("模型:" + req + "的param或bin文件不存在!请放入程序同目录的模型数据文件夹后点击确定");
-                    continue;
-                }
+                std::lock_guard<std::mutex> selection(g.modelMutex);
+                if (g.modelName != req || g.engine != engineWanted) continue;
+                g.adaptiveCapture = modelGroup;
             }
-            else if (engineWanted == 2)
-            {
-                const auto onnx = g.modelDirectory() / file_paths::wide(req + ".onnx");
-                if (fileExists(onnx))
-                {
-                    // The model and labels share the dedicated model directory.
-                    const auto txt = g.modelDirectory() / L"空类别.txt";
-                    // Labels are optional; loading a model must not require write permission.
-
-                    loadedModel = req;                                // 同上，先上锁
-                    int rc = sagaOnnxCreate(onnx.c_str(), txt.c_str(), true);
-                    if (rc != 0)
-                    {
-                        const std::string detail = utf8ToAnsi(saga::onnx_last_error());
-                        runtime_log::write("[infer] ONNX 加载失败：%s", detail.c_str());
-                        msgBox("ONNX 模型加载失败：\n" + detail +
-                            "\n\n若提示 onnxruntime.dll 不兼容，请完整替换新版程序及配套 DLL，不能只替换 EXE。");
-                        sleepMs(100);
-                        continue;
+            groupSizes.clear(); activeSize = requestedSize = searchSize = 0;
+            adaptiveRange.reset();
+            if (modelGroup) {
+                groupDirectory = g.modelDirectory() / file_paths::wide(req);
+                const auto available = model_files::groupSizes(groupDirectory, engineWanted);
+                if (available.empty()) {
+                    msgBox("模型组:" + req + "没有当前引擎可用的尺寸模型；NCNN 需要同尺寸的 param 和 bin。");
+                    continue;
+                }
+                // Load and warm each available size once; subsequent changes only select a cached instance.
+                for (int size : available) {
+                    int rc = selectVariant(size);
+                    if (rc == 0) {
+                        std::vector<unsigned char> warm(size_t(size) * size * 3, 114);
+                        const auto detect = engineWanted == 1 ? ncnnDetectBgr : engineWanted == 2 ? onnxDetectBgr : trtDetectBgr;
+                        rc = detect(warm.data(), size, size, size_t(size)*3, accuracy, settings.nms, objs);
                     }
-                    modelReady = true;
+                    if (rc >= 0) groupSizes.push_back(size);
+                    else runtime_log::write("[adaptive] 模型组=%s，尺寸=%d，加载或预热失败：%s", req.c_str(), size, modelError().c_str());
+                    if (g.engine != engineWanted || g.selectedModelName() != req) break;
                 }
-                else
-                {
-                    msgBox("模型:" + req + "的onnx文件不存在!请放入程序同目录的模型数据文件夹后点击确定");
+                if (g.engine != engineWanted || g.selectedModelName() != req) continue;
+                searchSize = adaptive_capture::largestSize(groupSizes);
+                if (!searchSize) {
+                    msgBox("模型组:" + req + "所有尺寸均加载或预热失败，详情见运行日志。修复后切换一次引擎重试。");
                     continue;
                 }
-            }
-            else if (engineWanted == 3)
-            {
-                const auto enginePath = g.modelDirectory() / file_paths::wide(req + ".trt");
-                if (!fileExists(enginePath)) {
-                    msgBox("模型:" + req + "的trt文件不存在!请先用ONNX转TRT工具转换，再放入程序同目录的模型数据文件夹。");
-                    continue;
-                }
-                loadedModel = req;
-                if (saga::trt_create(enginePath.c_str()) != 0) {
-                    runtime_log::write("[infer] TensorRT load failed: %s", utf8ToAnsi(saga::trt_last_error()).c_str());
-                    msgBox("N卡专用模型加载失败：\n" + utf8ToAnsi(saga::trt_last_error()) +
-                        "\n修复后切换一次推理引擎即可重试。");
-                    continue;
-                }
-                runtime_log::write("[infer] TensorRT model ready: %s", req.c_str());
+                requestedSize = searchSize;
                 modelReady = true;
+            }
+            else {
+                if (engineWanted == 1)
+                {
+                    const auto par = g.modelDirectory() / file_paths::wide(req + ".param");
+                    const auto bin = g.modelDirectory() / file_paths::wide(req + ".bin");
+                    if (fileExists(bin) && fileExists(par))
+                    {
+                        // 原版先用模型名"上锁"再加载：加载失败也不会反复重试
+                        loadedModel = req;
+                        int rc = sagaNcnnCreate(par.c_str(), bin.c_str(), 1, 0);
+                        if (rc != 0)
+                        {
+                            const auto detail = utf8ToAnsi(saga::ncnn_last_error());
+                            runtime_log::write("[infer] NCNN 加载失败：%s", detail.c_str());
+                            msgBox("模型加载失败，错误码：" + std::to_string(rc) + "\n" + detail);
+                            sleepMs(100);
+                            continue;
+                        }
+                        modelReady = true;
+                    }
+                    else
+                    {
+                        msgBox("模型:" + req + "的param或bin文件不存在!请放入程序同目录的模型数据文件夹后点击确定");
+                        continue;
+                    }
+                }
+                else if (engineWanted == 2)
+                {
+                    const auto onnx = g.modelDirectory() / file_paths::wide(req + ".onnx");
+                    if (fileExists(onnx))
+                    {
+                        // The model and labels share the dedicated model directory.
+                        const auto txt = g.modelDirectory() / L"空类别.txt";
+                        // Labels are optional; loading a model must not require write permission.
+
+                        loadedModel = req;                                // 同上，先上锁
+                        int rc = sagaOnnxCreate(onnx.c_str(), txt.c_str(), true);
+                        if (rc != 0)
+                        {
+                            const std::string detail = utf8ToAnsi(saga::onnx_last_error());
+                            runtime_log::write("[infer] ONNX 加载失败：%s", detail.c_str());
+                            msgBox("ONNX 模型加载失败：\n" + detail +
+                                "\n\n若提示 onnxruntime.dll 不兼容，请完整替换新版程序及配套 DLL，不能只替换 EXE。");
+                            sleepMs(100);
+                            continue;
+                        }
+                        modelReady = true;
+                    }
+                    else
+                    {
+                        msgBox("模型:" + req + "的onnx文件不存在!请放入程序同目录的模型数据文件夹后点击确定");
+                        continue;
+                    }
+                }
+                else if (engineWanted == 3)
+                {
+                    const auto enginePath = g.modelDirectory() / file_paths::wide(req + ".trt");
+                    if (!fileExists(enginePath)) {
+                        msgBox("模型:" + req + "的trt文件不存在!请先用ONNX转TRT工具转换，再放入程序同目录的模型数据文件夹。");
+                        continue;
+                    }
+                    loadedModel = req;
+                    if (saga::trt_create(enginePath.c_str()) != 0) {
+                        runtime_log::write("[infer] TensorRT load failed: %s", utf8ToAnsi(saga::trt_last_error()).c_str());
+                        msgBox("N卡专用模型加载失败：\n" + utf8ToAnsi(saga::trt_last_error()) +
+                            "\n修复后切换一次推理引擎即可重试。");
+                        continue;
+                    }
+                    runtime_log::write("[infer] TensorRT model ready: %s", req.c_str());
+                    modelReady = true;
+                }
             }
         }
         // Never invoke a failed or incomplete model. Existing ONNX/NCNN models
         // previously marked a failed load as loaded and could use a null object.
         if (!modelReady) { sleepMs(50); continue; }
+
+        if (modelGroup) {
+            if (!g.aimPhysicalDown || (!directCapture && nowMs() - inputFrameTime > 125)) {
+                requestedSize = searchSize;
+                adaptiveRange.reset();
+            }
+            const int nextSize = requestedSize;
+            if (nextSize != activeSize) {
+                if (selectVariant(nextSize) != 0) { modelReady = false; clearInferenceResult(); continue; }
+                std::lock_guard<std::mutex> selection(g.modelMutex);
+                if (g.modelName != req || g.engine != engineWanted || g.inferenceEpoch != inferenceEpoch) continue;
+                if (directCapture && !captureSetCrop(nextSize)) { sleepMs(2); continue; }
+                const int oldSize = activeSize ? activeSize : nextSize;
+                const double shift = (nextSize - oldSize) * 0.5;
+                for (int i = 0; i < lockMem.count; ++i) { lockMem.part[i].x += shift; lockMem.part[i].y += shift; }
+                nearestRect.x += float(shift); nearestRect.y += float(shift);
+                clearInferenceResult();
+                inferenceEpoch = ++g.inferenceEpoch;
+                lastInferenceEpoch = inferenceEpoch;
+                activeSize = nextSize; g.imgSize = nextSize;
+            }
+        }
 
         // ---------------- 帧率统计（每 100 次）----------------
         // Timeouts are not inference frames; acquire before counting a sample.
@@ -353,6 +441,12 @@ void aimThread(int engineWanted)
             captureFrame = {};
             continue;
         }
+        if (directCapture && modelGroup && (captureFrame.width != activeSize || captureFrame.height != activeSize)) {
+            captureFrame = {};
+            captureSetCrop(activeSize);
+            continue;
+        }
+        const int frameSize = modelGroup ? activeSize : directCapture ? captureFrame.width : g.imgSize.load();
         detectCount++;
         if (detectCount >= 100)
         {
@@ -374,6 +468,25 @@ void aimThread(int engineWanted)
                 engineWanted == 2 ? onnxDetectBgr : trtDetectBgr;
             n = detect(captureFrame.bmp + 54, captureFrame.width, captureFrame.height,
                 captureFrame.stride, accuracy, settings.nms, objs);
+        } else if (modelGroup) {
+            // Remote input must contain the group's full search area; crop without upscaling.
+            cv::Mat decoded;
+            encoded_image::BgrView view;
+            if (encoded_image::topDownBgr(localFrame.data(), localFrame.size(), view))
+                decoded = cv::Mat(view.height, view.width, CV_8UC3, localFrame.data() + view.offset, view.stride);
+            else {
+                try { decoded = cv::imdecode(localFrame, cv::IMREAD_COLOR); }
+                catch (const cv::Exception&) { clearInferenceResult(); continue; }
+            }
+            if (decoded.cols < searchSize || decoded.rows < searchSize) {
+                if (!remoteSizeWarned) runtime_log::write("[adaptive] UDP 输入必须至少为 %dx%d，当前 %dx%d", searchSize, searchSize, decoded.cols, decoded.rows);
+                remoteSizeWarned = true;
+                clearInferenceResult(); sleepMs(10); continue;
+            }
+            remoteSizeWarned = false;
+            const auto roi = decoded(cv::Rect((decoded.cols-activeSize)/2, (decoded.rows-activeSize)/2, activeSize, activeSize));
+            const auto detect = engineWanted == 1 ? ncnnDetectBgr : engineWanted == 2 ? onnxDetectBgr : trtDetectBgr;
+            n = detect(roi.data, roi.cols, roi.rows, roi.step, accuracy, settings.nms, objs);
         } else if (engineWanted == 1) {
             n = sagaNcnnDetect(localFrame.data(), (int)localFrame.size(), accuracy, settings.nms, objs);
         } else if (engineWanted == 2) {
@@ -410,6 +523,18 @@ void aimThread(int engineWanted)
         g.inferMs = (int)inferCost;
         g.inferMsPrecise = inferCost;
         g.resultFrameTime = inputFrameTime;
+        if (n < 0 && modelGroup) {
+            clearInferenceResult();
+            runtime_log::write("[adaptive] 推理失败：模型组=%s，尺寸=%d，%s", req.c_str(), activeSize, modelError().c_str());
+            groupSizes.erase(std::remove(groupSizes.begin(), groupSizes.end(), activeSize), groupSizes.end());
+            requestedSize = searchSize = adaptive_capture::largestSize(groupSizes);
+            adaptiveRange.reset();
+            if (!searchSize) {
+                modelReady = false;
+                msgBox("模型组已没有可用尺寸，请查看运行日志，修复后切换一次引擎重试。");
+            }
+            continue;
+        }
         if (n < 0 && engineWanted == 3) {
             modelReady = false;
             clearInferenceResult();
@@ -445,6 +570,7 @@ void aimThread(int engineWanted)
             std::memcpy(g.boxes, drawSnapshot, (size_t)bi * sizeof(DrawBox));
             if (bi < 99) g.boxes[bi] = {}; // Renderer stops at the first empty entry.
             g.canDraw = true;
+            g.drawSize = frameSize;
             LeaveCriticalSection(&g_drawLock);
         }
 
@@ -454,6 +580,7 @@ void aimThread(int engineWanted)
         const auto& profile = profileSnapshot.profile;
         if (lastProfileToken != profileSnapshot.token) {
             lockMem = {};
+            adaptiveRange.reset();
             pidX = {}; pidY = {};
             prevNearestRange = 0;
             nearestX = nearestY = 0;
@@ -464,8 +591,8 @@ void aimThread(int engineWanted)
         // ---------------- 鼠标中心点（准星）----------------
         int idx = 0;
         int crossCount = 0;
-        int centerX = roundToInt(g.imgSize * 0.5);
-        int centerY = roundToInt(g.imgSize * 0.5);
+        int centerX = roundToInt(frameSize * 0.5);
+        int centerY = roundToInt(frameSize * 0.5);
 
         if (settings.crossClass > 0 && g.crossTrack.load())
         {
@@ -478,8 +605,8 @@ void aimThread(int engineWanted)
                     crossCount++;
                     if (crossCount >= 2)          // 有且只有 1 个才采用
                     {
-                        centerX = roundToInt(g.imgSize * 0.5);
-                        centerY = roundToInt(g.imgSize * 0.5);
+                        centerX = roundToInt(frameSize * 0.5);
+                        centerY = roundToInt(frameSize * 0.5);
                         break;
                     }
                     // 原版：局_鼠标中心点X ＝ (x ＋ x ＋ 宽度) × 0.5，小数赋给整数型 → 四舍五入
@@ -597,6 +724,15 @@ void aimThread(int engineWanted)
             g.moveDy = 0;
             LeaveCriticalSection(&g_moveLock);
             g.nearestDist = 0;
+        }
+
+        if (modelGroup) {
+            // Use this frame's selected box, never the stale nearestRect retained after a lost lock.
+            const LockTarget* target = picked.index >= 0 ? &targets[picked.index] : nullptr;
+            const auto box = target ? adaptive_capture::TargetBox{target->rect.x, target->rect.y,
+                target->rect.width, target->rect.height} : adaptive_capture::TargetBox{};
+            requestedSize = adaptiveRange.nextSize(g.aimPhysicalDown.load(), target != nullptr,
+                target ? target->lockX : 0, target ? target->lockY : 0, box, frameSize, groupSizes);
         }
 
         g.boxDx = nearestX;

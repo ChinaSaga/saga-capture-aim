@@ -199,6 +199,7 @@
     <ClInclude Include="src\WebAccess.h" />
     <ClInclude Include="src\RuntimeLog.h" />
     <ClInclude Include="src\ModelFiles.h" />
+    <ClInclude Include="src\AdaptiveCapture.h" />
     <ClInclude Include="src\ModelPaths.h" />
     <ClInclude Include="src\FilePaths.h" />
     <ClInclude Include="src\FileIO.h" />

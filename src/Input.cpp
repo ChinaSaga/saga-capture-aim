@@ -30,12 +30,12 @@ void hotkeyThread()
         // Repeat only while a configured aim key is physically held, even in always-on mode.
         auto physicalConfig = config.config;
         physicalConfig.alwaysOn = false;
-        g.rangePressActive = g.rangePressKey.load() > 1000 &&
-            aim_profiles::select(physicalConfig, [&](int key) {
+        g.aimPhysicalDown = aim_profiles::select(physicalConfig, [&](int key) {
                 bool pressed = false;
                 readKey(key, pressed);
                 return pressed;
             }) >= 0;
+        g.rangePressActive = g.rangePressKey.load() > 1000 && g.aimPhysicalDown.load();
 
         // 准星追踪（原版为"只置真不自动复位"的锁存行为，由准星监控线程复位）
         bool track = g.crossTrack.load();

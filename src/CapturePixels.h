@@ -1,11 +1,13 @@
 #pragma once
 
 #include <immintrin.h>
+#include <intrin.h>
 #include <cstdint>
 #include <cstring>
+#include <cstdlib>
 
-// The DLL targets AVX2 machines. All converters preserve the original 16.16
-// coefficients and rounding exactly; no floating-point approximation is used.
+// AVX2 baseline, with guarded AVX-512F/BW entry points on capable CPU/OS pairs.
+// All converters preserve the original 16.16 coefficients and rounding exactly.
 namespace capture_pixels {
 
 struct Coefficients {
@@ -14,6 +16,25 @@ struct Coefficients {
 };
 
 namespace detail {
+
+inline bool wide_vectors_available() {
+    static const bool supported = [] {
+        size_t length = 0;
+        getenv_s(&length, nullptr, 0, "SAGA_CAPTURE_AVX512");
+        if (length == 2) {
+            char mode[2]{};
+            if (getenv_s(&length, mode, sizeof(mode), "SAGA_CAPTURE_AVX512") == 0 && mode[0] == '0') return false;
+        }
+        int regs[4]{};
+        __cpuid(regs, 0);
+        if (regs[0] < 7) return false;
+        __cpuidex(regs, 1, 0);
+        if ((regs[2] & (1 << 27)) == 0 || (_xgetbv(0) & 0xe6) != 0xe6) return false;
+        __cpuidex(regs, 7, 0);
+        return (static_cast<unsigned>(regs[1]) & 0x40010000u) == 0x40010000u; // AVX-512F + BW.
+    }();
+    return supported;
+}
 
 __forceinline unsigned char channel(int value) {
     const int rounded = (value + 32768) >> 16;
@@ -148,7 +169,7 @@ __forceinline void nv_row(const unsigned char* source, const unsigned char* chro
 
 } // namespace detail
 
-__forceinline void yuy2_row(const unsigned char* source, int left, int count,
+__forceinline void yuy2_row_avx2(const unsigned char* source, int left, int count,
     unsigned char* output, const Coefficients& c) {
     if ((left & 1) && count) {
         const unsigned char* pair = source + (left & ~1) * 2;
@@ -329,26 +350,128 @@ __forceinline void two_rows(const unsigned char* source0, const unsigned char* s
     }
 }
 
+// Keep the optional ISA inside non-inlined entry points. The rest of the
+// application remains AVX2 and calls these only after checking CPU/OS support.
+__forceinline void wide_store(__m512i b, __m512i g, __m512i r, unsigned char* output) {
+    b = _mm512_srai_epi32(b, 16); g = _mm512_srai_epi32(g, 16); r = _mm512_srai_epi32(r, 16);
+    const __m512i bytes = _mm512_packus_epi16(_mm512_packs_epi32(b, g), _mm512_packs_epi32(r, r));
+    const __m512i groups = _mm512_shuffle_epi8(bytes, _mm512_broadcast_i32x4(_mm_setr_epi8(
+        0, 4, 8, 1, 5, 9, 2, 6, 10, 3, 7, 11, -1, -1, -1, -1)));
+    const __m512i packed = _mm512_permutexvar_epi32(_mm512_setr_epi32(
+        0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, 0, 0, 0, 0), groups);
+    _mm512_mask_storeu_epi32(output, 0x0fff, packed); // Exactly 48 bytes, including at the row end.
+}
+
+template<bool TenBit>
+__forceinline __m512i wide_y(const unsigned char* source, const Coefficients& c) {
+    __m512i y;
+    if constexpr (TenBit) y = _mm512_cvtepu16_epi32(_mm256_srli_epi16(
+        _mm256_loadu_si256(reinterpret_cast<const __m256i*>(source)), 6));
+    else y = _mm512_cvtepu8_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(source)));
+    y = _mm512_max_epi32(_mm512_sub_epi32(y, _mm512_set1_epi32(c.yOffset)), _mm512_setzero_si512());
+    return _mm512_add_epi32(_mm512_mullo_epi32(y, _mm512_set1_epi32(c.y)), _mm512_set1_epi32(32768));
+}
+
+template<bool TenBit, bool SwapUV>
+__declspec(noinline) void two_rows_wide(const unsigned char* source0, const unsigned char* source1,
+    const unsigned char* chroma, int left, int count, unsigned char* output0, unsigned char* output1,
+    const Coefficients& c) {
+    constexpr int bpp = TenBit ? 2 : 1;
+    if ((left & 1) && count) {
+        planar_row<TenBit, SwapUV>(source0, chroma, left, 1, output0, c);
+        planar_row<TenBit, SwapUV>(source1, chroma, left, 1, output1, c);
+        ++left; --count; output0 += 3; output1 += 3;
+    }
+    source0 += left * bpp; source1 += left * bpp; chroma += left * bpp;
+    while (count >= 16) {
+        __m512i u, v;
+        if constexpr (TenBit) {
+            const __m256i uv = _mm256_srli_epi16(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(chroma)), 6);
+            u = _mm512_cvtepu16_epi32(_mm256_shuffle_epi8(uv, _mm256_setr_epi8(
+                0,1,0,1,4,5,4,5,8,9,8,9,12,13,12,13, 0,1,0,1,4,5,4,5,8,9,8,9,12,13,12,13)));
+            v = _mm512_cvtepu16_epi32(_mm256_shuffle_epi8(uv, _mm256_setr_epi8(
+                2,3,2,3,6,7,6,7,10,11,10,11,14,15,14,15, 2,3,2,3,6,7,6,7,10,11,10,11,14,15,14,15)));
+        } else {
+            const __m128i uv = _mm_loadu_si128(reinterpret_cast<const __m128i*>(chroma));
+            const __m128i first = _mm_shuffle_epi8(uv, _mm_setr_epi8(0,0,2,2,4,4,6,6,8,8,10,10,12,12,14,14));
+            const __m128i second = _mm_shuffle_epi8(uv, _mm_setr_epi8(1,1,3,3,5,5,7,7,9,9,11,11,13,13,15,15));
+            u = _mm512_cvtepu8_epi32(SwapUV ? second : first);
+            v = _mm512_cvtepu8_epi32(SwapUV ? first : second);
+        }
+        u = _mm512_sub_epi32(u, _mm512_set1_epi32(c.uvOffset));
+        v = _mm512_sub_epi32(v, _mm512_set1_epi32(c.uvOffset));
+        const __m512i b = _mm512_mullo_epi32(u, _mm512_set1_epi32(c.blueU));
+        const __m512i r = _mm512_mullo_epi32(v, _mm512_set1_epi32(c.redV));
+        const __m512i g = _mm512_add_epi32(_mm512_mullo_epi32(u, _mm512_set1_epi32(c.greenU)),
+            _mm512_mullo_epi32(v, _mm512_set1_epi32(c.greenV)));
+        const __m512i y0 = wide_y<TenBit>(source0, c), y1 = wide_y<TenBit>(source1, c);
+        wide_store(_mm512_add_epi32(y0, b), _mm512_add_epi32(y0, g), _mm512_add_epi32(y0, r), output0);
+        wide_store(_mm512_add_epi32(y1, b), _mm512_add_epi32(y1, g), _mm512_add_epi32(y1, r), output1);
+        source0 += 16 * bpp; source1 += 16 * bpp; chroma += 16 * bpp;
+        output0 += 48; output1 += 48; count -= 16;
+    }
+    if (count) {
+        planar_row<TenBit, SwapUV>(source0, chroma, 0, count, output0, c);
+        planar_row<TenBit, SwapUV>(source1, chroma, 0, count, output1, c);
+    }
+}
+
+__declspec(noinline) inline void yuy2_row_wide(const unsigned char* source, int left, int count,
+    unsigned char* output, const Coefficients& c) {
+    if ((left & 1) && count) {
+        yuy2_row_avx2(source, left, 1, output, c);
+        ++left; --count; output += 3;
+    }
+    source += left * 2;
+    while (count >= 16) {
+        const __m256i packed = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(source));
+        __m512i y = _mm512_cvtepu16_epi32(_mm256_and_si256(packed, _mm256_set1_epi16(255)));
+        __m512i u = _mm512_cvtepu16_epi32(_mm256_shuffle_epi8(packed, _mm256_setr_epi8(
+            1,-1,1,-1,5,-1,5,-1,9,-1,9,-1,13,-1,13,-1, 1,-1,1,-1,5,-1,5,-1,9,-1,9,-1,13,-1,13,-1)));
+        __m512i v = _mm512_cvtepu16_epi32(_mm256_shuffle_epi8(packed, _mm256_setr_epi8(
+            3,-1,3,-1,7,-1,7,-1,11,-1,11,-1,15,-1,15,-1, 3,-1,3,-1,7,-1,7,-1,11,-1,11,-1,15,-1,15,-1)));
+        y = _mm512_max_epi32(_mm512_sub_epi32(y, _mm512_set1_epi32(c.yOffset)), _mm512_setzero_si512());
+        y = _mm512_add_epi32(_mm512_mullo_epi32(y, _mm512_set1_epi32(c.y)), _mm512_set1_epi32(32768));
+        u = _mm512_sub_epi32(u, _mm512_set1_epi32(c.uvOffset));
+        v = _mm512_sub_epi32(v, _mm512_set1_epi32(c.uvOffset));
+        wide_store(_mm512_add_epi32(y, _mm512_mullo_epi32(u, _mm512_set1_epi32(c.blueU))),
+            _mm512_add_epi32(y, _mm512_add_epi32(_mm512_mullo_epi32(u, _mm512_set1_epi32(c.greenU)),
+                _mm512_mullo_epi32(v, _mm512_set1_epi32(c.greenV)))),
+            _mm512_add_epi32(y, _mm512_mullo_epi32(v, _mm512_set1_epi32(c.redV))), output);
+        source += 32; output += 48; count -= 16;
+    }
+    if (count) yuy2_row_avx2(source, 0, count, output, c);
+}
+
 } // namespace detail
+
+__forceinline void yuy2_row(const unsigned char* source, int left, int count,
+    unsigned char* output, const Coefficients& c) {
+    if (count >= 16 + (left & 1) && detail::wide_vectors_available()) detail::yuy2_row_wide(source, left, count, output, c);
+    else yuy2_row_avx2(source, left, count, output, c);
+}
 
 // source0 and source1 must belong to the same 4:2:0 chroma row. The caller
 // handles an odd first source row and an unpaired final row with the row APIs.
 __forceinline void nv12_two_rows(const unsigned char* source0, const unsigned char* source1,
     const unsigned char* chroma, int left, int count, unsigned char* output0, unsigned char* output1,
     const Coefficients& c) {
-    detail::two_rows<false, false>(source0, source1, chroma, left, count, output0, output1, c);
+    if (count >= 16 + (left & 1) && detail::wide_vectors_available()) detail::two_rows_wide<false, false>(source0, source1, chroma, left, count, output0, output1, c);
+    else detail::two_rows<false, false>(source0, source1, chroma, left, count, output0, output1, c);
 }
 
 __forceinline void nv21_two_rows(const unsigned char* source0, const unsigned char* source1,
     const unsigned char* chroma, int left, int count, unsigned char* output0, unsigned char* output1,
     const Coefficients& c) {
-    detail::two_rows<false, true>(source0, source1, chroma, left, count, output0, output1, c);
+    if (count >= 16 + (left & 1) && detail::wide_vectors_available()) detail::two_rows_wide<false, true>(source0, source1, chroma, left, count, output0, output1, c);
+    else detail::two_rows<false, true>(source0, source1, chroma, left, count, output0, output1, c);
 }
 
 __forceinline void p010_two_rows(const unsigned char* source0, const unsigned char* source1,
     const unsigned char* chroma, int left, int count, unsigned char* output0, unsigned char* output1,
     const Coefficients& c) {
-    detail::two_rows<true, false>(source0, source1, chroma, left, count, output0, output1, c);
+    if (count >= 16 + (left & 1) && detail::wide_vectors_available()) detail::two_rows_wide<true, false>(source0, source1, chroma, left, count, output0, output1, c);
+    else detail::two_rows<true, false>(source0, source1, chroma, left, count, output0, output1, c);
 }
 
 } // namespace capture_pixels

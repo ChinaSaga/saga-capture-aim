@@ -327,6 +327,7 @@ bool frame_layout(AM_MEDIA_TYPE& type, int width, int height, FrameLayout& layou
 class FrameReceiver final : public ISampleGrabberCB {
 public:
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
+        if (!object) return E_POINTER;
         *object = nullptr;
         if (iid != IID_IUnknown && iid != __uuidof(ISampleGrabberCB)) return E_NOINTERFACE;
         *object = static_cast<ISampleGrabberCB*>(this);
@@ -368,8 +369,8 @@ public:
     // SampleCB stays available for in-process tests; production selects BufferCB
     // so there are no IMediaSample method calls in the streaming path.
     HRESULT STDMETHODCALLTYPE SampleCB(double, IMediaSample* sample) override {
-        BYTE* data;
-        sample->GetPointer(&data);
+        BYTE* data = nullptr;
+        if (!sample || FAILED(sample->GetPointer(&data))) return S_OK;
         return BufferCB(0, data, sample->GetActualDataLength());
     }
     HRESULT STDMETHODCALLTYPE BufferCB(double, BYTE* data, long bytes) override {
@@ -389,6 +390,13 @@ public:
         BYTE* completed = buffers_[slot];
         writeHeader(completed);
         kernel_(*this, data, completed + 54);
+        // Odd crop widths leave 1-3 BMP padding bytes. A larger crop can reuse
+        // a slot written with another stride; never expose those old bytes.
+        const size_t pixelBytes = static_cast<size_t>(crop_) * 3;
+        if (pixelBytes != stride_) {
+            for (int y = 0; y < crop_; ++y)
+                std::memset(completed + 54 + y * stride_ + pixelBytes, 0, stride_ - pixelBytes);
+        }
         {
             Lock snapshot(g_snapshotLock);
             g_captureFrame = {storage_[slot], completed, size_, crop_, crop_, stride_};

@@ -14,6 +14,7 @@ $tests = @(
     @{ Name='test_aim_profiles' }, @{ Name='test_adaptive_capture' }, @{ Name='test_adaptive_loop' }, @{ Name='test_tensor_pixels' },
     @{ Name='test_letterbox_geometry' }, @{ Name='test_yolo_hotpath' },
     @{ Name='test_capture_pipeline' }, @{ Name='test_capture_preview' },
+    @{ Name='test_capture_stress' }, @{ Name='test_screenshot' },
     @{ Name='test_capture_start_async' }, @{ Name='test_makcu_serial_protocol' },
     @{ Name='test_wch_hardware_id' }, @{ Name='test_box_controller' },
     @{ Name='test_tensorrt_api' }, @{ Name='test_trt_converter' }, @{ Name='test_onnx_fp16' },

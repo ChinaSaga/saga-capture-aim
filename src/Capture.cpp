@@ -6,6 +6,7 @@
 #include <limits>
 #include "RuntimeLog.h"
 #include "ModelFiles.h"
+#include "Screenshot.h"
 
 
 #include <chrono>
@@ -305,8 +306,10 @@ void frameThreadRender()
 void frameThreadShotSave()
 {
     long long lastWrite = 0;
+    unsigned long long captureSequence = 0;
+    long long udpSequence = -1;
     std::vector<unsigned char> local, jpeg;
-    const std::vector<int> jpegParams{cv::IMWRITE_JPEG_QUALITY, 95};
+    screenshot::Writer writer;
     while (g.running.load())
     {
         long long now = nowMs();
@@ -314,16 +317,19 @@ void frameThreadShotSave()
 
         if (g.settings.snapshot().autoShot && g.aimKeyDown.load())
         {
-            if (now - g.lastDetectTime < 125 && now - lastWrite > 80)
+            if (now - g.lastDetectTime < 125 && now - g_lastFrameTime < 125 && now - lastWrite > 80)
             {
                 CaptureFrame frame;
                 if (g.captureRunning.load()) {
-                    unsigned long long sequence = 0;
-                    captureAcquire(frame, sequence, 0);
+                    captureAcquire(frame, captureSequence, 0);
                     local.clear();
                 } else {
+                    local.clear();
                     EnterCriticalSection(&g_frameLock);
-                    local = g_frame;
+                    if (udpSequence != g_frameSeq) {
+                        local = g_frame;
+                        udpSequence = g_frameSeq;
+                    }
                     LeaveCriticalSection(&g_frameLock);
                 }
 
@@ -333,29 +339,15 @@ void frameThreadShotSave()
                     // 截图节流是 80ms（每秒最多 ~12 张），秒级文件名会互相覆盖
                     long long ts = (long long)std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::system_clock::now().time_since_epoch()).count();
-                    char name[32];
-                    snprintf(name, sizeof(name), "%lld.jpg", ts);
-                    const auto dir = file_paths::io(g.runDir / file_paths::wide(g.selectedModelName()));
-                    CreateDirectoryW(dir.c_str(), nullptr);
+                    const auto model = g.selectedModelName();
                     // The capture lease already contains top-down BGR; preserve
                     // its stride and encode directly, without copying/decoding BMP.
                     try {
-                        cv::Mat decoded = frame.owner
-                            ? cv::Mat(frame.height, frame.width, CV_8UC3,
-                                const_cast<unsigned char*>(frame.bmp + 54), frame.stride)
-                            : cv::imdecode(local, cv::IMREAD_COLOR);
-                        const bool encoded = !decoded.empty() &&
-                            cv::imencode(".jpg", decoded, jpeg, jpegParams);
+                        const bool encoded = screenshot::encode(frame, local, jpeg);
                         // Release the capture slot before disk I/O.
-                        decoded.release();
                         frame = {};
-                        if (encoded) {
-                            FILE* file = file_paths::open(dir / file_paths::wide(name), L"wb");
-                            if (file) {
-                                fwrite(jpeg.data(), 1, jpeg.size(), file);
-                                fclose(file);
-                            }
-                        }
+                        if (encoded && !writer.save(g.runDir, model, ts, jpeg))
+                            OutputDebugStringA("Automatic screenshot: file write failed.\n");
                     } catch (const cv::Exception&) {
                         OutputDebugStringA("Automatic screenshot: JPEG encoding failed.\n");
                     }

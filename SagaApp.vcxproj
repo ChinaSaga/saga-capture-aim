@@ -167,6 +167,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\CapturePixels.h" />
+    <ClInclude Include="src\Screenshot.h" />
     <ClInclude Include="src\FrameWait.h" />
     <ClInclude Include="src\App.h" />
     <ClInclude Include="src\AimProfiles.h" />

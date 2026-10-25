@@ -9,16 +9,9 @@ void hotkeyThread()
     while (g.running.load())
     {
         const auto settings = g.settings.snapshot();
-        // Query a configured button once per scan (Ferrum performs serial I/O).
-        struct CachedKey { int key; bool pressed; } cache[20]{};
-        int cached = 0;
+        BoxInputScan input;
         const auto readKey = [&](int key, bool& state) {
-            if (key <= 0) { state = false; return; }
-            for (int i = 0; i < cached; ++i) {
-                if (cache[i].key == key) { state = cache[i].pressed; return; }
-            }
-            state = boxKeyState(key);
-            if (cached < 20) cache[cached++] = {key, state};
+            state = input.keyDown(key);
         };
         const auto config = g.aimProfiles.config();
         const int active = aim_profiles::select(config.config, [&](int key) {

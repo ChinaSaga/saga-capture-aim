@@ -8,6 +8,7 @@
 #include <thread>
 #include <array>
 #include <bitset>
+#include <chrono>
 #include <random>
 
 namespace {
@@ -73,6 +74,14 @@ std::atomic<bool> catConfigured{false}, catConnecting{false};
 constexpr int keys[] = {1, 2, 3, 5, 6};
 constexpr cat::MouseButton buttons[] = {cat::MouseButton::LEFT, cat::MouseButton::RIGHT,
     cat::MouseButton::MIDDLE, cat::MouseButton::SIDE1, cat::MouseButton::SIDE2};
+struct ButtonSample {
+    std::mutex mutex;
+    unsigned long long generation = 0;
+    std::chrono::steady_clock::time_point sampledAt{};
+    bool valid = false, pressed = false;
+};
+std::array<ButtonSample, 5> buttonSamples;
+constexpr auto buttonSampleAge = std::chrono::milliseconds(2);
 int buttonIndex(int key) {
     for (int i = 0; i < 5; ++i) if (keys[i] == key) return i;
     return -1;
@@ -328,9 +337,31 @@ void boxUp(int key) {
 bool boxButtonState(int key) {
     const int index = buttonIndex(key);
     if (index < 0) return false;
+    // Serialize only readers of this button, never device output. In particular,
+    // concurrent web/camp reads must not queue duplicate Ferrum serial queries.
+    auto& sample = buttonSamples[index];
+    std::lock_guard<std::mutex> lock(sample.mutex);
+    const auto generation = routeGeneration.load();
     auto session = activeCat.load();
-    if (session) return session->online && session->device.isMouseButtonPressed(buttons[index]);
-    return saga::makcuMouseButtonState(key) != 0;
+    const bool online = session ? session->online && session->device.isMonitoring() : saga::makcuIsConnected() != 0;
+    if (!online) { sample.valid = false; return false; }
+    const auto now = std::chrono::steady_clock::now();
+    if (sample.valid && sample.generation == generation && now - sample.sampledAt < buttonSampleAge)
+        return generation == routeGeneration.load() && sample.pressed;
+    const bool pressed = session ? session->device.isMouseButtonPressed(buttons[index]) :
+        saga::makcuMouseButtonState(key) != 0;
+    // A slow query may span a route change. Do not publish the previous route's
+    // held key as a fresh sample for the new device.
+    if (generation != routeGeneration.load() ||
+        (session ? !session->online || !session->device.isMonitoring() : !saga::makcuIsConnected())) {
+        sample.valid = false;
+        return false;
+    }
+    sample.generation = generation;
+    sample.sampledAt = std::chrono::steady_clock::now();
+    sample.pressed = pressed;
+    sample.valid = true;
+    return pressed;
 }
 
 bool boxKeyState(int key) {
@@ -339,4 +370,18 @@ bool boxKeyState(int key) {
         return session && session->online && session->device.isKeyPressed(static_cast<uint16_t>(key - 1000));
     }
     return boxButtonState(key);
+}
+
+BoxInputScan::BoxInputScan() : generation_(routeGeneration.load()) {}
+
+bool BoxInputScan::keyDown(int key) {
+    const int index = key > 1000 && key <= 1127 ? key - 1000 + 4 : buttonIndex(key);
+    if (index < 0 || generation_ != routeGeneration.load()) return false;
+    auto& state = states_[index];
+    if (!state) {
+        const bool pressed = boxKeyState(key);
+        if (generation_ != routeGeneration.load()) return false;
+        state = pressed ? 1 : -1;
+    }
+    return state > 0;
 }

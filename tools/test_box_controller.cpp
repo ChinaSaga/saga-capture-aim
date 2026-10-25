@@ -1,5 +1,6 @@
 // Local encrypted UDP peer: verifies routing without moving a physical mouse.
 #include "../src/BoxController.cpp"
+#include "../src/Input.cpp"
 #include "../src/Makcu/cat/src/aes_functions.cpp"
 #include "../src/Makcu/cat/src/cat_net_core.cpp"
 #include "../src/Makcu/cat/src/catdevice.cpp"
@@ -12,20 +13,109 @@
 AppState g;
 namespace runtime_log { void write(const char*, ...) {} }
 static int makcuMoves = 0, makcuDowns = 0, makcuUps = 0;
+static bool makcuOnline = true;
+static unsigned physicalButtons = 1u << 2;
+static std::array<int, 7> buttonReads{};
+static std::function<void()> duringButtonRead;
 namespace saga {
 int makcuMove(int, int) { ++makcuMoves; return 1; }
 int makcuMouseDown(int) { ++makcuDowns; return 1; }
 int makcuMouseUp(int) { ++makcuUps; return 1; }
-int makcuMouseButtonState(int key) { return key == 2; }
-int makcuIsConnected() { return 1; }
+int makcuMouseButtonState(int key) {
+    ++buttonReads.at(key);
+    const bool pressed = (physicalButtons & (1u << key)) != 0;
+    if (duringButtonRead) duringButtonRead();
+    return pressed;
+}
+int makcuIsConnected() { return makcuOnline; }
 }
 const char* makcuStartupStatus() { return "MAKCU"; }
+void sleepMs(int) { g.running = false; } // Run exactly one production input scan.
+void makcuState(int key, bool& state) { state = boxButtonState(key); }
+void RunTimer::start() {}
+double RunTimer::ms() const { return 0; }
+void soundPlayCamp(int) {}
 void check(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
 template<class F> void eventually(F condition, int ms, const char* message) {
     auto end = GetTickCount64() + ms;
     while (!condition()) { check(GetTickCount64() < end, message); Sleep(5); }
+}
+
+void expireButtonSamples() {
+    for (auto& sample : buttonSamples) {
+        std::lock_guard lock(sample.mutex);
+        sample.sampledAt = std::chrono::steady_clock::now() - buttonSampleAge;
+    }
+}
+
+void testInputSharing() {
+    aim_profiles::Config config;
+    for (auto& profile : config.profiles) profile.keys.fill(2);
+    g.aimProfiles.replace(config);
+    auto settings = g.settings.snapshot();
+    for (int& key : settings.crossBind) key = 2;
+    for (int& key : settings.triggerKey) key = 2;
+    g.settings.replace(settings);
+    g.rangePressKey = 1057;
+    for (bool pressed : {true, false}) {
+        physicalButtons = pressed ? 1u << 2 : 0;
+        expireButtonSamples();
+        buttonReads.fill(0);
+        g.crossTrack = false;
+        g.running = true;
+        hotkeyThread();
+        check(buttonReads[2] == 1, "all aim/crosshair/trigger slots query right once per scan, including key-up");
+        check(g.aimKeyDown == pressed && g.aimPhysicalDown == pressed &&
+            g.crossTrack == pressed && g.triggerDown == pressed && g.rangePressActive == pressed,
+            "all consumers must use the same physical right-button result");
+    }
+
+    // A scan remains consistent even when the underlying state changes and the
+    // shared 2 ms sample expires midway through evaluation.
+    buttonReads.fill(0);
+    expireButtonSamples();
+    BoxInputScan heldScan;
+    check(!heldScan.keyDown(2), "initial released sample");
+    physicalButtons = 1u << 2;
+    expireButtonSamples();
+    for (int code = 1001; code <= 1127; ++code) check(!heldScan.keyDown(code), "MAKCU keyboard remains unavailable");
+    for (int i = 0; i < 100; ++i) check(!heldScan.keyDown(2), "released result stays shared for the entire scan");
+    check(buttonReads[2] == 1, "scan cache does not overflow after more than twenty keys");
+    BoxInputScan nextScan;
+    check(nextScan.keyDown(2) && buttonReads[2] == 2, "next scan refreshes expired physical state");
+    for (int key : {-1, 0, 4, 7, 1000, 1128, 65535}) check(!nextScan.keyDown(key), "invalid bindings do not access devices");
+
+    // Keep the sample fresh deterministically while another thread acts as the
+    // web status/camp reader. Expiration is exercised separately above.
+    { std::lock_guard lock(buttonSamples[1].mutex);
+      buttonSamples[1].sampledAt = std::chrono::steady_clock::now() + std::chrono::seconds(1); }
+    bool webPressed = false;
+    std::thread status([&] { webPressed = boxButtonState(2); });
+    status.join();
+    check(webPressed && buttonReads[2] == 2, "other threads reuse the shared button result without device calls");
+    makcuOnline = false;
+    check(!boxButtonState(2), "disconnect immediately invalidates a fresh held sample");
+    makcuOnline = true;
+    physicalButtons = 0;
+    check(!boxButtonState(2) && buttonReads[2] == 3, "reconnect cannot reuse a stale held sample");
+    physicalButtons = 1u << 2;
+    expireButtonSamples();
+    BoxInputScan oldRoute;
+    check(oldRoute.keyDown(2), "held key before switching route");
+    switchRoute(nullptr);
+    check(!oldRoute.keyDown(2), "route change invalidates the entire old scan");
+    physicalButtons = 0;
+    check(!boxButtonState(2), "route change bypasses even a fresh shared sample");
+    physicalButtons = 1u << 2;
+    expireButtonSamples();
+    duringButtonRead = [] { switchRoute(nullptr); };
+    check(!boxButtonState(2), "query finishing after a route change must not publish a held key");
+    duringButtonRead = {};
+    g.rangePressKey = 0;
+    g.rangePressActive = false;
+    expireButtonSamples();
 }
 
 class Peer {
@@ -39,7 +129,7 @@ class Peer {
     std::atomic<unsigned short> monitorPort{0};
     std::atomic<int> report{-1};
     std::atomic<int> keyboardReport{-1};
-    std::array<unsigned char, 32> encryptReport(int mask, int keyboardCode = 0) {
+    std::array<unsigned char, 32> encryptReport(int mask, int keyboardCode = 0, int mouseCode = 0x110) {
         // One 15-byte HidData record + PKCS#7 padding, prefixed by a zero IV.
         std::array<unsigned char, 32> frame{};
         unsigned char* out = frame.data() + 16;
@@ -48,7 +138,9 @@ class Peer {
             out[11] = static_cast<unsigned char>(keyboardCode >> 8);
             out[12] = static_cast<unsigned char>(mask);
         } else {
-            out[0] = 0x10; out[1] = 0x01; out[2] = static_cast<unsigned char>(mask);
+            out[0] = static_cast<unsigned char>(mouseCode);
+            out[1] = static_cast<unsigned char>(mouseCode >> 8);
+            out[2] = static_cast<unsigned char>(mask);
         }
         out[15] = 1;
         add_round_key(out, expanded.data());
@@ -79,7 +171,7 @@ class Peer {
             }
             const int state = report.exchange(-1);
             if (state >= 0 && monitorPort) {
-                auto frame = encryptReport(state);
+                auto frame = encryptReport(state & 1, 0, 0x110 + (state >> 1));
                 socket.send_to(asio::buffer(frame), {asio::ip::make_address("127.0.0.1"), monitorPort.load()}, 0, ec);
             }
             const int key = keyboardReport.exchange(-1);
@@ -100,13 +192,14 @@ public:
     }
     ~Peer() { stop = true; thread.join(); }
     int port() { return socket.local_endpoint().port(); }
-    void button(bool down) { report = down ? 1 : 0; }
+    void button(bool down, int key = 1) { report = (buttonIndex(key) << 1) | (down ? 1 : 0); }
     void keyboard(int code, bool down) { keyboardReport = code | (down ? 0x10000 : 0); }
     auto snapshot() { std::lock_guard<std::mutex> lock(mutex); return commands; }
 };
 
 int main() {
     try {
+        testInputSharing();
         check(validCatSettings({"192.168.1.2", "65535", "12ABcdef", true}), "valid settings");
         for (const auto& ip : {"", "1.2.3", "1.2.3.256", "1.2.3.4.5", "0.0.0.0", "224.0.0.1"})
             check(!validCatSettings({ip, "1234", "1234abcd", true}), "reject malformed IP");
@@ -154,6 +247,19 @@ int main() {
         eventually([] { return boxButtonState(1); }, 500, "CAT physical down monitor");
         peer.button(false);
         eventually([] { return !boxButtonState(1); }, 500, "CAT physical up monitor");
+        peer.button(true, 2);
+        eventually([] { return boxButtonState(2); }, 500, "CAT right down monitor");
+        g.crossTrack = false;
+        g.running = true;
+        hotkeyThread();
+        check(g.aimKeyDown && g.aimPhysicalDown && g.crossTrack && g.triggerDown,
+            "CAT right report drives aim, crosshair and trigger together");
+        peer.button(false, 2);
+        eventually([] { return !boxButtonState(2); }, 500, "CAT right up monitor");
+        g.running = true;
+        hotkeyThread();
+        check(!g.aimKeyDown && !g.aimPhysicalDown && !g.triggerDown,
+            "CAT right release reaches aim and trigger on the next scan");
         for (int code : {1, 30, 42, 54, 97, 59, 96, 103, 127}) {
             peer.keyboard(code, true);
             eventually([code] { return boxKeyState(1000 + code); }, 500, "CAT keyboard down");
@@ -162,6 +268,7 @@ int main() {
             eventually([code] { return !boxKeyState(1000 + code); }, 500, "CAT keyboard up");
         }
         check(!boxKeyState(1000) && !boxKeyState(1128) && !boxKeyState(-1), "invalid keyboard bindings rejected");
+        check(peer.snapshot().size() == count, "all CAT input reads consume local reports without sending query commands");
         g.running = true;
         g.rangePressActive = true;
         g.rangePressKey = 1057;
@@ -247,7 +354,7 @@ int main() {
             eventually([] { return !activeCat.load(); }, 1000, "disable CAT reverts route");
         } catch (...) { g.running = false; worker.join(); throw; }
         g.running = false; worker.join();
-        std::puts("PASS: settings, encrypted UDP, five buttons, input monitor, route release, timeout, fallback, recovery and disable");
+        std::puts("PASS: shared hotkey scans, cross-thread cache, release/route invalidation, settings, encrypted UDP, five buttons, input monitor, timeout, fallback, recovery and disable");
         return 0;
     } catch (const std::exception& e) {
         std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1;

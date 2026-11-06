@@ -52,7 +52,8 @@ async function open(config) {
     assert.equal(get('卡尔曼预测面板'), null, 'Kalman controls removed');
     assert.equal(get('移动速度补偿精调').value, '0', 'Legacy config defaults compensation off');
     assert.equal(get('速度补偿面板').querySelectorAll('input[type="range"]').length, 1);
-    assert.equal(get('速度补偿面板').nextElementSibling, get('移动系数面板'), 'Single compensation directly above coefficient');
+    assert.equal(get('速度补偿面板').closest('#移动系数面板'), get('移动系数面板'), 'Compensation inside coefficient panel');
+    assert.equal(get('速度补偿面板').nextElementSibling.querySelector('#移动系数'), get('移动系数'), 'Compensation directly above coefficient input');
     await dom.window.fetchData();
     const rangeOptions = [...get('测距按下').options];
     assert.equal(get('测距按下').value, '0', 'Old config defaults to blank');

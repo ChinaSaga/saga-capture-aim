@@ -166,7 +166,7 @@ select:disabled { opacity: .65; }
 .hotkey-profile-tabs .mode-tab { min-height: 34px; }
 #always-on-row[hidden] { display: none; }
 .profile-note { color: var(--muted); font-size: 11px; line-height: 1.6; margin: 0 0 12px; }
-#速度补偿面板 .mode-header .profile-note { margin: 0; flex: 0 0 auto; }
+#移动系数面板 .mode-header .profile-note { margin: 0; flex: 0 0 auto; }
 .param-row { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; }
 .param-row:last-child { margin-bottom: 0; }
 .param-label { flex: 0 0 40px; color: var(--muted); font-size: 12px; }
@@ -404,8 +404,8 @@ body { padding: 10px; }
     .control-row { margin-bottom: 7px; }
     .slider-container { gap: 8px; }
 }
-/* Narrow centered layout with aligned cards. */
-.container { max-width: 1440px; }
+/* Desktop layout fills the available screen width. */
+.container { max-width: 1920px; }
 .config-panel { gap: 10px; }
 .panel-column { gap: 10px; }
 @media (min-width: 1280px) {
@@ -727,6 +727,27 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
 @media (prefers-reduced-motion: reduce) {
     .config-group:is([data-profile="2"], [data-profile="3"]) :is(.mode-tab.active, .special-toggle input:checked + .slider) { background-image: none; }
 }
+/* Fill desktop height; retain natural scrolling on phones and short windows. */
+@media (min-width: 1280px) {
+    .config-panel { min-height: calc(100dvh - 88px); grid-template-rows: auto auto; align-content: stretch; }
+}
+@media (min-width: 1280px) and (max-height: 850px) {
+    .app-header { min-height: 48px; }
+    .config-panel { min-height: calc(100dvh - 86px); }
+    .precision-control button { min-height: 24px; }
+    input[type="text"], .btn-group button { height: 26px; min-height: 26px; }
+
+    .config-group { padding: 6px 10px; }
+    .group-title { margin-bottom: 5px; padding-bottom: 4px; }
+    .control-row { min-height: 26px; margin-bottom: 2px; }
+    .control-row input[type="range"] { height: 26px; }
+    select { height: 28px; background-position: calc(100% - 13px) 12px, calc(100% - 9px) 12px; }
+    .special-move-row { min-height: 30px; }
+    .special-toggle { min-height: 26px; }
+    .sub-text { line-height: 1.25; }
+    .profile-note { font-size: 10px; margin-bottom: 6px; }
+    .hotkey-profile-tabs { margin-bottom: 8px; }
+}
         </style>
     </head>
 
@@ -796,19 +817,13 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
                                 <span class="toggle-text">线程外移动</span>
                             </label>
                         </div>
-                        <div class="move-mode-panel" id="速度补偿面板">
-                            <div class="mode-header"><span class="mode-label">移动速度补偿</span><span class="profile-note" id="补偿配置组显示">热键配置 1</span></div>
+                        <div class="move-mode-panel" id="移动系数面板">
+                            <div class="mode-header"><span class="mode-label" id="移动系数组标题">移动系数</span><span class="profile-note" id="补偿配置组显示">热键配置 1</span></div>
                             <div class="mode-body">
-                                <div class="control-row">
+                                <div class="control-row" id="速度补偿面板" title="1–100 连续增强预测追赶；匀速时提前距离稳定，加减速时自动调整。建立预测后允许通过中心停移范围。">
                                     <div class="control-label multi-label"><div class="main-title">补偿幅度</div><div class="sub-text">0 关 · 100 最强</div></div>
                                     <div class="slider-container"><input type="range" id="移动速度补偿" min="0" max="100" value="0" step="1"><span class="value-display" id="移动速度补偿显示">0</span></div>
                                 </div>
-                                <p class="profile-note">1–100 统一增强预测追赶，数值越大补偿越强，各档均允许越过当前目标点。匀速时提前距离保持稳定，加减速时自动调整。建立预测后可通过中心停移范围，三组热键独立保存。</p>
-                            </div>
-                        </div>
-                        <div class="move-mode-panel" id="移动系数面板">
-                            <div class="mode-header"><span class="mode-label" id="移动系数组标题">移动系数</span></div>
-                            <div class="mode-body">
                                 <div class="param-row">
                                     <span class="param-label">系数:</span>
                                     <input type="text" id="移动系数" value="0.618">
@@ -817,7 +832,7 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
                                         <button type="button" onclick="减少移动系数()">-</button>
                                     </div>
                                 </div>
-                                <p class="profile-note">随热键配置分别保存，可为不同倍镜设置系数。</p>
+                                <p class="profile-note">补偿与系数随热键分别保存，可按倍镜调整。</p>
                             </div>
                         </div>
                     </div>

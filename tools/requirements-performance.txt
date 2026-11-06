@@ -1,0 +1,6 @@
+# Latest stable tool packages verified on PyPI, 2026-10-02. Python >= 3.12.
+# The native C++ application does not depend on this Python environment.
+numpy==2.5.3
+onnx==1.23.1
+onnxconverter-common==1.16.0
+Pillow==12.3.0

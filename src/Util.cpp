@@ -1,0 +1,286 @@
+#include "App.h"
+#include "FileIO.h"
+#include "BoxController.h"
+#include "Inference.h"
+#include "RuntimeLog.h"
+#include "TrajectorySteps.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdlib>
+#include <bit>
+#include <limits>
+
+AppState g;
+
+CRITICAL_SECTION g_frameLock;
+CONDITION_VARIABLE g_publishedFrameReady = CONDITION_VARIABLE_INIT;
+std::vector<unsigned char> g_frame;
+long long g_frameSeq = 0;
+std::atomic<long long> g_lastFrameTime{0};
+std::atomic<long long> g_nowMs{0};
+
+CRITICAL_SECTION g_drawLock;
+CRITICAL_SECTION g_moveLock;
+
+// ============================================================================
+//  计时 / 延时
+// ============================================================================
+static double qpcFreqMs()
+{
+    static const double f = [] {
+        LARGE_INTEGER fr;
+        QueryPerformanceFrequency(&fr);
+        return 1000.0 / (double)fr.QuadPart;
+    }();
+    return f;
+}
+
+void RunTimer::start()
+{
+    QueryPerformanceCounter(&m_begin);
+}
+
+double RunTimer::ms() const
+{
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    return (double)(now.QuadPart - m_begin.QuadPart) * qpcFreqMs();
+}
+
+long long nowMs()
+{
+    return (long long)GetTickCount64();
+}
+
+void sleepMs(int ms)
+{
+    if (ms <= 0) { Sleep(0); return; }
+    Sleep((DWORD)ms);
+}
+
+void hiSleep(double ms)
+{
+    if (ms <= 0) return;
+    LARGE_INTEGER fr, a, b;
+    QueryPerformanceFrequency(&fr);
+    QueryPerformanceCounter(&a);
+    double target = ms / (1000.0 / (double)fr.QuadPart);
+    for (;;)
+    {
+        QueryPerformanceCounter(&b);
+        if ((double)(b.QuadPart - a.QuadPart) >= target) break;
+        SwitchToThread();
+    }
+}
+
+double round2(double v)
+{
+    return std::round(v * 100.0) / 100.0;
+}
+
+// 易语言 取整()：向下取整（floor），-7.8 → -8
+// 注意不是向零截断（那个是易语言的「绝对取整」/fix）
+int truncToInt(double v)
+{
+    if ((std::bit_cast<std::uint64_t>(v) & 0x7ff0000000000000ull) == 0x7ff0000000000000ull ||
+        v < (std::numeric_limits<int>::min)() || v > (std::numeric_limits<int>::max)()) return 0;
+    return (int)std::floor(v);
+}
+
+// 易语言把「小数型」赋给「整数型」变量时的隐式转换：四舍五入
+int roundToInt(double v)
+{
+    if ((std::bit_cast<std::uint64_t>(v) & 0x7ff0000000000000ull) == 0x7ff0000000000000ull ||
+        v < (std::numeric_limits<int>::min)() || v > (std::numeric_limits<int>::max)()) return 0;
+    return (int)std::llround(v);
+}
+
+int randInt(int lo, int hi)
+{
+    if (hi <= lo) return lo;
+    return lo + (int)((double)rand() / ((double)RAND_MAX + 1.0) * (double)(hi - lo + 1));
+}
+
+// ============================================================================
+//  文件 / 编码
+// ============================================================================
+bool fileExists(const std::filesystem::path& path) { return file_io::exists(path); }
+
+std::string trimStr(const std::string& s)
+{
+    const char* ws = " \t\r\n";
+    size_t a = s.find_first_not_of(ws);
+    if (a == std::string::npos) return "";
+    size_t b = s.find_last_not_of(ws);
+    return s.substr(a, b - a + 1);
+}
+
+std::string ansiToUtf8(const std::string& s)
+{
+    if (s.empty()) return s;
+    int wlen = MultiByteToWideChar(936, 0, s.c_str(), (int)s.size(), nullptr, 0);
+    std::wstring w(wlen, L'\0');
+    MultiByteToWideChar(936, 0, s.c_str(), (int)s.size(), &w[0], wlen);
+    int ulen = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), wlen, nullptr, 0, nullptr, nullptr);
+    std::string u(ulen, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, w.c_str(), wlen, &u[0], ulen, nullptr, nullptr);
+    return u;
+}
+
+std::string utf8ToAnsi(const std::string& s)
+{
+    if (s.empty()) return s;
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
+    if (wlen <= 0) return s;
+    std::wstring w(wlen, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), &w[0], wlen);
+    int alen = WideCharToMultiByte(936, 0, w.c_str(), wlen, nullptr, 0, nullptr, nullptr);
+    std::string a(alen, '\0');
+    WideCharToMultiByte(936, 0, w.c_str(), wlen, &a[0], alen, nullptr, nullptr);
+    return a;
+}
+
+std::string readFileAll(const std::filesystem::path& path) { return file_io::read(path); }
+bool writeFileAll(const std::filesystem::path& path, const std::string& data) { return file_io::write(path, data); }
+
+// ============================================================================
+// Internal direct calls.
+bool sagaEnumDevices(std::string& out)
+{
+    const char* s = saga::enum_video_devices();
+    out = s ? s : "";
+    return true;
+}
+
+bool sagaEnumFormats(const char* dev, std::string& out)
+{
+    const char* s = saga::enum_device_formats(dev);
+    out = s ? s : "";
+    return true;
+}
+
+bool sagaSetCapture(const char* dev, int w, int h, const char* fourcc, int fps, int crop, std::string& out)
+{
+    const char* s = saga::setcjk_ex(dev, w, h, fourcc, fps, crop);
+    out = s ? s : "";
+    return true;
+}
+
+
+int sagaNcnnCreate(const wchar_t* p, const wchar_t* b, int gpu, int idx)
+{
+    return saga::ncnn_create(p, b, gpu, idx);
+}
+int sagaNcnnDetect(const unsigned char* d, int n, float c, float i, DetectObject* o)
+{
+    return saga::ncnn_detect(d, n, c, i, o);
+}
+int sagaOnnxCreate(const wchar_t* m, const wchar_t* l, bool gpu)
+{
+    return saga::onnx_create(m, l, gpu);
+}
+int sagaOnnxDetect(const unsigned char* d, int n, float c, float i, DetectObject* o)
+{
+    return saga::onnx_detect(d, n, c, i, o);
+}
+
+// ============================================================================
+//  S_优化_Main / S_优化_Thread（精易模块「S_优化操作」）
+//  S_优化_Main : 进程优先级 HIGH_PRIORITY_CLASS + 使用全部逻辑核心 + 启用 LFH 低碎片堆
+//  S_优化_Thread: 当前线程 TIME_CRITICAL(15) + 关闭动态优先级提升
+// ============================================================================
+void optMain()
+{
+    HANDLE hp = GetCurrentProcess();
+    SetPriorityClass(hp, HIGH_PRIORITY_CLASS);
+    // Let Windows schedule workers without overriding user CPU affinity.
+    ULONG lfh = 2;                                      // HeapCompatibilityInformation = 2
+    HeapSetInformation(GetProcessHeap(), HeapCompatibilityInformation, &lfh, sizeof(lfh));
+}
+
+void optThread()
+{
+    HANDLE ht = GetCurrentThread();
+    SetThreadPriority(ht, THREAD_PRIORITY_NORMAL);
+    SetThreadPriorityBoost(ht, FALSE);                      // 匿名API_691(hThread, 假)
+}
+
+// ============================================================================
+//  Makcu 封装
+// ============================================================================
+bool makcuConnect(int port)
+{
+    return (saga::makcuConnect(port) != 0);
+}
+
+void makcuMove(float x, float y)
+{
+    boxMove(roundToInt(x), roundToInt(y));
+}
+
+void makcuDown(int key)
+{
+    boxDown(key);
+}
+
+void makcuUp(int key)
+{
+    boxUp(key);
+}
+
+void makcuState(int key, bool& out)
+{
+    out = boxButtonState(key);
+
+}
+
+// ============================================================================
+//  模拟轨迹（对齐 模拟轨迹.txt）
+// ============================================================================
+static std::atomic<bool> g_trajReady{false};
+static WIN32_FILE_ATTRIBUTE_DATA g_trajFileStamp{}; // Accessed only by the UI thread.
+
+bool trajReady() { return g_trajReady; }
+
+bool trajInit()
+{
+    const auto trained = file_paths::io(g.runDir / L"人手数据" / L"mouse.bin");
+    const auto model = fileExists(trained) ? trained : file_paths::io(g.runDir / L"mouse.bin");
+    const bool loaded = saga::mc_create(model.c_str()) != 0;
+    if (loaded) g_trajReady = true;
+    GetFileAttributesExW(trained.c_str(), GetFileExInfoStandard, &g_trajFileStamp);
+    return loaded;
+}
+
+bool trajReloadIfChanged()
+{
+    const auto trained = file_paths::io(g.runDir / L"人手数据" / L"mouse.bin");
+    WIN32_FILE_ATTRIBUTE_DATA stamp{};
+    if (!GetFileAttributesExW(trained.c_str(), GetFileExInfoStandard, &stamp) ||
+        (stamp.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) return false;
+    if (CompareFileTime(&stamp.ftLastWriteTime, &g_trajFileStamp.ftLastWriteTime) == 0 &&
+        CompareFileTime(&stamp.ftCreationTime, &g_trajFileStamp.ftCreationTime) == 0 &&
+        stamp.nFileSizeLow == g_trajFileStamp.nFileSizeLow &&
+        stamp.nFileSizeHigh == g_trajFileStamp.nFileSizeHigh) return false;
+    // Training publishes a complete file atomically. mc_create also swaps the
+    // in-memory weights under a lock; a failed load preserves the running model.
+    const bool loaded = saga::mc_create(trained.c_str()) != 0;
+    g_trajFileStamp = stamp;
+    if (loaded) g_trajReady = true;
+    runtime_log::write("[traj] model hot reload: %s", loaded ? "success" : "failed; previous model retained");
+    return loaded;
+}
+
+// The learned curve supplies cumulative positions. Preserve every integer
+// count through grouped dispatch instead of rounding and discarding each group.
+static void trajMove(float endX,float endY,int groups) {
+    if(!g_trajReady) return;
+    float curve[20]={};saga::mc_calc(endX,endY,curve);
+    trajectory_steps::emit(endX,endY,curve,groups,
+        [](int x,int y){boxMove(x,y);},
+        []{if(boxLastMoveNeedsDelay())hiSleep(0.885);});
+}
+void trajMove10(float x,float y){trajMove(x,y,10);}
+void trajMove5(float x,float y){trajMove(x,y,5);}
+void trajMove3(float x,float y){trajMove(x,y,3);}

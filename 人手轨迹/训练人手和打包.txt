@@ -1,0 +1,6 @@
+CD D:\BaiduSyncdisk\圣人自用V11\人手轨迹
+conda activate mouse
+python train.py
+
+pip install pyinstaller
+pyinstaller -F collect_mouse_data.py

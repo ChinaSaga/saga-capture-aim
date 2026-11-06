@@ -1,0 +1,88 @@
+# ============ 构建产物 ============
+x64/
+[Ss]aga[Aa]pp/x64/
+[Bb]in/
+[Oo]bj/
+build*/
+*.obj
+*.iobj
+*.ipdb
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.tlog
+*.recipe
+*.lastbuildstate
+*.aps
+*.opendb
+*.VC.db
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# ============ IDE / 工具 ============
+.vs/
+.vscode/
+.idea/
+*.swp
+
+# ============ 私有辅助目录（会话记忆 / 备份 / 原版易语言源码）============
+.workbuddy/
+.deps/
+diagnostics/
+.publish/
+
+# ============ 第三方运行时 DLL（构建时自动复制，不要入库）============
+*.dll
+*.exe
+licenses/DirectML/
+# 例外：Makcu(CH343) 驱动要打进 EXE 资源，必须入库
+!src/drv/*.DLL
+!src/drv/*.dll
+!src/drv/DRVSETUP64.exe
+
+# ============ 模型与人手数据（体积大 / 属于个人数据）============
+# mouse.bin / mouse_data.csv 都是本人真实鼠标数据 —— 不入库，谁用谁自己采、自己训
+# （注意：不是 *.bin 全忽略，免得误伤其它二进制）
+mouse.bin
+mouse_data.csv
+人手数据.txt
+mouse_data_test.csv
+人手数据/
+__pycache__/
+*.onnx
+*.param
+*.engine
+*.plan
+*.trt
+*.trt.*.tmp
+*.pt
+*.onnx.*_data
+模型*/
+YoloServer/
+
+# 演示视频体积大（36MB），放 Release 附件，不进仓库
+docs/demo/*.mp4
+
+# ============ 运行期生成的文件 ============
+圣人自用.js
+主机IP.ini
+主机端口.ini
+监控双机.ini
+配置保存.ini
+配置保存/
+运行日志.txt
+Makcu驱动报告.txt
+SagaApp_startup.log
+网络自检.txt
+Makcu串口日志.txt
+CAT盒子.ini
+崩溃报告/
+*.log
+自动截图/
+
+轨迹采集/
+
+XY预测模型.bin

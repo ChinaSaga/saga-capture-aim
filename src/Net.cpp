@@ -1,0 +1,703 @@
+#include "App.h"
+#include "RuntimeLog.h"
+#include "ModelFiles.h"
+#include "HttpRequest.h"
+#include "ConfigValue.h"
+
+#include <algorithm>
+#include <map>
+#include <mutex>
+#include <sstream>
+#include <thread>
+#include "WebAccess.h"
+
+// ============================================================================
+//  配置哈希表（替代易语言 哈希表_ASM）
+// ============================================================================
+static std::map<std::string, std::string> g_hash;
+// 必须是可重入锁：configSyncAll 持锁期间会反复调用 hashGet()
+static std::recursive_mutex g_hashMutex;
+static std::string g_outBuf;                       // 集_写出内容
+static std::map<std::string, std::string> g_webConfig;
+static bool g_configSaved = true; // Accessed under g_hashMutex.
+static std::string jsonEscape(const std::string& s);
+
+static std::vector<std::string> splitStr(const std::string& s, const std::string& sep)
+{
+    std::vector<std::string> r;
+    size_t start = 0;
+    for (;;)
+    {
+        size_t p = s.find(sep, start);
+        if (p == std::string::npos) { r.push_back(s.substr(start)); break; }
+        r.push_back(s.substr(start, p - start));
+        start = p + sep.size();
+    }
+    return r;
+}
+
+static std::string trim(const std::string& s)
+{
+    size_t a = s.find_first_not_of(" \t\r\n");
+    if (a == std::string::npos) return "";
+    size_t b = s.find_last_not_of(" \t\r\n");
+    return s.substr(a, b - a + 1);
+}
+
+static std::string stripQuotes(const std::string& s)
+{
+    std::string r;
+    for (char c : s) if (c != '"' && c != '\'') r += c;
+    return r;
+}
+
+void configInit()
+{
+    std::lock_guard<std::recursive_mutex> lk(g_hashMutex);
+    g_hash.clear();
+
+    std::string raw = readFileAll(g.cfgPath);
+    runtime_log::write("[cfg] path=%s rawSize=%zu", file_paths::narrow(g.cfgPath.wstring()).c_str(), raw.size());
+    if (raw.empty()) return;
+    // 去掉可能的 UTF-8 BOM
+    if (raw.starts_with("\xef\xbb\xbf")) raw.erase(0, 3);
+    std::string text = utf8ToAnsi(raw);
+
+    auto lines = splitStr(text, "\n");
+    for (auto& ln : lines)
+    {
+        std::string line = trim(ln);
+        if (line.empty()) continue;
+        auto kv = splitStr(line, "=");
+        if (kv.size() == 2)
+            g_hash[trim(kv[0])] = stripQuotes(trim(kv[1]));
+    }
+}
+
+static std::string hashGet(const std::string& k)
+{
+    std::lock_guard<std::recursive_mutex> lk(g_hashMutex);
+    auto it = g_hash.find(k);
+    return (it == g_hash.end()) ? std::string() : it->second;
+}
+
+static void hashSet(const std::string& k, const std::string& v)
+{
+    std::lock_guard<std::recursive_mutex> lk(g_hashMutex);
+    g_hash[k] = v;
+}
+
+void configApplyStartupDefaults()
+{
+    // 易语言原版只在启动阶段执行一次；网页运行期修改其它参数的行为不受影响。
+    hashSet("本地端口", "8888");
+}
+
+static void bufInt(const char* name, int& v)
+{
+    v = config_value::integer(hashGet(name));
+    g_webConfig[name] = std::to_string(v);
+    g_outBuf += name;
+    g_outBuf += "=";
+    g_outBuf += std::to_string(v);
+    g_outBuf += "\n";
+}
+
+static void bufStr(const char* name, std::string& v)
+{
+    v = hashGet(name);
+    if (std::string(name) == "模型名称" && !v.empty() && !config_value::leafName(v)) v.clear();
+    g_webConfig[name] = (v == "true" || v == "false") && std::string(name) != "模型名称"
+        ? v : "\"" + jsonEscape(v) + "\"";
+    if (name == std::string("模型名称")) return;      // 原版：读了但不写回缓冲
+    if (name == std::string("移动延时")) return;
+    g_outBuf += name;
+    g_outBuf += "=";
+    g_outBuf += v;
+    g_outBuf += "\n";
+}
+
+static void bufFlt(const char* name, float& v)
+{
+    v = config_value::number(hashGet(name));
+    g_outBuf += name;
+    g_outBuf += "=";
+    char tmp[64];
+    snprintf(tmp, sizeof(tmp), "%g", (double)v);
+    g_webConfig[name] = std::isfinite(v) ? tmp : "0";
+    g_outBuf += tmp;
+    g_outBuf += "\n";
+}
+
+static void bufBool(const char* name, bool& value)
+{
+    std::string text;
+    bufStr(name, text);
+    value = text == "true";
+}
+
+// 变量全部对应一次
+void configSyncAll(bool save)
+{
+    std::lock_guard<std::recursive_mutex> lk(g_hashMutex);
+    auto settings = g.settings.snapshot();
+    g_outBuf.clear();
+    g_webConfig.clear();
+
+    bufInt("本地端口", g.localPort);
+    // Removed movement modes: old PID configurations now use their coefficient.
+    g_hash.erase("移动方式"); g_hash.erase("Kp"); g_hash.erase("Ki");
+    bufInt("优先锁定", g.prioLock);
+    bufInt("其次锁定", g.secondLock);
+    bufInt("再次锁定", g.thirdLock);
+    bufInt("锁定范围", g.lockRange);
+    bufInt("优先锁定位置", g.prioLockPos);
+    bufInt("其次锁定位置", g.secondLockPos);
+    bufInt("再次锁定位置", g.thirdLockPos);
+    bufInt("自瞄主键", g.aimMainKey);
+    bufInt("自瞄副键", g.aimSubKey1);
+    bufInt("自瞄副键2", g.aimSubKey2);
+    bufInt("自瞄副键3", g.aimSubKey3);
+    bufInt("准星绑定1", settings.crossBind[0]);
+    bufInt("准星绑定2", settings.crossBind[1]);
+    bufInt("准星绑定3", settings.crossBind[2]);
+    bufInt("准星绑定4", settings.crossBind[3]);
+    int rangeKey = config_value::integer(hashGet("测距按下"));
+    if (rangeKey <= 1000 || rangeKey > 1127) rangeKey = 0;
+    hashSet("测距按下", std::to_string(rangeKey));
+    bufInt("测距按下", rangeKey);
+    g.rangePressKey = rangeKey;
+    bufInt("扳机热键1", settings.triggerKey[0]);
+    bufInt("扳机热键2", settings.triggerKey[1]);
+    bufInt("扳机热键3", settings.triggerKey[2]);
+    bufInt("扳机热键4", settings.triggerKey[3]);
+    int engineTmp = g.engine.load();
+    bufInt("推理引擎", engineTmp);
+    bufInt("准星类别", settings.crossClass);
+    bufInt("开镜时间", settings.adsTime);
+    bufInt("开枪间隔", settings.shotInterval);
+    bufInt("锁定频率", settings.lockFreq);
+    bufInt("延时频率", settings.delayFreq);
+    int campTmp = g.camp.load();
+    bufInt("目前阵容", campTmp);
+    g.camp = campTmp;
+    bufInt("中心点范围", g.centerRange);
+
+    {
+        std::lock_guard<std::mutex> modelGuard(g.modelMutex);
+        const auto previousModel = g.modelName;
+        const int previousEngine = g.engine.load();
+        bufStr("模型名称", g.modelName);
+        // Publish the selected engine together with its model name.
+        g.engine = engineTmp >= 1 && engineTmp <= 3 ? engineTmp : 1;
+        if (previousModel != g.modelName || previousEngine != g.engine) {
+            ++g.inferenceEpoch;
+            g.modelStatus = model_status::State::Idle;
+            g.triggerFire = false;
+            g.adaptiveCapture = model_files::isGroup(g.modelDirectory(), file_paths::wide(g.modelName));
+        }
+    }
+    bufStr("框内移动", g.moveInBox);
+    bufBool("线程移动", settings.threadMove);
+    bufBool("自瞄连续按下", settings.aimContinuous);
+    bufBool("自动截图", settings.autoShot);
+    bufStr("吸附常驻", g.alwaysOn);
+    bufBool("准星扳机", settings.crossTrigger);
+    bufBool("中心扳机", settings.centerTrigger);
+
+    // 原版写出顺序：type0~9 一组，team1type0~9 一组，team2type0~9 一组
+    char k[32];
+    for (int i = 0; i < 10; ++i) { snprintf(k, sizeof(k), "type%d", i);      bufBool(k, settings.type[i]); }
+    for (int i = 0; i < 10; ++i) { snprintf(k, sizeof(k), "team1type%d", i); bufBool(k, settings.team1[i]); }
+    for (int i = 0; i < 10; ++i) { snprintf(k, sizeof(k), "team2type%d", i); bufBool(k, settings.team2[i]); }
+
+    bufInt("移动延时", settings.moveDelay);
+    bufFlt("置信度", settings.conf);
+    bufFlt("准星精度", settings.crossConf);
+    bufFlt("交并比", settings.nms);
+    bufFlt("扳机范围", settings.triggerRange);
+
+    aim_profiles::Config profiles;
+    auto& first = profiles.profiles[0];
+    first.keys = {g.aimMainKey, g.aimSubKey1, g.aimSubKey2, g.aimSubKey3};
+    first.prioLock = g.prioLock;
+    first.secondLock = g.secondLock;
+    first.thirdLock = g.thirdLock;
+    first.prioLockPos = g.prioLockPos;
+    first.secondLockPos = g.secondLockPos;
+    first.thirdLockPos = g.thirdLockPos;
+    first.lockRange = g.lockRange;
+    first.centerRange = g.centerRange;
+    first.moveInBox = g.moveInBox == "true";
+    profiles.alwaysOn = g.alwaysOn == "true";
+    const auto movementFields = [&](const std::string& prefix, aim_profiles::Profile& profile) {
+        const auto coefficient = prefix + "移动系数";
+        if (!g_hash.contains(coefficient)) hashSet(coefficient, std::to_string(profile.moveFactor));
+        const float factor = std::clamp(config_value::number(hashGet(coefficient)), 0.f, 10.f);
+        hashSet(coefficient, std::to_string(factor));
+        bufFlt(coefficient.c_str(), profile.moveFactor);
+        const auto compensation = prefix + "移动速度补偿";
+        if (!g_hash.contains(compensation)) hashSet(compensation, std::to_string(profile.speedCompensation));
+        hashSet(compensation, std::to_string(std::clamp(config_value::integer(hashGet(compensation)), 0, 100)));
+        bufInt(compensation.c_str(), profile.speedCompensation);
+        // Retired settings are removed on import/save and cannot be posted by an old page.
+        for(const auto* name:{"预测连续次数","预测提前量","X轴预测提前量","Y轴预测提前量",
+            "卡尔曼预测","卡尔曼预测时间","卡尔曼响应强度","卡尔曼平滑强度","卡尔曼最大提前量"})
+            g_hash.erase(prefix+name);
+    };
+    movementFields("", first);
+    settings.moveFactor = first.moveFactor;
+    for (int group = 1; group < 3; ++group) {
+        // Old files become group 1. New groups start with copied target settings
+        // and no keys; materialize defaults once so later group-1 edits stay isolated.
+        auto& profile = profiles.profiles[group];
+        profile = first;
+        profile.keys = {};
+        const auto prefix = std::string("热键") + std::to_string(group + 1) + "_";
+        movementFields(prefix, profile);
+        const auto field = [&](const char* name, int& value) {
+            const auto key = prefix + name;
+            if (g_hash.find(key) == g_hash.end()) hashSet(key, std::to_string(value));
+            bufInt(key.c_str(), value);
+        };
+        field("自瞄主键", profile.keys[0]);
+        field("自瞄副键", profile.keys[1]);
+        field("自瞄副键2", profile.keys[2]);
+        field("自瞄副键3", profile.keys[3]);
+        field("优先锁定", profile.prioLock);
+        field("其次锁定", profile.secondLock);
+        field("再次锁定", profile.thirdLock);
+        field("优先锁定位置", profile.prioLockPos);
+        field("其次锁定位置", profile.secondLockPos);
+        field("再次锁定位置", profile.thirdLockPos);
+        field("锁定范围", profile.lockRange);
+        field("中心点范围", profile.centerRange);
+        const auto key = prefix + "框内移动";
+        std::string moveInBox = first.moveInBox ? "true" : "false";
+        if (g_hash.find(key) == g_hash.end()) hashSet(key, moveInBox);
+        bufStr(key.c_str(), moveInBox);
+        profile.moveInBox = moveInBox == "true";
+    }
+    g.aimProfiles.replace(profiles);
+
+    g.settings.replace(settings);
+    if (save) configSaveFile();
+}
+
+void configSaveFile()
+{
+    std::lock_guard<std::recursive_mutex> lock(g_hashMutex);
+    g_outBuf += "模型名称=\"";
+    g_outBuf += g.selectedModelName();
+    g_outBuf += "\"\n";
+
+    g_outBuf += "服务器ip=\"";
+    g_outBuf += g.hostIp;
+    g_outBuf += "\"\n";
+
+    // 与易语言写出的文件保持一致：换行统一为 CRLF，内容转 UTF-8
+    std::string crlf;
+    crlf.reserve(g_outBuf.size() + 64);
+    for (char c : g_outBuf)
+    {
+        if (c == '\n') crlf += "\r\n";
+        else crlf += c;
+    }
+    g_configSaved = writeFileAll(g.cfgPath, ansiToUtf8(crlf));
+    if (!g_configSaved) runtime_log::writeWide(L"[cfg] 无法保存配置：" + g.cfgPath.wstring());
+    g_outBuf.clear();
+}
+
+// ============================================================================
+//  HTTP 服务（Winsock 极简实现，替代 HPSocket）
+// ============================================================================
+static std::string jsonEscape(const std::string& s)
+{
+    std::string r;
+    for (size_t i = 0; i < s.size(); ++i)
+    {
+        const char c = s[i];
+        // Internal strings are GBK: 0x5c may be the trail byte of a Chinese
+        // character, not a JSON backslash. UTF-8 conversion happens afterward.
+        const auto lead = static_cast<unsigned char>(c);
+        if (lead >= 0x81 && lead <= 0xfe && i + 1 < s.size()) {
+            const auto trail = static_cast<unsigned char>(s[i+1]);
+            if (trail >= 0x40 && trail <= 0xfe && trail != 0x7f) {
+                r += c; r += s[++i]; continue;
+            }
+        }
+        if (c == '"' || c == '\\') { r += '\\'; r += c; }
+        else if (static_cast<unsigned char>(c) < 0x20) {
+            char escaped[7];
+            snprintf(escaped, sizeof(escaped), "\\u%04x", static_cast<unsigned char>(c));
+            r += escaped;
+        }
+        else r += c;
+    }
+    return r;
+}
+
+// extraKey 非空时插入一个额外字段（原版是在同一个 JSON 上继续 置属性）
+static std::string buildJsonBody(const std::string& extraKey = "",
+                                 const std::string& extraVal = "")
+{
+    std::string j = "{";
+    j += "\"推理帧率\":\"" + std::to_string(g.inferFps.load()) + "\",";
+    // Latency-derived capacity is separate from captured frames processed per second.
+    const double inferMs = g.inferMsPrecise;
+    const bool active = g.running.load() && !g.inferPaused.load()
+        && nowMs() - g_lastFrameTime < 1000;
+    const double inferenceSpeed = active && inferMs > 0.0 ? 1000.0 / inferMs : 0.0;
+    j += "\"推理速度FPS\":" + std::to_string(inferenceSpeed) + ",";
+    j += "\"推理耗时毫秒\":" + std::to_string(active ? inferMs : 0.0) + ",";
+    j += "\"自适应截图\":" + std::string(g.adaptiveCapture ? "true" : "false") + ",";
+    j += "\"截图范围\":" + std::to_string(g.imgSize.load()) + ",";
+    j += "\"模型加载状态\":\"" + jsonEscape(file_paths::narrow(model_status::label(g.modelStatus.load()))) + "\",";
+    j += "\"截图宽度\":" + std::to_string(g.imgWidth.load()) + ",";
+    j += "\"全屏找图\":" + std::string(g.fullScreenSearch ? "true" : "false") + ",";
+    j += "\"目前阵容\":\"" + std::to_string(g.camp.load()) + "\",";
+    if (!extraKey.empty())
+        j += "\"" + extraKey + "\":\"" + jsonEscape(extraVal) + "\",";
+
+    std::string hot;                       // 原版：热键1:真   热键2:假 ...
+    const std::string sep = "   ";
+    for (int i = 1; i <= 6; ++i)
+    {
+        bool st = false;
+        makcuState(i, st);
+        hot += "热键" + std::to_string(i) + ":" + (st ? "真" : "假");
+        if (i != 6) hot += sep;
+    }
+    j += "\"热键文本\":\"" + jsonEscape(hot) + "\"";
+    j += "}";
+    return j;
+}
+
+static void sendResponse(SOCKET c, int code, const std::string& body,
+                         const char* contentType = "application/json; charset=utf-8")
+{
+    const char* reason = code == 200 ? "OK" : code == 201 ? "Created" :
+        code == 400 ? "Bad Request" : code == 404 ? "Not Found" :
+        code == 405 ? "Method Not Allowed" : code == 413 ? "Payload Too Large" :
+        code == 503 ? "Service Unavailable" : "Internal Server Error";
+    std::string head = "HTTP/1.1 " + std::to_string(code) + " " + reason + "\r\n";
+    head += std::string("Content-Type: ") + contentType + "\r\n";
+    head += "Cache-Control: no-store\r\n";
+    head += "Access-Control-Allow-Origin: *\r\n";
+    head += "Access-Control-Allow-Headers: *\r\n";
+    head += "Access-Control-Allow-Methods: POST, GET, OPTIONS\r\n";
+    head += "Content-Length: " + std::to_string(body.size()) + "\r\n";
+    head += "Connection: close\r\n\r\n";
+
+    // Send header and payload together without copying the whole HTML page.
+    WSABUF buffers[2]{{static_cast<ULONG>(head.size()), head.data()},
+        {static_cast<ULONG>(body.size()), const_cast<char*>(body.data())}};
+    DWORD first = 0;
+    while (first < 2) {
+        while (first < 2 && !buffers[first].len) ++first;
+        if (first == 2) break;
+        DWORD sent = 0;
+        if (WSASend(c, buffers + first, 2 - first, &sent, 0, nullptr, nullptr) == SOCKET_ERROR || !sent) break;
+        while (first < 2 && sent >= buffers[first].len) {
+            sent -= buffers[first].len;
+            ++first;
+        }
+        if (first < 2) { buffers[first].buf += sent; buffers[first].len -= sent; }
+    }
+}
+
+static std::string webConfigScript()
+{
+    std::lock_guard<std::recursive_mutex> lock(g_hashMutex);
+    std::string script = "Object.assign(window,{";
+    bool first = true;
+    for (const auto& [key, value] : g_webConfig) {
+        if (!first) script += ',';
+        first = false;
+        script += "\"" + jsonEscape(key) + "\":" + value;
+    }
+    script += "});\n";
+    return ansiToUtf8(script);
+}
+
+static void sendMissingWebPanel(SOCKET c)
+{
+    sendResponse(c, 404, ansiToUtf8(
+        "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
+        "<title>网页不存在</title></head><body><h1>网页不存在</h1>"
+        "<p>请将 圣人视觉识别系统.html 放到 EXE 同目录，然后刷新此页面。</p>"
+        "</body></html>"), "text/html; charset=utf-8");
+}
+
+static void sendModelList(SOCKET c, int engine = 0)
+{
+    const auto directory = g.modelDirectory();
+    const auto pathJson = model_files::escapeJson(model_files::utf8(directory.wstring()));
+    try {
+        auto body = engine ? model_files::json(directory, engine) : model_files::catalogJson(directory);
+        body.pop_back();
+        body += ",\"directory\":\"" + pathJson + "\"}";
+        sendResponse(c, 200, body);
+    } catch (const std::filesystem::filesystem_error& error) {
+        const auto detail = L"无法读取模型数据目录：" + file_paths::errorText(error.code().value());
+        runtime_log::writeWide(L"[model] " + directory.wstring() + L" — " + detail);
+        sendResponse(c, 500, "{\"error\":\"" + model_files::escapeJson(model_files::utf8(detail)) +
+            "\",\"directory\":\"" + pathJson + "\",\"code\":" + std::to_string(error.code().value()) + "}");
+    }
+}
+
+static void handleRequest(SOCKET c, const std::string& req)
+{
+    const auto framing = http_request::inspect(req);
+    if (framing.state != http_request::State::complete) {
+        sendResponse(c, framing.state == http_request::State::tooLarge ? 413 : 400,
+            "{\"error\":\"Invalid or incomplete request\"}");
+        return;
+    }
+    // 分离头部与 body
+    size_t sep = req.find("\r\n\r\n");
+    std::string head = (sep == std::string::npos) ? req : req.substr(0, sep);
+    std::string body = (sep == std::string::npos) ? "" : req.substr(sep + 4);
+
+    std::istringstream requestLine(head);
+    std::string method, path;
+    requestLine >> method >> path;
+    const bool isPost = method == "POST", isOpt = method == "OPTIONS";
+    const size_t queryOffset = path.find('?');
+    const std::string query = queryOffset == std::string::npos ? "" : path.substr(queryOffset+1);
+    path = path.substr(0, queryOffset);
+    if (method == "GET" && path == "/__saga_health") {
+        sendResponse(c, 200, "{\"service\":\"SagaApp\",\"pid\":" + std::to_string(GetCurrentProcessId()) + "}");
+        return;
+    }
+    // The panel is supplied alongside the EXE. Never fall back to an embedded
+    // page or a different folder; stale browser tabs must not tune without it.
+    const auto panelPath = g.runDir / L"圣人视觉识别系统.html";
+    if (!fileExists(panelPath)) {
+        sendMissingWebPanel(c);
+        return;
+    }
+    if (method == "GET" && path == "/config.js") {
+        sendResponse(c, 200, webConfigScript(), "application/javascript; charset=utf-8");
+        return;
+    }
+    if (method == "GET" && path == "/model-catalog.json") {
+        sendModelList(c);
+        return;
+    }
+    if (method == "GET" && path == "/models.json") {
+        int engine = 0;
+        if (!model_files::parseEngine(query, engine)) {
+            sendResponse(c, 400, "{\"error\":\"Invalid engine; expected 1, 2 or 3\"}");
+            return;
+        }
+        sendModelList(c, engine);
+        return;
+    }
+    if (method == "GET" && (path == "/" || path == "/index.html") &&
+        head.find("application/json") == std::string::npos) {
+        const std::string page = readFileAll(panelPath);
+        if (page.empty()) sendMissingWebPanel(c);
+        else sendResponse(c, 200, page, "text/html; charset=utf-8");
+        return;
+    }
+    if (path != "/" && path != "/api") {
+        sendResponse(c, 404, "{\"error\":\"Not found\"}");
+        return;
+    }
+    if (method != "GET" && !isPost && !isOpt) {
+        sendResponse(c, 405, "{\"error\":\"Method not allowed\"}");
+        return;
+    }
+
+    if (isOpt)
+    {
+        sendResponse(c, 200, "");
+        return;
+    }
+
+    std::string payload = utf8ToAnsi(body);
+    auto parts = splitStr(payload, "|");
+
+    std::string json = buildJsonBody();
+
+    if (isPost && parts.size() == 2)
+    {
+        std::lock_guard<std::recursive_mutex> lock(g_hashMutex);
+        const std::string& cmd = trim(parts[0]);
+        const std::string& arg = trim(parts[1]);
+        if (((cmd == "保存配置" || cmd == "删除配置" || cmd == "导入配置" || cmd == "模型名称") &&
+            !config_value::leafName(arg)) ||
+            std::any_of(payload.begin(), payload.end(), [](unsigned char ch) { return ch < 32; })) {
+            sendResponse(c, 400, "{\"error\":\"Invalid configuration name\"}");
+            return;
+        }
+
+        const auto cfgDir = file_paths::io(g.runDir / L"配置保存");
+
+        if (cmd == "获取所有配置名")
+        {
+            std::string names;
+            WIN32_FIND_DATAW fd;
+            const auto pat = cfgDir / L"*.*";
+            HANDLE hf = FindFirstFileW(pat.c_str(), &fd);
+            if (hf != INVALID_HANDLE_VALUE)
+            {
+                do
+                {
+                    if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+                    std::string n = file_paths::narrow(fd.cFileName);
+                    size_t dot = n.rfind('.');
+                    if (dot != std::string::npos) n = n.substr(0, dot);
+                    names += n + ",";
+                } while (FindNextFileW(hf, &fd));
+                FindClose(hf);
+            }
+            // 原版 文本_删右边 (局_返回文件名, 1)：去掉最后一个逗号
+            if (!names.empty() && names.back() == ',') names.pop_back();
+            // 原版是在同一份 JSON 上追加 配置列表，而不是替换
+            json = buildJsonBody("配置列表", names);
+        }
+        else if (cmd == "保存配置")
+        {
+            CreateDirectoryW(cfgDir.c_str(), nullptr);
+            if (!CopyFileW(g.cfgPath.c_str(), (cfgDir / file_paths::wide(arg + ".js")).c_str(), FALSE)) {
+                sendResponse(c, 500, "{\"error\":\"Cannot save configuration\"}");
+                return;
+            }
+            // 原版是在同一份 JSON 上追加 是否刷新（仍带 推理帧率/目前阵容/热键文本）
+            json = buildJsonBody("是否刷新", "是");
+        }
+        else if (cmd == "删除配置")
+        {
+            if (!DeleteFileW((cfgDir / file_paths::wide(arg + ".js")).c_str())) {
+                sendResponse(c, 500, "{\"error\":\"Cannot delete configuration\"}");
+                return;
+            }
+            json = buildJsonBody("是否刷新", "是");
+        }
+        else if (cmd == "导入配置")
+        {
+            if (!CopyFileW((cfgDir / file_paths::wide(arg + ".js")).c_str(), g.cfgPath.c_str(), FALSE)) {
+                sendResponse(c, 400, "{\"error\":\"Configuration not found\"}");
+                return;
+            }
+            configInit();
+            configApplyStartupDefaults();
+            configSyncAll(true);
+            if (!g_configSaved) {
+                sendResponse(c, 500, "{\"error\":\"Configuration applied but could not be saved\"}");
+                return;
+            }
+            json = buildJsonBody("是否刷新", "是");
+        }
+        else
+        {
+            if (!g_webConfig.contains(cmd)) {
+                sendResponse(c, 400, "{\"error\":\"Unknown configuration key\"}");
+                return;
+            }
+            // Sliders and multiple browser tabs can resend an unchanged value.
+            // Do not rebuild every setting or rewrite the file in that case.
+            // Retry after a failed save even if the in-memory value is equal.
+            if (!g_configSaved || hashGet(cmd) != arg || !fileExists(g.cfgPath) ||
+                g.camp != config_value::integer(hashGet("目前阵容"))) {
+                hashSet(cmd, arg);
+                configSyncAll(true);
+            }
+            if (!g_configSaved) {
+                sendResponse(c, 500, "{\"error\":\"Configuration applied but could not be saved\"}");
+                return;
+            }
+        }
+    }
+
+    sendResponse(c, 201, ansiToUtf8(json));
+}
+
+static void clientThread(SOCKET c)
+{
+    struct Close { SOCKET socket; ~Close() { closesocket(socket); } } close{c};
+    try {
+    DWORD timeout = 5000;
+    setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+    setsockopt(c, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+    std::string req;
+    char buf[4096];
+    const auto deadline = GetTickCount64() + timeout;
+    for (;;)
+    {
+        const auto now = GetTickCount64();
+        if (now >= deadline) return;
+        timeout = static_cast<DWORD>(deadline - now);
+        setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+        int n = recv(c, buf, sizeof(buf), 0);
+        if (n <= 0) break;
+        req.append(buf, n);
+        if (http_request::inspect(req).state != http_request::State::incomplete) break;
+    }
+
+    if (!req.empty()) handleRequest(c, req);
+    } catch (const std::exception& error) {
+        runtime_log::write("[web] Request failed: %s", error.what());
+        sendResponse(c, 500, "{\"error\":\"Request failed\"}");
+    }
+}
+
+void httpServerThread()
+{
+    WSADATA wsa{};
+    const int startup = WSAStartup(MAKEWORD(2, 2), &wsa);
+    if (startup != 0) {
+        webAccessFailed(L"Windows 网络初始化失败，错误 " + std::to_wstring(startup) + L"。\r\n");
+        return;
+    }
+    WebListeners listeners = startWebListeners((unsigned short)g.localPort);
+    if (listeners.primary == INVALID_SOCKET) {
+        webAccessFailed(listeners.notes);
+        WSACleanup();
+        return;
+    }
+    runtime_log::write("[web] LAN listener ready: %s:%u, port80=%s; background preflight started",
+        listeners.lan ? "0.0.0.0" : "127.0.0.1", listeners.port,
+        listeners.standard != INVALID_SOCKET ? "ready" : "unavailable");
+    std::thread(webAccessMonitor, listeners).detach();
+    while (g.running.load())
+    {
+        fd_set readable;
+        FD_ZERO(&readable);
+        FD_SET(listeners.primary, &readable);
+        if (listeners.standard != INVALID_SOCKET) FD_SET(listeners.standard, &readable);
+        timeval timeout{0, 500000};
+        const int selected = select(0, &readable, nullptr, nullptr, &timeout);
+        if (selected == SOCKET_ERROR) {
+            webAccessFailed(L"网页监听发生错误 " + std::to_wstring(WSAGetLastError()) + L"。\r\n");
+            break;
+        }
+        if (selected == 0) continue;
+        for (SOCKET listener : {listeners.primary, listeners.standard}) {
+            if (listener == INVALID_SOCKET || !FD_ISSET(listener, &readable)) continue;
+            SOCKET c = accept(listener, nullptr, nullptr);
+            if (c != INVALID_SOCKET) {
+                static std::atomic<unsigned> clients{0};
+                if (clients.fetch_add(1) >= 16) {
+                    --clients;
+                    closesocket(c);
+                    continue;
+                }
+                try {
+                    std::thread([c] {
+                        struct Release { ~Release() { --clients; } } release;
+                        clientThread(c);
+                    }).detach();
+                } catch (const std::exception&) {
+                    --clients;
+                    closesocket(c);
+                }
+            }
+        }
+    }
+
+    closeWebListeners(listeners);
+    WSACleanup();
+}

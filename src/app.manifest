@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  程序的 UAC 清单。
+
+  为什么要求管理员：
+    程序要自动安装 Makcu 盒子（WCH CH343）的 USB 转串口驱动，而安装内核驱动
+    必须管理员权限。清单里声明 requireAdministrator 后，启动时系统就完成提权，
+    驱动安装那一步才能全程不弹任何窗口。
+
+  副作用：双击 exe 时会出现一次 UAC 确认（系统的，无法绕过）。
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity type="win32" name="SagaApp.圣人双机服务端" version="1.0.0.0" processorArchitecture="amd64" />
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <!-- Windows 10 / 11 -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
+    </application>
+  </compatibility>
+</assembly>

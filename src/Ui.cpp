@@ -45,6 +45,7 @@ static unsigned char g_presentPixels[kBoard * kBoard * 4] = {};
 static bool g_hasPresentedFrame = false;
 static double g_imageScale = 1.0;
 static int g_sourceWidth = 0; // Protected by g_canvasLock.
+static int g_sourceHeight = 0;
 static int g_imageX = 0, g_imageY = 0;
 static constexpr UINT kSyncPreview = WM_APP + 41;
 static constexpr UINT kSyncSizeCombo = WM_APP + 42;   // 取消时把下拉框显示退回生效值
@@ -115,6 +116,7 @@ static HWND   g_cbDevice = nullptr;
 static HWND   g_cbFormat = nullptr;
 static HWND   g_cbSize = nullptr;
 static HWND   g_currentCropLabel = nullptr;
+static HWND   g_modelStatusLabel = nullptr;
 static HWND   g_chkRefresh = nullptr;
 
 
@@ -180,6 +182,7 @@ static void boardDrawPixels(const cv::Mat& image)
         cv::cvtColor(*pixels, destination, cv::COLOR_BGR2BGRA);
         if (trace) runtime_log::write("[preview] 首次颜色转换完成");
         g_sourceWidth = image.cols;
+        g_sourceHeight = image.rows;
         g_hasFrame = true;
     } catch (const cv::Exception&) {
         OutputDebugStringA("Preview decode failed.\n");
@@ -193,8 +196,9 @@ static void boardDrawImage(const std::vector<unsigned char>& encoded)
     try {
         auto decoded = cv::imdecode(encoded, cv::IMREAD_COLOR);
         const int size = g.imgSize;
-        if (g.adaptiveCapture && size > 0 && decoded.cols >= size && decoded.rows >= size)
-            decoded = decoded(cv::Rect((decoded.cols-size)/2, (decoded.rows-size)/2, size, size));
+        const int width = g.imgWidth;
+        if ((g.adaptiveCapture || g.fullScreenSearch) && size > 0 && width > 0 && decoded.cols >= width && decoded.rows >= size)
+            decoded = decoded(cv::Rect((decoded.cols-width)/2, (decoded.rows-size)/2, width, size));
         boardDrawPixels(decoded);
     } catch (const cv::Exception&) {
         OutputDebugStringA("Preview decode failed.\n");
@@ -247,7 +251,7 @@ static void canvasDrawImpl(const std::vector<unsigned char>* encoded, const Capt
         HBRUSH oldBrush = (HBRUSH)SelectObject(g_memDC, GetStockObject(NULL_BRUSH));
         DrawBox drawSnapshot[99];
         EnterCriticalSection(&g_drawLock);
-        const bool canDraw = g.canDraw && (!g.adaptiveCapture || g.drawSize == g_sourceWidth);
+        const bool canDraw = g.canDraw && g.drawSize == g_sourceHeight && g.drawWidth == g_sourceWidth;
         if (canDraw) std::memcpy(drawSnapshot, g.boxes, sizeof(drawSnapshot));
         LeaveCriticalSection(&g_drawLock);
         // GDI and label formatting must not hold up inference publication.
@@ -283,20 +287,20 @@ static void canvasDrawImpl(const std::vector<unsigned char>* encoded, const Capt
                 textAt(g_memDC, label, badge, g_font, RGB(8,18,32));
             }
         }
-        const int half = g_sourceWidth / 2;
+        const int halfX = g_sourceWidth / 2, halfY = g_sourceHeight / 2;
         const int lockRange = g.aimProfiles.active().profile.lockRange;
         HPEN pen = CreatePen(PS_SOLID, 1, RGB(255,222,89));
         auto oldPen = SelectObject(g_memDC, pen);
-        Ellipse(g_memDC, px(half - lockRange), py(half - lockRange),
-            px(half + lockRange), py(half + lockRange));
-        MoveToEx(g_memDC, px(half), py(half), nullptr);
+        Ellipse(g_memDC, px(halfX - lockRange), py(halfY - lockRange),
+            px(halfX + lockRange), py(halfY + lockRange));
+        MoveToEx(g_memDC, px(halfX), py(halfY), nullptr);
         EnterCriticalSection(&g_moveLock);
         const int moveDx = g.moveDx, moveDy = g.moveDy;
         LeaveCriticalSection(&g_moveLock);
-        LineTo(g_memDC, px(half + moveDx), py(half + moveDy));
+        LineTo(g_memDC, px(halfX + moveDx), py(halfY + moveDy));
         SelectObject(g_memDC, oldPen); DeleteObject(pen);
-        drawBigPoint(px(half), py(half), RGB(255,222,89));
-        drawBigPoint(px(half + g.boxDx), py(half + g.boxDy), RGB(255,222,89));
+        drawBigPoint(px(halfX), py(halfY), RGB(255,222,89));
+        drawBigPoint(px(halfX + g.boxDx), py(halfY + g.boxDy), RGB(255,222,89));
         SelectObject(g_memDC, oldBrush);
     }
     // Complete GDI operations before allowing the UI thread to read this bitmap.
@@ -573,15 +577,21 @@ static void sizeComboShowApplied()
 
 static void currentCaptureShow()
 {
+    if (g_modelStatusLabel) {
+        const auto value = model_status::label(g.modelStatus.load());
+        wchar_t previous[128]{};
+        GetWindowTextW(g_modelStatusLabel, previous, _countof(previous));
+        if (wcscmp(value, previous)) SetWindowTextW(g_modelStatusLabel, value);
+    }
     if (g_currentCropLabel) {
         const int size = g.imgSize.load();
         char label[96]{}, previous[96]{};
-        snprintf(label, sizeof(label), "当前截图范围：%d × %d 像素", size, size);
+        snprintf(label, sizeof(label), "当前截图范围：%d × %d 像素", g.imgWidth.load(), size);
         GetWindowTextA(g_currentCropLabel, previous, sizeof(previous));
         if (strcmp(label, previous) != 0) SetWindowTextA(g_currentCropLabel, label);
     }
     if (g_cbSize && !captureTaskBusy) {
-        const BOOL enabled = !g.adaptiveCapture.load();
+        const BOOL enabled = !g.adaptiveCapture.load() && !g.fullScreenSearch.load();
         if (IsWindowEnabled(g_cbSize) != enabled) EnableWindow(g_cbSize, enabled);
     }
 }
@@ -591,7 +601,7 @@ static void currentCaptureShow()
 static void sizeComboCommit()
 {
     if (captureTaskBusy) return;
-    if (g.adaptiveCapture) {
+    if (g.adaptiveCapture || g.fullScreenSearch) {
         sizeComboShowApplied();
         return;
     }
@@ -752,6 +762,22 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         {
             uiSetShowImg(IsDlgButtonChecked(h, 300) == BST_CHECKED);
         }
+        else if (id == 301 && code == BN_CLICKED)
+        {
+            const bool enabled = IsDlgButtonChecked(h, 301) == BST_CHECKED;
+            {
+                std::lock_guard<std::mutex> selection(g.modelMutex);
+                g.fullScreenSearch = enabled;
+                ++g.inferenceEpoch; // Revoke old movement and in-flight results immediately.
+                g.triggerFire = false;
+                EnterCriticalSection(&g_drawLock);
+                g.canDraw = false;
+                LeaveCriticalSection(&g_drawLock);
+            }
+            if (!startup_session::saveFullScreenSearch(g.runDir / L"配置保存.ini", enabled))
+                runtime_log::write("[ui] 无法保存全屏找图状态，错误=%lu", GetLastError());
+            currentCaptureShow();
+        }
         break;
     }
 
@@ -765,6 +791,8 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
     {
         HDC dc = (HDC)w;
         SetTextColor(dc, RGB(57, 69, 87));
+        if (reinterpret_cast<HWND>(l) == g_modelStatusLabel && g.modelStatus == model_status::State::Failed)
+            SetTextColor(dc, RGB(190, 40, 40));
         SetBkMode(dc, TRANSPARENT);
         return (LRESULT)g_panelBrush;
     }
@@ -866,7 +894,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         // 状态栏：中心尺寸 / 采集帧率 / 推理帧率 / 显卡名称 / 推理耗时
         char head[160];
         snprintf(head, sizeof(head), "%s %d × %d    采集 %d FPS    推理 %d FPS",
-            g.adaptiveCapture ? "自适应" : "中心", g.imgSize.load(), g.imgSize.load(), g.frameFps.load(), displayInferFps());
+            g.adaptiveCapture ? "自适应" : "中心", g.imgWidth.load(), g.imgSize.load(), g.frameFps.load(), displayInferFps());
         char tail[48];
         snprintf(tail, sizeof(tail), "    %.3f ms", g.inferMsPrecise.load());
 
@@ -885,8 +913,8 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         const std::string hardware = std::string("本地推理 · ") + boxStatus();
         textAt(dc, hardware.c_str(), {696,26,1056,56}, g_uiFont, RGB(101,118,142),
             DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-        textAt(dc, "数据：EXE / 人手数据 · 训练后自动生效", {696,738,1056,760}, g_uiFont, RGB(119,132,153));
-        textAt(dc, "截图：EXE / 模型名 / 时间戳.jpg · JPEG 95%", {696,763,1056,785}, g_uiFont, RGB(119,132,153));
+        textAt(dc, "数据：EXE / 人手数据 · 训练后自动生效", {696,770,1056,792}, g_uiFont, RGB(119,132,153));
+        textAt(dc, "截图：EXE / 模型名 / 时间戳.jpg · JPEG 95%", {696,795,1056,817}, g_uiFont, RGB(119,132,153));
         char status[192];
         snprintf(status, sizeof(status), "最近距离 %d     优先锁定 %.2f", g.nearestDist.load(), g.prioRatio.load());
         textAt(dc, status, {24,749,664,779}, g_uiFont, RGB(101,118,142));
@@ -911,6 +939,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         if (selSz >= 0)
             file_paths::writeProfile("默认", "组合框_视频大小", std::to_string(selSz).c_str(), ini.c_str());
         file_paths::writeProfile("默认", "选择框_实时刷新", g.showImg.load() ? "真" : "假", ini.c_str());
+        startup_session::saveFullScreenSearch(ini, g.fullScreenSearch.load());
 
         // 本程序自己的补充记忆（原版没有这一段，不影响易语言读取 [默认]）
         char dev[256] = {}, fmt[256] = {};
@@ -954,7 +983,7 @@ bool uiCreate(HINSTANCE hInst)
     wc.hbrBackground = g_panelBrush;
     RegisterClassA(&wc);
     const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN;
-    RECT rc{0, 0, 1080, 792};
+    RECT rc{0, 0, 1080, 824};
     AdjustWindowRect(&rc, style, FALSE);
     g_hwnd = CreateWindowA("SagaAppWindow", "圣人视觉 C++ · 采集与推理  |  网页访问IP：正在获取",
         style, CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top,
@@ -987,6 +1016,9 @@ bool uiCreate(HINSTANCE hInst)
     g_cbSize = combo(202, 316);
     g_currentCropLabel = label("当前截图范围：--", 364);
     SendMessageA(g_currentCropLabel, WM_SETFONT, (WPARAM)g_uiFont, TRUE);
+    g_modelStatusLabel = CreateWindowW(L"STATIC", L"模型尚未加载", WS_CHILD | WS_VISIBLE,
+        696, 390, 360, 22, h, nullptr, hInst, nullptr);
+    SendMessageW(g_modelStatusLabel, WM_SETFONT, (WPARAM)g_uiFont, TRUE);
     const auto button = [&](int id, const char* value, int x, int y, int width = 174) {
         HWND control = CreateWindowA("BUTTON", value, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
             x, y, width, 44, h, (HMENU)(INT_PTR)id, hInst, nullptr);
@@ -1001,12 +1033,17 @@ bool uiCreate(HINSTANCE hInst)
         h, (HMENU)300, hInst, nullptr);
     SendMessageA(g_chkRefresh, WM_SETFONT, (WPARAM)g_uiFont, TRUE);
     SetWindowTheme(g_chkRefresh, L"Explorer", nullptr);
-    button(106, "本机网络检查", 696, 522);
-    button(107, "打开本机调参", 882, 522);
-    button(102, "轨迹测试 · 10 次", 696, 576);
-    button(103, "移动 · 120 像素", 882, 576);
-    button(104, "点我开始记录人手数据", 696, 634, 360);
-    button(105, "点我开始训练人手模型", 696, 688, 360);
+    HWND fullSearch = CreateWindowA("BUTTON", "全屏找图",
+        BS_AUTOCHECKBOX | WS_CHILD | WS_VISIBLE | WS_TABSTOP, 696, 512, 360, 32,
+        h, (HMENU)301, hInst, nullptr);
+    SendMessageA(fullSearch, WM_SETFONT, (WPARAM)g_uiFont, TRUE);
+    SetWindowTheme(fullSearch, L"Explorer", nullptr);
+    button(106, "本机网络检查", 696, 554);
+    button(107, "打开本机调参", 882, 554);
+    button(102, "轨迹测试 · 10 次", 696, 608);
+    button(103, "移动 · 120 像素", 882, 608);
+    button(104, "点我开始记录人手数据", 696, 666, 360);
+    button(105, "点我开始训练人手模型", 696, 720, 360);
     EnableWindow(GetDlgItem(h, 102), trajReady());
     SetTimer(h, 1, 500, nullptr);
 
@@ -1063,7 +1100,10 @@ bool uiCreate(HINSTANCE hInst)
         g.showImg = (rf != 0);
     }
     CheckDlgButton(h, 300, g.showImg.load() ? BST_CHECKED : BST_UNCHECKED);
+    g.fullScreenSearch = startup_session::loadFullScreenSearch(ini);
+    CheckDlgButton(h, 301, g.fullScreenSearch.load() ? BST_CHECKED : BST_UNCHECKED);
     g.manualCropSize = g.imgSize.load();
+    g.imgWidth = g.imgSize.load();
     currentCaptureShow();
     ShowWindow(h, SW_SHOW);
     UpdateWindow(h);
@@ -1126,6 +1166,17 @@ void uiThread()
 HWND uiGetHwnd()
 {
     return g_hwnd;
+}
+
+bool uiModelError(const std::wstring& message)
+{
+    runtime_log::writeWide(L"[model-error] " + message);
+    int result = model_status::show(g_hwnd, message);
+    if (!result) {
+        runtime_log::write("[model-error] 创建提示框失败，错误=%lu，尝试无父窗口提示", GetLastError());
+        result = model_status::show(nullptr, message);
+    }
+    return result == IDRETRY;
 }
 
 // ============================================================================

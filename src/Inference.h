@@ -1,6 +1,11 @@
 #pragma once
 #include <memory>
 #include <cstddef>
+#include <chrono>
+
+inline double frameClockMs() {
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
 struct DetectObject {
     float x, y, width, height;
     int label;
@@ -71,9 +76,12 @@ struct CaptureFrame {
     const unsigned char* bmp = nullptr;
     int size = 0, width = 0, height = 0;
     size_t stride = 0;
+    double timestampMs = 0; // Monotonic publication time of this exact frame.
 };
 bool captureAcquire(CaptureFrame& frame, unsigned long long& sequence, unsigned timeoutMs);
 bool captureSetCrop(int size); // Changes the next frame crop without rebuilding DirectShow.
+// Centered rectangle, clipped to the source width; returns applied width, or 0.
+int captureSetRegion(int width, int height);
 void canvasDrawCapture(const CaptureFrame& frame);
 int ncnnDetectBgr(const unsigned char*, int, int, size_t, float, float, DetectObject*);
 int onnxDetectBgr(const unsigned char*, int, int, size_t, float, float, DetectObject*);

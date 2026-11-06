@@ -7,7 +7,7 @@
 AppState g;
 CRITICAL_SECTION g_drawLock;
 CRITICAL_SECTION g_moveLock;
-namespace runtime_log { void write(const char*, ...) {} }
+namespace runtime_log { void write(const char*, ...) {} void writeWide(std::wstring_view) {} }
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "shell32.lib")
@@ -180,6 +180,27 @@ int main() {
         boardPaint(target);
         checkPreview(expected);
 
+        // Wide input remains 3:1 in the square preview. Both the crosshair and
+        // right-tile boxes must use separate horizontal and vertical centers.
+        std::vector<unsigned char> wide(54+1920*640*3,0);
+        for(int y=0;y<640;++y) for(int x=0;x<1920;++x) {
+            auto* p=wide.data()+54+(size_t(y)*1920+x)*3;
+            p[x/640]=120;
+        }
+        frame.bmp=wide.data();frame.size=int(wide.size());frame.width=1920;frame.height=640;frame.stride=1920*3;
+        g.canDraw=true;g.drawWidth=1920;g.drawSize=640;
+        g.boxes[0]={};g.boxes[0].x1=1400;g.boxes[0].x2=1600;g.boxes[0].y1=240;g.boxes[0].y2=400;
+        g.boxes[0].color=RGB(0,255,0);g.boxes[0].category=1;g.boxes[0].confidence=.9f;g.boxes[1]={};
+        canvasDrawCapture(frame);
+        require(g_sourceWidth==1920 && g_sourceHeight==640 && std::abs(g_imageScale-1./3)<1e-9,"Wide preview aspect");
+        require(g_imageY==213 && GetPixel(g_memDC,20,20)==RGB(0,0,0),"Wide preview letterbox");
+        require(GetPixel(g_memDC,40,250)==RGB(0,0,120) && GetPixel(g_memDC,600,250)==RGB(120,0,0),"Wide side tiles visible");
+        require(GetPixel(g_memDC,320,320)==RGB(255,222,89),"Wide crosshair must stay centered");
+        require(GetPixel(g_memDC,467,320)==RGB(0,255,0),"Right-tile rectangle must map to preview");
+        g.drawWidth=640;canvasDrawCapture(frame);
+        require(GetPixel(g_memDC,467,320)!=RGB(0,255,0),"Stale square boxes must not annotate wide frame");
+        g.canDraw=false;
+
         g_cbSize = CreateWindowA("COMBOBOX", "", WS_CHILD | CBS_DROPDOWNLIST,
             0, 0, 200, 200, window, nullptr, GetModuleHandleA(nullptr), nullptr);
         require(g_cbSize != nullptr,"Create size display fixture");
@@ -204,7 +225,7 @@ int main() {
         const int manualWrites=comboWrites;
         g.adaptiveCapture=true;
         for(int size=160;size<=640;size+=32) {
-            g.imgSize=size; currentCaptureShow();
+            g.imgSize=size; g.imgWidth=size; currentCaptureShow();
             char actual[96]{},expectedLabel[96]{};
             GetWindowTextA(g_currentCropLabel,actual,sizeof(actual));
             snprintf(expectedLabel,sizeof(expectedLabel),"当前截图范围：%d × %d 像素",size,size);
@@ -215,6 +236,9 @@ int main() {
             require(g.manualCropSize==416 && SendMessageA(g_cbSize,CB_GETCURSEL,0,0)==8,"Adaptive range changed manual selection");
         }
         require(comboWrites==manualWrites && labelWrites==16,"Adaptive updates must write only the live label");
+        g.imgWidth=1920;g.imgSize=640;currentCaptureShow();
+        char wideLabel[96]{};GetWindowTextA(g_currentCropLabel,wideLabel,sizeof(wideLabel));
+        require(std::string(wideLabel)=="当前截图范围：1920 × 640 像素","Wide range label");
         require(!IsWindowEnabled(g_cbSize),"Adaptive mode must disable manual range");
         sizeComboCommit(); // No task or popup in adaptive mode.
         g.adaptiveCapture=false; currentCaptureShow();
@@ -222,6 +246,26 @@ int main() {
         const auto sessionDir=std::filesystem::temp_directory_path()/(L"saga-restore-ui-"+std::to_wstring(GetCurrentProcessId()));
         require(std::filesystem::create_directory(sessionDir),"Create startup fixture directory");
         g.runDir=sessionDir; g_hwnd=window;
+        HWND fullSearch=CreateWindowA("BUTTON","全屏找图",WS_CHILD|BS_AUTOCHECKBOX,0,0,200,32,
+            window,(HMENU)301,wc.hInstance,nullptr);
+        require(fullSearch!=nullptr,"Full search checkbox fixture");
+        for(bool enabled:{true,false}) {
+            CheckDlgButton(window,301,enabled?BST_CHECKED:BST_UNCHECKED);
+            g.moveDx=100;g.moveEpoch=g.inferenceEpoch;g.canDraw=true;
+            wndProc(window,WM_COMMAND,MAKEWPARAM(301,BN_CLICKED),(LPARAM)fullSearch);
+            require(g.fullScreenSearch==enabled && g.moveEpoch!=g.inferenceEpoch && !g.canDraw,"Toggle must revoke old results");
+            require(startup_session::loadFullScreenSearch(sessionDir/L"配置保存.ini")==enabled,"Full search persists immediately");
+            require(bool(IsWindowEnabled(g_cbSize))!=enabled,"Full search owns the maximum manual crop");
+        }
+        DestroyWindow(fullSearch);
+        g_modelStatusLabel=CreateWindowW(L"STATIC",L"",WS_CHILD,0,0,360,22,window,nullptr,wc.hInstance,nullptr);
+        require(g_modelStatusLabel!=nullptr,"Model status fixture");
+        for(auto state:{model_status::State::Loading,model_status::State::Ready,model_status::State::Failed}) {
+            g.modelStatus=state;currentCaptureShow();
+            wchar_t text[128]{};GetWindowTextW(g_modelStatusLabel,text,_countof(text));
+            require(wcscmp(text,model_status::label(state))==0,"Model status must distinguish failed from loaded");
+        }
+        DestroyWindow(g_modelStatusLabel);g_modelStatusLabel=nullptr;
         g_cbDevice=CreateWindowA("COMBOBOX","",WS_CHILD|CBS_DROPDOWNLIST,0,0,200,200,window,nullptr,wc.hInstance,nullptr);
         g_cbFormat=CreateWindowA("COMBOBOX","",WS_CHILD|CBS_DROPDOWNLIST,0,0,200,200,window,nullptr,wc.hInstance,nullptr);
         uiRestoreCapture();

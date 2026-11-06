@@ -8,10 +8,10 @@ $relative = '.workbuddy/review-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + 
 $output = Join-Path $root $relative
 New-Item -ItemType Directory -Path $output | Out-Null
 $tests = @(
-    @{ Name='test_runtime_safety' }, @{ Name='test_move_transaction' },
+    @{ Name='test_runtime_safety' }, @{ Name='test_move_transaction' }, @{ Name='test_speed_compensation' },
     @{ Name='test_inference_inputs'; Sources=@('src/NCNN.cpp','src/ONNX.cpp') },
-    @{ Name='test_model_files' }, @{ Name='test_model_http' },
-    @{ Name='test_aim_profiles' }, @{ Name='test_adaptive_capture' }, @{ Name='test_adaptive_loop' }, @{ Name='test_tensor_pixels' },
+    @{ Name='test_model_files' }, @{ Name='test_model_http' }, @{ Name='test_model_failures' }, @{ Name='test_model_error_dialog' },
+    @{ Name='test_aim_profiles' }, @{ Name='test_adaptive_capture' }, @{ Name='test_adaptive_loop' }, @{ Name='test_wide_search' }, @{ Name='test_tensor_pixels' },
     @{ Name='test_letterbox_geometry' }, @{ Name='test_yolo_hotpath' },
     @{ Name='test_capture_pipeline' }, @{ Name='test_capture_preview' },
     @{ Name='test_capture_stress' }, @{ Name='test_screenshot' },

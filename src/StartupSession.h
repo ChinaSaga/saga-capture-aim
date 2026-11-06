@@ -34,4 +34,10 @@ inline bool save(const std::filesystem::path& ini, const Capture& capture, int m
 inline bool savePreview(const std::filesystem::path& ini, bool enabled) {
     return file_paths::writeProfile("默认","选择框_实时刷新",enabled?"1":"0",ini.c_str())!=FALSE;
 }
+inline bool loadFullScreenSearch(const std::filesystem::path& ini) {
+    return file_paths::profileInt("默认","选择框_全屏找图",0,ini.c_str()) != 0;
+}
+inline bool saveFullScreenSearch(const std::filesystem::path& ini, bool enabled) {
+    return file_paths::writeProfile("默认","选择框_全屏找图",enabled?"1":"0",ini.c_str())!=FALSE;
+}
 }

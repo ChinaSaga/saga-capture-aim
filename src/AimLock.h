@@ -58,6 +58,8 @@ struct Result
 {
     int  index = -1;    // 选中的候选框下标；-1 = 这一帧不移动
     bool held  = false; // true = 正在「失锁确认」里按住不动
+    bool sameTarget = false; // Matched the previous person, without stealing.
+    int anchor = -1;    // Largest current part: stable motion reference for head/body switching.
 };
 
 // 两个框是不是「同一个人」的两个部位（头挂在身子上）：
@@ -72,6 +74,16 @@ inline bool sameBody(const Box& a, const Box& b, const Params& p)
 
     const double overlapX = (std::min)(smallBox.x + smallBox.w, bigBox.x + bigBox.w) - (std::max)(smallBox.x, bigBox.x);
     if (smallBox.w <= 0.0 || overlapX < smallBox.w * p.sameBodyOverlap) return false;
+
+    // Detectors can label a head *inside* the full-person box. Require a smaller
+    // part in its upper half, substantial containment and horizontal alignment.
+    const double overlapY = (std::min)(smallBox.y + smallBox.h, bigBox.y + bigBox.h) -
+                            (std::max)(smallBox.y, bigBox.y);
+    const double centerGap = std::abs(smallBox.x + smallBox.w * .5 - bigBox.x - bigBox.w * .5);
+    if (smallBox.h <= bigBox.h * .55 && smallBox.w <= bigBox.w * .85 &&
+        overlapX >= smallBox.w * .8 && overlapY >= smallBox.h * .8 &&
+        smallBox.y + smallBox.h * .5 <= bigBox.y + bigBox.h * .5 &&
+        centerGap <= bigBox.w * .35) return true;
 
     const double delta = (smallBox.y + smallBox.h) - bigBox.y;   // 小框底 − 大框顶
     return delta >= -bigBox.h * p.sameBodyGap && delta <= bigBox.h * p.sameBodyTopK;
@@ -143,7 +155,8 @@ inline Result select(const Box* box, int count, const Params& p, Memory& mem)
                 Pair& pr = pairs[pairCount++];
                 pr.part = iSmall ? i : j;
                 pr.body   = iSmall ? j : i;
-                pr.score = std::fabs((box[pr.part].y + box[pr.part].h) - box[pr.body].y);
+                pr.score = std::fabs((box[pr.part].y + box[pr.part].h) - box[pr.body].y) +
+                    std::fabs(box[pr.part].x + box[pr.part].w * .5 - box[pr.body].x - box[pr.body].w * .5);
             }
         }
     }
@@ -214,23 +227,37 @@ inline Result select(const Box* box, int count, const Params& p, Memory& mem)
             mem.part[mem.count++] = box[i];
         mem.lost = 0;
         r.index = clusterBest[slot];
+        r.anchor = clusterAnchor[slot];
         r.held = false;
     };
 
     // ---------------- 锁定粘滞第 1 步：上一帧锁的那个人这一帧还在不在 ----------------
     int locked = -1;
+    double matchScore = 1e18;
     if (mem.count > 0)
     {
-        for (int k = 0; k < peopleCount && locked < 0; ++k)
+        for (int k = 0; k < peopleCount; ++k)
         {
-            for (int i = firstMember[k]; i >= 0 && locked < 0; i = nextMember[i])
+            for (int i = firstMember[k]; i >= 0; i = nextMember[i])
             {
-                for (int m = 0; m < mem.count; ++m)
-                    if (sameBoxAcrossFrames(box[i], mem.part[m], p)) { locked = k; break; }
+                for (int m = 0; m < mem.count; ++m) {
+                    const auto& old = mem.part[m];
+                    const bool sharedPart = sameBoxAcrossFrames(box[i], old, p);
+                    const bool substitute = box[i].lockType >= 1 && box[i].lockType <= 3 &&
+                        old.lockType >= 1 && old.lockType <= 3 && box[i].lockType != old.lockType &&
+                        sameBody(box[i], old, p);
+                    if (!sharedPart && !substitute) continue;
+                    const double dx = box[i].x + box[i].w * .5 - old.x - old.w * .5;
+                    const double dy = box[i].y + box[i].h * .5 - old.y - old.h * .5;
+                    const double size = (std::max)(24.0, (std::max)(box[i].w, old.w));
+                    const double score = (dx * dx + dy * dy) / (size * size) + (sharedPart ? 0 : 4);
+                    if (score < matchScore) { matchScore = score; locked = k; }
+                }
             }
         }
     }
-    if (locked >= 0 && box[clusterBest[locked]].distance >= (double)p.lockRange)
+    if (locked >= 0 && box[clusterBest[locked]].distance >= (double)p.lockRange &&
+        !(p.moveInBox && box[clusterBest[locked]].normRatio <= 1.0))
         locked = -1;                                       // 已经脱离锁定范围 → 重新选
 
     if (locked >= 0)
@@ -254,6 +281,7 @@ inline Result select(const Box* box, int count, const Params& p, Memory& mem)
                 (typeRank(c.lockType) == typeRank(s.lockType) &&
                  box[clusterAnchor[k]].distance < box[clusterAnchor[steal]].distance)) steal = k;
         }
+        r.sameTarget = steal < 0 && mem.lost == 0;
         pick(steal >= 0 ? steal : locked);
         return r;
     }

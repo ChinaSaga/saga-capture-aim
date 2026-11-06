@@ -145,7 +145,8 @@ void configSyncAll(bool save)
     g_webConfig.clear();
 
     bufInt("本地端口", g.localPort);
-    bufInt("移动方式", settings.moveMode);
+    // Removed movement modes: old PID configurations now use their coefficient.
+    g_hash.erase("移动方式"); g_hash.erase("Kp"); g_hash.erase("Ki");
     bufInt("优先锁定", g.prioLock);
     bufInt("其次锁定", g.secondLock);
     bufInt("再次锁定", g.thirdLock);
@@ -191,6 +192,7 @@ void configSyncAll(bool save)
         g.engine = engineTmp >= 1 && engineTmp <= 3 ? engineTmp : 1;
         if (previousModel != g.modelName || previousEngine != g.engine) {
             ++g.inferenceEpoch;
+            g.modelStatus = model_status::State::Idle;
             g.triggerFire = false;
             g.adaptiveCapture = model_files::isGroup(g.modelDirectory(), file_paths::wide(g.modelName));
         }
@@ -213,9 +215,6 @@ void configSyncAll(bool save)
     bufFlt("置信度", settings.conf);
     bufFlt("准星精度", settings.crossConf);
     bufFlt("交并比", settings.nms);
-    bufFlt("移动系数", settings.moveFactor);
-    bufFlt("Kp", settings.kp);
-    bufFlt("Ki", settings.ki);
     bufFlt("扳机范围", settings.triggerRange);
 
     aim_profiles::Config profiles;
@@ -231,6 +230,23 @@ void configSyncAll(bool save)
     first.centerRange = g.centerRange;
     first.moveInBox = g.moveInBox == "true";
     profiles.alwaysOn = g.alwaysOn == "true";
+    const auto movementFields = [&](const std::string& prefix, aim_profiles::Profile& profile) {
+        const auto coefficient = prefix + "移动系数";
+        if (!g_hash.contains(coefficient)) hashSet(coefficient, std::to_string(profile.moveFactor));
+        const float factor = std::clamp(config_value::number(hashGet(coefficient)), 0.f, 10.f);
+        hashSet(coefficient, std::to_string(factor));
+        bufFlt(coefficient.c_str(), profile.moveFactor);
+        const auto compensation = prefix + "移动速度补偿";
+        if (!g_hash.contains(compensation)) hashSet(compensation, std::to_string(profile.speedCompensation));
+        hashSet(compensation, std::to_string(std::clamp(config_value::integer(hashGet(compensation)), 0, 100)));
+        bufInt(compensation.c_str(), profile.speedCompensation);
+        // Retired settings are removed on import/save and cannot be posted by an old page.
+        for(const auto* name:{"预测连续次数","预测提前量","X轴预测提前量","Y轴预测提前量",
+            "卡尔曼预测","卡尔曼预测时间","卡尔曼响应强度","卡尔曼平滑强度","卡尔曼最大提前量"})
+            g_hash.erase(prefix+name);
+    };
+    movementFields("", first);
+    settings.moveFactor = first.moveFactor;
     for (int group = 1; group < 3; ++group) {
         // Old files become group 1. New groups start with copied target settings
         // and no keys; materialize defaults once so later group-1 edits stay isolated.
@@ -238,6 +254,7 @@ void configSyncAll(bool save)
         profile = first;
         profile.keys = {};
         const auto prefix = std::string("热键") + std::to_string(group + 1) + "_";
+        movementFields(prefix, profile);
         const auto field = [&](const char* name, int& value) {
             const auto key = prefix + name;
             if (g_hash.find(key) == g_hash.end()) hashSet(key, std::to_string(value));
@@ -335,6 +352,9 @@ static std::string buildJsonBody(const std::string& extraKey = "",
     j += "\"推理耗时毫秒\":" + std::to_string(active ? inferMs : 0.0) + ",";
     j += "\"自适应截图\":" + std::string(g.adaptiveCapture ? "true" : "false") + ",";
     j += "\"截图范围\":" + std::to_string(g.imgSize.load()) + ",";
+    j += "\"模型加载状态\":\"" + jsonEscape(file_paths::narrow(model_status::label(g.modelStatus.load()))) + "\",";
+    j += "\"截图宽度\":" + std::to_string(g.imgWidth.load()) + ",";
+    j += "\"全屏找图\":" + std::string(g.fullScreenSearch ? "true" : "false") + ",";
     j += "\"目前阵容\":\"" + std::to_string(g.camp.load()) + "\",";
     if (!extraKey.empty())
         j += "\"" + extraKey + "\":\"" + jsonEscape(extraVal) + "\",";

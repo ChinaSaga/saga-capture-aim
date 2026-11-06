@@ -166,6 +166,7 @@ select:disabled { opacity: .65; }
 .hotkey-profile-tabs .mode-tab { min-height: 34px; }
 #always-on-row[hidden] { display: none; }
 .profile-note { color: var(--muted); font-size: 11px; line-height: 1.6; margin: 0 0 12px; }
+#速度补偿面板 .mode-header .profile-note { margin: 0; flex: 0 0 auto; }
 .param-row { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; }
 .param-row:last-child { margin-bottom: 0; }
 .param-label { flex: 0 0 40px; color: var(--muted); font-size: 12px; }
@@ -649,9 +650,9 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
     :is(#NCNN, #ONNX, #TensorRT):checked:not(:disabled) + label::after { animation: none; }
 }
 /* Preserve selected/idle styling, but stop animations on these controls. */
-:is(#tab移动系数, #tabPID移动, #panel-types button, #panel-types .checkbox-item label, #panel-types .radio-card span),
-:is(#tab移动系数, #tabPID移动, #panel-types button, #panel-types .checkbox-item label, #panel-types .radio-card span)::before,
-:is(#tab移动系数, #tabPID移动, #panel-types button, #panel-types .checkbox-item label, #panel-types .radio-card span)::after {
+:is(#panel-types button, #panel-types .checkbox-item label, #panel-types .radio-card span),
+:is(#panel-types button, #panel-types .checkbox-item label, #panel-types .radio-card span)::before,
+:is(#panel-types button, #panel-types .checkbox-item label, #panel-types .radio-card span)::after {
     animation: none !important;
 }
 /* Profile colors are scoped to the two linked cards; profile 1 keeps the original palette. */
@@ -795,44 +796,28 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
                                 <span class="toggle-text">线程外移动</span>
                             </label>
                         </div>
-                        <!-- 移动方式切换面板 -->
-                        <div class="move-mode-panel" id="移动方式面板">
-                            <div class="mode-header">
-                                <span class="mode-label">移动方式</span>
-                                <div class="mode-tabs">
-                                    <button type="button" class="mode-tab active" data-mode="1" id="tab移动系数">移动系数</button>
-                                    <button type="button" class="mode-tab" data-mode="2" id="tabPID移动">PID移动</button>
+                        <div class="move-mode-panel" id="速度补偿面板">
+                            <div class="mode-header"><span class="mode-label">移动速度补偿</span><span class="profile-note" id="补偿配置组显示">热键配置 1</span></div>
+                            <div class="mode-body">
+                                <div class="control-row">
+                                    <div class="control-label multi-label"><div class="main-title">补偿幅度</div><div class="sub-text">0 关 · 100 最强</div></div>
+                                    <div class="slider-container"><input type="range" id="移动速度补偿" min="0" max="100" value="0" step="1"><span class="value-display" id="移动速度补偿显示">0</span></div>
                                 </div>
+                                <p class="profile-note">1–100 统一增强预测追赶，数值越大补偿越强，各档均允许越过当前目标点。匀速时提前距离保持稳定，加减速时自动调整。建立预测后可通过中心停移范围，三组热键独立保存。</p>
                             </div>
-                            <div class="mode-body" id="移动方式参数体">
-                                <div id="移动系数参数区">
-                                    <div class="param-row">
-                                        <span class="param-label">系数:</span>
-                                        <input type="text" id="移动系数" value="0.486">
-                                        <div class="btn-group">
-                                            <button type="button" onclick="增加移动系数()">+</button>
-                                            <button type="button" onclick="减少移动系数()">-</button>
-                                        </div>
+                        </div>
+                        <div class="move-mode-panel" id="移动系数面板">
+                            <div class="mode-header"><span class="mode-label" id="移动系数组标题">移动系数</span></div>
+                            <div class="mode-body">
+                                <div class="param-row">
+                                    <span class="param-label">系数:</span>
+                                    <input type="text" id="移动系数" value="0.618">
+                                    <div class="btn-group">
+                                        <button type="button" onclick="增加移动系数()">+</button>
+                                        <button type="button" onclick="减少移动系数()">-</button>
                                     </div>
                                 </div>
-                                <div id="PID参数区" style="display:none;">
-                                    <div class="param-row">
-                                        <span class="param-label">Kp:</span>
-                                        <input type="text" id="Kp" value="0.100">
-                                        <div class="btn-group">
-                                            <button type="button" onclick="增加Kp()">+</button>
-                                            <button type="button" onclick="减少Kp()">-</button>
-                                        </div>
-                                    </div>
-                                    <div class="param-row">
-                                        <span class="param-label">Ki:</span>
-                                        <input type="text" id="Ki" value="0.010">
-                                        <div class="btn-group">
-                                            <button type="button" onclick="增加Ki()">+</button>
-                                            <button type="button" onclick="减少Ki()">-</button>
-                                        </div>
-                                    </div>
-                                </div>
+                                <p class="profile-note">随热键配置分别保存，可为不同倍镜设置系数。</p>
                             </div>
                         </div>
                     </div>
@@ -921,6 +906,7 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
                         </div>
                     </div>
                 </section>
+
 <section class="config-group hotkeys-card" id="panel-hotkeys" aria-labelledby="heading-hotkeys">
                     <h3 class="group-title" id="heading-hotkeys">热键设置</h3>
                     <div class="mode-tabs hotkey-profile-tabs" role="tablist" aria-label="热键设置分组">
@@ -2245,6 +2231,7 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
                     </div>
                     <div class="model-tools"><button type="button" onclick="刷新模型列表()">刷新模型</button><span id="模型列表状态" aria-live="polite"></span></div>
                     <div id="模型实时范围" aria-live="polite"></div>
+                    <div id="模型加载状态" role="status" aria-live="polite">模型尚未加载</div>
                     <div class="radio-container">
                         <div class="radio-item engine-disabled">
                             <input type="radio" id="NCNN" name="推理引擎" value="NCNN" disabled>
@@ -2957,10 +2944,6 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
             }
         }
 
-        let 移动方式 = (typeof window.移动方式 !== 'undefined') ? window.移动方式 : 1;
-        let Kp = (typeof window.Kp !== 'undefined') ? window.Kp : 0.1;
-        let Ki = (typeof window.Ki !== 'undefined') ? window.Ki : 0.01;
-
         let 当前选中配置 = null;
 
         window.addEventListener("load", async function() {
@@ -3027,7 +3010,7 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
         // The editor selection is local UI state; all three groups remain live.
         const 热键配置字段 = ['自瞄主键', '自瞄副键', '自瞄副键2', '自瞄副键3'];
         const 目标配置字段 = ['锁定范围', '中心点范围', '框内移动', '优先锁定', '其次锁定', '再次锁定',
-            '优先锁定位置', '其次锁定位置', '再次锁定位置'];
+            '优先锁定位置', '其次锁定位置', '再次锁定位置', '移动系数', '移动速度补偿'];
         const 分组配置字段 = new Set([...热键配置字段, ...目标配置字段]);
         let 当前热键配置 = 0;
         let 热键配置组 = [];
@@ -3053,6 +3036,7 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
             });
             document.getElementById('always-on-row').hidden = group !== 0;
             document.getElementById('heading-target').textContent = '目标锁定' + (group + 1);
+            document.getElementById('补偿配置组显示').textContent = '热键配置 ' + (group + 1);
             document.getElementById('hotkey-profile-content').setAttribute('aria-labelledby', 'hotkey-tab-' + (group + 1));
             document.querySelectorAll('[data-hotkey-profile]').forEach(tab => {
                 const selected = Number(tab.dataset.hotkeyProfile) === group;
@@ -3062,10 +3046,13 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
             });
         }
         function 初始化热键配置() {
+            // An element ID is also exposed on window when old config.js has no
+            // corresponding setting; it must not override a numeric default.
+            const 配置值 = name => ['number', 'boolean', 'string'].includes(typeof window[name]) ? window[name] : undefined;
             热键配置组 = [0, 1, 2].map(group => Object.fromEntries([...分组配置字段].map(name => {
                 const key = 分组参数名(name, group);
-                const fallback = 热键配置字段.includes(name) && group !== 0 ? 0 : window[name];
-                const value = window[key] ?? fallback;
+                const fallback = 热键配置字段.includes(name) && group !== 0 ? 0 : 配置值(name);
+                const value = 配置值(key) ?? fallback ?? ({移动系数: .618, 移动速度补偿: 0}[name] ?? 0);
                 return [name, name === '框内移动' ? (value === true || value === 'true') : Number(value)];
             })));
             document.querySelectorAll('[data-hotkey-profile]').forEach(tab => {
@@ -3124,11 +3111,15 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
             return option;
         }
         function 更新实时截图(obj) {
+            const modelStatus = document.getElementById('模型加载状态');
+            if (modelStatus) modelStatus.textContent = typeof obj['模型加载状态'] === 'string' ? obj['模型加载状态'] : '等待模型状态…';
             const element = document.getElementById('模型实时范围');
             if (!element) return;
             const size = Number(obj['截图范围']);
+            const inputWidth = Number(obj['截图宽度']);
+            const width = Number.isInteger(inputWidth) && inputWidth >= size && inputWidth <= 1920 ? inputWidth : size;
             const label = Number.isInteger(size) && size >= 160 && size <= 640
-                ? (obj['自适应截图'] === true ? '当前自适应截图：' : '当前截图：') + size + ' × ' + size : '';
+                ? (obj['自适应截图'] === true ? '当前自适应截图：' : '当前截图：') + width + ' × ' + size : '';
             if (element.textContent !== label) element.textContent = label;
         }
         async function 刷新模型列表() {
@@ -3237,80 +3228,16 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
             document.getElementById('吸附常驻').checked = 吸附常驻;
             document.getElementById('自瞄连续按下').checked = 自瞄连续按下;
 
-            // 移动方式初始化
-            移动方式 = (typeof window.移动方式 !== 'undefined') ? window.移动方式 : 1;
-            Kp = (typeof window.Kp !== 'undefined') ? window.Kp : 0.1;
-            Ki = (typeof window.Ki !== 'undefined') ? window.Ki : 0.01;
-
-            document.getElementById('移动系数').value = 移动系数;
-            document.getElementById('Kp').value = Kp.toFixed(3);
-            document.getElementById('Ki').value = Ki.toFixed(3);
-
-            切换移动方式界面(移动方式);
-
-            // 只高亮移动方式标签
-            document.querySelectorAll('.mode-tab[data-mode]').forEach(tab => {
-                tab.classList.toggle('active', parseInt(tab.dataset.mode) === 移动方式);
-            });
-
             initSliders();
+            initSpeedCompensation();
             initPrecisionControls();
             初始化热键配置();
 
-            // 移动方式点击切换
-            document.querySelectorAll('.mode-tab[data-mode]').forEach(tab => {
-                tab.addEventListener('click', function() {
-                    const mode = parseInt(this.dataset.mode);
-                    if (mode === 移动方式) return;
-                    移动方式 = mode;
-                    document.querySelectorAll('.mode-tab[data-mode]').forEach(t => t.classList.remove('active'));
-                    this.classList.add('active');
-                    切换移动方式界面(mode);
-                    发送消息给服务器("移动方式", mode);
-                });
-            });
-
-            // PID 监听
-            document.getElementById('Kp').addEventListener('change', function() {
-                let val = parseFloat(this.value);
-                if (isNaN(val)) val = 0;
-                Kp = val;
-                发送消息给服务器("Kp", Kp);
-            });
-            document.getElementById('Ki').addEventListener('change', function() {
-                let val = parseFloat(this.value);
-                if (isNaN(val)) val = 0;
-                Ki = val;
-                发送消息给服务器("Ki", Ki);
-            });
-
-            document.getElementById('Kp').addEventListener('input', function() {
-                let val = parseFloat(this.value);
-                if (!isNaN(val)) { Kp = val;
-                    发送消息给服务器("Kp", Kp); }
-            });
-            document.getElementById('Ki').addEventListener('input', function() {
-                let val = parseFloat(this.value);
-                if (!isNaN(val)) { Ki = val;
-                    发送消息给服务器("Ki", Ki); }
-            });
         };
-
-        function 切换移动方式界面(mode) {
-            const 系数区 = document.getElementById('移动系数参数区');
-            const pid区 = document.getElementById('PID参数区');
-            if (mode === 1) {
-                系数区.style.display = 'block';
-                pid区.style.display = 'none';
-            } else {
-                系数区.style.display = 'none';
-                pid区.style.display = 'block';
-            }
-        }
 
         function 增加移动系数() {
             移动系数 = parseFloat(document.getElementById('移动系数').value) || 0;
-            移动系数 = 移动系数 + 0.001;
+            移动系数 = Math.min(10, 移动系数 + 0.001);
             移动系数 = parseFloat(移动系数.toFixed(3));
             document.getElementById('移动系数').value = 移动系数;
             发送消息给服务器("移动系数", 移动系数);
@@ -3318,45 +3245,11 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
 
         function 减少移动系数() {
             移动系数 = parseFloat(document.getElementById('移动系数').value) || 0;
-            if (移动系数 <= 0.01) return;
-            移动系数 = 移动系数 - 0.001;
+            if (移动系数 <= 0) return;
+            移动系数 = Math.max(0, 移动系数 - 0.001);
             移动系数 = parseFloat(移动系数.toFixed(3));
             document.getElementById('移动系数').value = 移动系数;
             发送消息给服务器("移动系数", 移动系数);
-        }
-
-        function 增加Kp() {
-            let val = parseFloat(document.getElementById('Kp').value) || 0;
-            val = Math.round((val + 0.001) * 1000) / 1000;
-            document.getElementById('Kp').value = val.toFixed(3);
-            Kp = val;
-            发送消息给服务器("Kp", Kp);
-        }
-
-        function 减少Kp() {
-            let val = parseFloat(document.getElementById('Kp').value) || 0;
-            if (val <= 0.01) return;
-            val = Math.round((val - 0.001) * 1000) / 1000;
-            document.getElementById('Kp').value = val.toFixed(3);
-            Kp = val;
-            发送消息给服务器("Kp", Kp);
-        }
-
-        function 增加Ki() {
-            let val = parseFloat(document.getElementById('Ki').value) || 0;
-            val = Math.round((val + 0.001) * 1000) / 1000;
-            document.getElementById('Ki').value = val.toFixed(3);
-            Ki = val;
-            发送消息给服务器("Ki", Ki);
-        }
-
-        function 减少Ki() {
-            let val = parseFloat(document.getElementById('Ki').value) || 0;
-            if (val <= 0) return;
-            val = Math.round((val - 0.001) * 1000) / 1000;
-            document.getElementById('Ki').value = val.toFixed(3);
-            Ki = val;
-            发送消息给服务器("Ki", Ki);
         }
 
         function 增加优先锁定数值() {
@@ -3573,7 +3466,7 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
                 const row = input.closest('.control-row, .param-row');
                 const label = row?.querySelector('.control-label, .param-label');
                 if (label) input.setAttribute('aria-label', label.textContent.replace(/:$/, '').trim());
-                if (input.type === 'text') input.inputMode = ['移动系数', 'Kp', 'Ki'].includes(input.id) ? 'decimal' : 'numeric';
+                if (input.type === 'text') input.inputMode = input.id === '移动系数' ? 'decimal' : 'numeric';
             });
             // These category fields previously only submitted via +/−; direct entry must
             // update the same globals so the next button click continues from that value.
@@ -3595,6 +3488,14 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
             document.querySelectorAll('.btn-group button').forEach(button => {
                 const input = button.closest('.control-row, .param-row')?.querySelector('input');
                 if (input) button.setAttribute('aria-label', (button.textContent.trim() === '+' ? '增加' : '减少') + input.id);
+            });
+        }
+
+        function initSpeedCompensation() {
+            document.getElementById('移动速度补偿').addEventListener('input', function() {
+                const value = Math.min(Number(this.max), Math.max(Number(this.min), Math.round(Number(this.value))));
+                document.getElementById('移动速度补偿显示').textContent = String(value);
+                发送消息给服务器('移动速度补偿', value);
             });
         }
 
@@ -3674,7 +3575,7 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
             document.getElementById('移动系数').addEventListener('input', function() {
                 let val = parseFloat(this.value);
                 if (isNaN(val)) val = 0;
-                移动系数 = parseFloat(val.toFixed(3));
+                移动系数 = Math.min(10, Math.max(0, parseFloat(val.toFixed(3))));
                 发送消息给服务器("移动系数", 移动系数);
             });
             document.getElementById('自瞄主键').addEventListener('change', function() {

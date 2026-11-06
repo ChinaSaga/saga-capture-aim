@@ -6,8 +6,8 @@
 struct RuntimeSettings {
     float conf = .55f, nms = .25f, crossConf = .20f;
     int crossClass = 5;
-    int moveMode = 0, moveDelay = 5;
-    float moveFactor = .618f, kp = 0, ki = 0;
+    int moveDelay = 5;
+    float moveFactor = .618f; // Group 1 value, also used by the manual move test.
     int lockFreq = 100, delayFreq = 200;
     int crossBind[4]{}, triggerKey[4]{};
     int shotInterval = 80, adsTime = 350;

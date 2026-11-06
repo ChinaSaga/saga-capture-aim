@@ -11,6 +11,8 @@ struct Profile {
     int prioLockPos = 50, secondLockPos = 50, thirdLockPos = 50;
     int lockRange = 256, centerRange = 50;
     bool moveInBox = false;
+    float moveFactor = .618f;
+    int speedCompensation = 0; // 0..100, zero preserves coefficient-only movement.
     bool operator==(const Profile&) const = default;
 };
 struct Config {

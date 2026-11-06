@@ -136,7 +136,8 @@ def main():
             panel.write_bytes(expected)
             code, content_type, script = request(args.lan_ip, port, '/config.js')
             assert code == 200 and 'javascript' in content_type
-            assert '"Kp":0' in script.decode('utf-8')
+            assert '"X轴预测提前量":30' in script.decode('utf-8')
+            assert '"Kp"' not in script.decode('utf-8')
             assert request(args.lan_ip, port, '/api', '置信度|0.73')[0] == 201
             assert '"置信度":0.73' in request(args.lan_ip, primary_port, '/config.js')[2].decode('utf-8')
             assert '置信度=0.73' in (directory / '圣人自用.js').read_text(encoding='utf-8')

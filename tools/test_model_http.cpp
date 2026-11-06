@@ -155,6 +155,8 @@ int main() {
         const int values[]={1,2,5,6,3,2,1,70,40,20,240,30};
         for(int group=1;group<=3;++group) {
             const auto prefix=group==1?std::string():std::string("热键")+std::to_string(group)+"_";
+            require(request("/api",ansiToUtf8(prefix+"移动速度补偿|"+std::to_string(group*10))).starts_with("HTTP/1.1 201 "), "Speed compensation POST failed");
+            require(request("/api",ansiToUtf8(prefix+"移动系数|0."+std::to_string(group))).starts_with("HTTP/1.1 201 "), "Coefficient POST failed");
             for(int field=0;field<12;++field)
                 require(request("/api",ansiToUtf8(prefix+names[field]+"|"+std::to_string(values[field]+group))).find("HTTP/1.1 201 ")==0,
                     "Profile field POST failed");
@@ -163,6 +165,9 @@ int main() {
         profiles=g.aimProfiles.config().config;
         for(int group=0;group<3;++group) {
             const auto& p=profiles.profiles[group];const int offset=group+1;
+            require(p.speedCompensation==offset*10, "Compensation leaked between groups");
+            require(std::abs(p.moveFactor-offset*.1f)<.0001f,
+                "Movement and prediction settings leaked between profiles");
             require(p.keys==std::array<int,4>{1+offset,2+offset,5+offset,6+offset}, "Four key bindings leaked between groups");
             require(p.prioLock==3+offset && p.secondLock==2+offset && p.thirdLock==1+offset &&
                 p.prioLockPos==70+offset && p.secondLockPos==40+offset && p.thirdLockPos==20+offset &&
@@ -186,9 +191,37 @@ int main() {
         require(readFileAll(g.cfgPath)==originalConfig,"Invalid request mutated configuration");
         require(request("/api",ansiToUtf8("模型名称|../escape")).starts_with("HTTP/1.1 400 "),"Model path traversal was accepted");
         require(request("/api",ansiToUtf8("移动系数|nan")).starts_with("HTTP/1.1 201 ") && g.settings.snapshot().moveFactor==0,"Nonfinite input reached worker settings");
-        writeFileAll(g.cfgPath,std::string("\xef\xbb\xbf")+ansiToUtf8("移动方式=2\n"));
-        configInit();configSyncAll(false);
-        require(g.settings.snapshot().moveMode==2,"UTF-8 BOM hid the first configuration key");
+        writeFileAll(g.cfgPath,std::string("\xef\xbb\xbf")+ansiToUtf8("移动系数=0.42\n移动方式=2\nKp=0.1\nKi=0.01\n"));
+        configInit();configSyncAll(true);
+        for(const auto& p:g.aimProfiles.config().config.profiles)
+            require(p.moveFactor==.42f,
+                "Legacy PID / BOM migration lost coefficient or prediction defaults");
+        const auto migrated=request("/config.js");
+        require(migrated.find("Kp")==std::string::npos && migrated.find("Ki")==std::string::npos &&
+            migrated.find(ansiToUtf8("移动方式"))==std::string::npos, "Removed PID controls were republished");
+        require(readFileAll(g.cfgPath).find("Kp=")==std::string::npos, "Removed PID values persisted");
+        require(request("/api",ansiToUtf8("移动方式|2")).starts_with("HTTP/1.1 400 "), "Old browser re-enabled a removed mode");
+        request("/api",ansiToUtf8("热键2_移动系数|-1"));
+        require(g.aimProfiles.config().config.profiles[1].moveFactor==0,"Movement bounds failed");
+        require(g.aimProfiles.config().config.profiles[0].speedCompensation==0,"Legacy compensation must default off");
+        request("/api",ansiToUtf8("移动速度补偿|9999"));
+        require(g.aimProfiles.config().config.profiles[0].speedCompensation==100,"Compensation upper bound failed");
+        for(const auto value:{"-1","nan","inf","2.5"}) {
+            request("/api",ansiToUtf8(std::string("移动速度补偿|")+value));
+            require(g.aimProfiles.config().config.profiles[0].speedCompensation==0,"Invalid compensation accepted");
+        }
+        writeFileAll(g.cfgPath,ansiToUtf8("移动系数=0.42\n预测连续次数=99\n预测提前量=45\nX轴预测提前量=50\nY轴预测提前量=60\n热键2_X轴预测提前量=30\n热键3_Y轴预测提前量=80\n卡尔曼预测=true\n卡尔曼预测时间=50\n热键2_卡尔曼响应强度=80\n热键3_卡尔曼最大提前量=100\n"));
+        configInit();configSyncAll(true);
+        for(const auto prefix:{"","热键2_","热键3_"})
+            for(const auto name:{"预测连续次数","预测提前量","X轴预测提前量","Y轴预测提前量",
+                "卡尔曼预测","卡尔曼预测时间","卡尔曼响应强度","卡尔曼平滑强度","卡尔曼最大提前量"}) {
+                const std::string key=std::string(prefix)+name;
+                require(!g_webConfig.contains(key),"Retired setting republished");
+                require(request("/api",ansiToUtf8(key+"|50")).starts_with("HTTP/1.1 400 "),"Retired prediction accepted");
+            }
+        require(readFileAll(g.cfgPath).find(ansiToUtf8("卡尔曼"))==std::string::npos &&
+            readFileAll(g.cfgPath).find(ansiToUtf8("X轴预测提前量="))==std::string::npos &&
+            readFileAll(g.cfgPath).find(ansiToUtf8("预测连续次数="))==std::string::npos,"Retired prediction persisted");
         const std::string gbkTrailBackslash("\x81\x5c",2);
         require(jsonEscape(gbkTrailBackslash)==gbkTrailBackslash,"GBK trail byte was mistaken for a JSON escape");
         require(request("/api",ansiToUtf8("不存在的参数|1")).starts_with("HTTP/1.1 400 "),"Unknown keys were accepted");
@@ -196,6 +229,14 @@ int main() {
         const auto live=request("/api");
         require(live.find(ansiToUtf8("\"自适应截图\":true"))!=std::string::npos &&
             live.find(ansiToUtf8("\"截图范围\":192"))!=std::string::npos,"Live crop state missing from existing poll response");
+        for (auto state : {model_status::State::Idle, model_status::State::Loading,
+            model_status::State::Ready, model_status::State::Failed}) {
+            g.modelStatus = state;
+            const auto expected = model_files::utf8(L"\"模型加载状态\":\"") +
+                model_files::utf8(model_status::label(state)) + "\"";
+            require(request("/api").find(expected)!=std::string::npos,
+                "Model status must reach the browser as valid UTF-8");
+        }
         std::filesystem::remove(directory/L"圣人视觉识别系统.html");
         require(request("/models.json?engine=3").find("HTTP/1.1 404 ")==0,"Missing panel protection broken");
         require(request("/model-catalog.json").find("HTTP/1.1 404 ")==0,"Catalog missing-panel protection broken");

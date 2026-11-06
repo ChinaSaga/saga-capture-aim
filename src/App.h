@@ -27,6 +27,7 @@
 #include "FilePaths.h"
 #include "AimProfiles.h"
 #include "RuntimeSettings.h"
+#include "ModelStatus.h"
 
 
 // ============================================================================
@@ -40,6 +41,7 @@ struct SRect
 // 易语言 锁定目标类
 struct LockTarget
 {
+    int    category = 0;
     int    lockX = 0;          // 锁定位置x
     int    lockY = 0;          // 锁定位置y
     double normRatio = 0;      // 归一化比例
@@ -70,6 +72,8 @@ struct AppState
     std::uint64_t moveEpoch = 0; // Protected by g_moveLock.
     long long moveFrameTime = 0; // Protected by g_moveLock.
     std::atomic<std::uint64_t> moveProfileToken{0};
+    std::atomic<std::uint64_t> moveDispatchSequence{0}; // Completed consumer batches, not a calibrated camera displacement.
+    std::int64_t moveDispatchedX=0, moveDispatchedY=0; // Command totals, protected by g_moveLock.
     // ---- 运行控制 ----
     std::atomic<bool> running{ false };        // 全_死循环
     std::atomic<bool> inferPaused{ false };    // 切换识别范围期间暂停推理（等新画面到位）
@@ -88,8 +92,10 @@ struct AppState
 
     // ---- 图片 ----
     std::atomic<int>   imgSize{320};                        // 全_图片宽高
+    std::atomic<int>   imgWidth{320};                       // 搜索画面宽度；高度仍为 imgSize
     std::atomic<int>   manualCropSize{320};                 // 单模型手动范围，不随自适应切换
     std::atomic<bool> adaptiveCapture{false};
+    std::atomic<bool> fullScreenSearch{false};              // 最大档横向三块 640；小档保持自适应
     std::atomic<bool> noConvert{false};        // 全_图片无需转换（后台采集初始化会写入）
     std::atomic<bool> showImg{ false };        // 全_是否显示图片
 
@@ -103,6 +109,7 @@ struct AppState
         return modelName;
     }
     std::atomic<int> engine{1};                 // 1=NCNN 2=ONNX 3=TensorRT
+    std::atomic<model_status::State> modelStatus{model_status::State::Idle};
 
     // ---- 锁定类别与位置 ----
     int prioLock = 1, secondLock = 2, thirdLock = 3;              // 整数_优先/其次/再次锁定
@@ -135,6 +142,7 @@ struct AppState
     int  boxCount = 99;                        // 集_数组成员数
     bool canDraw = false;                      // 集_可以画框
     int drawSize = 0; // Protected by g_drawLock, dimensions of the published boxes.
+    int drawWidth = 0;
     int  moveDx = 0, moveDy = 0;               // 集_移动距离x/y
     std::atomic<int> boxDx{0}, boxDy{0};               // 集_画框距离x/y
     std::atomic<int> nearestDist{ 0 };         // 集_最近距离
@@ -196,9 +204,6 @@ bool        writeFileAll(const std::filesystem::path& path, const std::string& d
 void optMain();                                // 进程级：HIGH 优先级 + LFH
 void optThread();                              // 线程级：NORMAL 优先级 + 关动态提升
 
-// 位置式 PID（移动方式 2），对齐凌哥 L_PID控制结构：积分累积 + 上次输出
-struct PidCtx { double integral = 0; double prevOut = 0; };
-double pidPosition(PidCtx& ctx, double err, double kp, double ki);
 
 // ============================================================================
 //  引擎薄封装（原 Saga.dll 的调用层，现在直接调本 EXE 内的引擎函数）
@@ -283,6 +288,7 @@ void httpServerThread();                       // 接口_初始化_HTTP + Handle
 bool uiCreate(HINSTANCE hInst);
 void uiThread();                               // 消息循环
 HWND uiGetHwnd();
+bool uiModelError(const std::wstring& message); // Modal, owned, foreground; true requests a fresh load.
 void uiSetShowImg(bool v);                     // 同步 选择框_实时刷新
 void uiSetComboSizeIndex(int idx);             // 同步 组合框_视频大小
 bool uiInputBox(const char* prompt, const char* title, std::string& text);

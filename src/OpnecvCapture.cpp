@@ -14,6 +14,7 @@
 #include <new>
 #include <utility>
 #include <atomic>
+#include <algorithm>
 #include <malloc.h>
 #include "CapturePixels.h"
 
@@ -344,9 +345,9 @@ public:
         if (!frame_layout(type, width, height, layout_)) return false;
         width_ = width; height_ = height;
         rows_.reset(new Row[640]);
-        cropLayout(crop);
+        cropLayout(crop, crop);
         for (unsigned i = 0; i < kCaptureSlots; ++i) {
-            storage_[i].reset(static_cast<BYTE*>(_aligned_malloc(static_cast<size_t>(54 + 640 * 640 * 3) + 64, 64)), FreeAligned{});
+            storage_[i].reset(static_cast<BYTE*>(_aligned_malloc(static_cast<size_t>(54 + 1920 * 640 * 3) + 64, 64)), FreeAligned{});
             if (!storage_[i]) throw std::bad_alloc();
             // BMP pixels begin at +54; shifting the header by ten bytes aligns
             // the first pixel row to 64 bytes (common crop widths keep it so).
@@ -392,14 +393,14 @@ public:
         kernel_(*this, data, completed + 54);
         // Odd crop widths leave 1-3 BMP padding bytes. A larger crop can reuse
         // a slot written with another stride; never expose those old bytes.
-        const size_t pixelBytes = static_cast<size_t>(crop_) * 3;
+        const size_t pixelBytes = static_cast<size_t>(cropWidth_) * 3;
         if (pixelBytes != stride_) {
             for (int y = 0; y < crop_; ++y)
                 std::memset(completed + 54 + y * stride_ + pixelBytes, 0, stride_ - pixelBytes);
         }
         {
             Lock snapshot(g_snapshotLock);
-            g_captureFrame = {storage_[slot], completed, size_, crop_, crop_, stride_};
+            g_captureFrame = {storage_[slot], completed, size_, cropWidth_, crop_, stride_, frameClockMs()};
             ++g_captureSequence;
         }
         WakeAllConditionVariable(&g_frameReady);
@@ -412,13 +413,19 @@ public:
     }
 
     bool setCrop(int crop) {
+        if (crop <= 0 || crop > 640) return false;
+        return setRegion(crop, crop) == crop;
+    }
+    int setRegion(int width, int height) {
         Lock producer(producerLock_);
-        if (!kernel_ || crop <= 0 || crop > 640 || crop > width_ || crop > height_) return false;
-        if (crop == crop_) return true;
-        cropLayout(crop);
+        if (!kernel_ || width <= 0 || width > 1920 || height <= 0 || height > 640 ||
+            height > height_ || height > width_ || width < height) return 0;
+        width = (std::min)(width, width_);
+        if (height == crop_ && width == cropWidth_) return width;
+        cropLayout(width, height);
         Lock snapshot(g_snapshotLock);
         g_captureFrame = {};
-        return true;
+        return width;
     }
     void clear() {
         Lock producer(producerLock_);
@@ -431,11 +438,12 @@ public:
     }
     void set_event(HANDLE event) { firstFrame_ = event; }
 private:
-    void cropLayout(int crop) {
+    void cropLayout(int cropWidth, int crop) {
         const int width = width_, height = height_;
         crop_ = crop;
-        left_ = (width - crop) / 2;
-        stride_ = (static_cast<size_t>(crop) * 3 + 3) & ~size_t(3);
+        cropWidth_ = cropWidth;
+        left_ = (width - cropWidth) / 2;
+        stride_ = (static_cast<size_t>(cropWidth) * 3 + 3) & ~size_t(3);
         size_ = static_cast<int>(54 + stride_ * crop);
         const int top = (height - crop) / 2;
         unpairedFirst_ = (top & 1) != 0;
@@ -449,7 +457,7 @@ private:
             BITMAPFILEHEADER file = {};
             file.bfType = 0x4d42; file.bfSize = size_; file.bfOffBits = 54;
             BITMAPINFOHEADER info = {};
-            info.biSize = sizeof(info); info.biWidth = crop_; info.biHeight = -crop_;
+            info.biSize = sizeof(info); info.biWidth = cropWidth_; info.biHeight = -crop_;
             info.biPlanes = 1; info.biBitCount = 24;
             info.biSizeImage = static_cast<DWORD>(stride_ * crop_);
             std::memcpy(completed, &file, sizeof(file));
@@ -463,17 +471,17 @@ private:
     static __forceinline void convert_row(const FrameReceiver& state, const BYTE* data, const Row& row, BYTE* destination) {
         const BYTE* source = data + row.luma;
         if constexpr (Format == PixelFormat::Bgr24) {
-            std::memcpy(destination, source + static_cast<size_t>(state.left_) * 3, static_cast<size_t>(state.crop_) * 3);
+            std::memcpy(destination, source + static_cast<size_t>(state.left_) * 3, static_cast<size_t>(state.cropWidth_) * 3);
         } else if constexpr (Format == PixelFormat::Yuy2) {
-            capture_pixels::yuy2_row(source, state.left_, state.crop_, destination, state.layout_.conversion);
+            capture_pixels::yuy2_row(source, state.left_, state.cropWidth_, destination, state.layout_.conversion);
         } else {
             const BYTE* chroma = data + row.chroma;
             if constexpr (Format == PixelFormat::Nv12)
-                capture_pixels::nv12_row(source, chroma, state.left_, state.crop_, destination, state.layout_.conversion);
+                capture_pixels::nv12_row(source, chroma, state.left_, state.cropWidth_, destination, state.layout_.conversion);
             else if constexpr (Format == PixelFormat::Nv21)
-                capture_pixels::nv21_row(source, chroma, state.left_, state.crop_, destination, state.layout_.conversion);
+                capture_pixels::nv21_row(source, chroma, state.left_, state.cropWidth_, destination, state.layout_.conversion);
             else
-                capture_pixels::p010_row(source, chroma, state.left_, state.crop_, destination, state.layout_.conversion);
+                capture_pixels::p010_row(source, chroma, state.left_, state.cropWidth_, destination, state.layout_.conversion);
         }
     }
 
@@ -498,11 +506,11 @@ private:
                 const BYTE* chroma = data + row[y].chroma;
                 BYTE* output1 = destination + state.stride_;
                 if constexpr (Format == PixelFormat::Nv12)
-                    capture_pixels::nv12_two_rows(source0, source1, chroma, state.left_, state.crop_, destination, output1, state.layout_.conversion);
+                    capture_pixels::nv12_two_rows(source0, source1, chroma, state.left_, state.cropWidth_, destination, output1, state.layout_.conversion);
                 else if constexpr (Format == PixelFormat::Nv21)
-                    capture_pixels::nv21_two_rows(source0, source1, chroma, state.left_, state.crop_, destination, output1, state.layout_.conversion);
+                    capture_pixels::nv21_two_rows(source0, source1, chroma, state.left_, state.cropWidth_, destination, output1, state.layout_.conversion);
                 else
-                    capture_pixels::p010_two_rows(source0, source1, chroma, state.left_, state.crop_, destination, output1, state.layout_.conversion);
+                    capture_pixels::p010_two_rows(source0, source1, chroma, state.left_, state.cropWidth_, destination, output1, state.layout_.conversion);
             }
             if (y < state.crop_) convert_row<Format>(state, data, row[y], destination);
         }
@@ -516,7 +524,7 @@ private:
     Kernel kernel_ = nullptr;
     FrameLayout layout_;
     size_t stride_ = 0;
-    int size_ = 0, crop_ = 0, left_ = 0, width_ = 0, height_ = 0;
+    int size_ = 0, crop_ = 0, cropWidth_ = 0, left_ = 0, width_ = 0, height_ = 0;
     bool unpairedFirst_ = false;
 };
 HRESULT set_format(IAMStreamConfig* config, int width, int height, const GUID& subtype, int fps) {
@@ -583,6 +591,7 @@ public:
         stop();
     }
     bool setCrop(int size) { return receiver_.setCrop(size); }
+    int setRegion(int width, int height) { return receiver_.setRegion(width, height); }
     void stop() {
         // Stop streaming before releasing the two frame buffers.
         if (control_) { captureLog("停止旧采集图"); control_->Stop(); }
@@ -798,6 +807,7 @@ const char* saga::setcjk_ex(const char* deviceName, int width, int height, const
 }
 
 bool captureSetCrop(int size) { return g_capture.setCrop(size); }
+int captureSetRegion(int width, int height) { return g_capture.setRegion(width, height); }
 
 bool captureAcquire(CaptureFrame& frame, unsigned long long& sequence, unsigned timeoutMs) {
     Lock snapshot(g_snapshotLock);

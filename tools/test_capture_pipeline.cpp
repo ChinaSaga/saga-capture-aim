@@ -102,21 +102,23 @@ int validate() {
             std::vector<int> crops;
             for (int size=160; size<=640; size+=32) crops.push_back(size);
             for (int size=608; size>=160; size-=32) crops.push_back(size);
-            for (int crop : crops) {
-                if (!receiver.setCrop(crop) || receiver.setCrop(641) || receiver.setCrop(0)) return 9;
+            crops.insert(crops.end(),{1920,160,1920,640});
+            for (int width : crops) {
+                const int crop=(std::min)(width,640);
+                if (receiver.setRegion(width,crop)!=width || receiver.setCrop(641) || receiver.setCrop(0)) return 9;
                 receiver.BufferCB(0, sample.data(), static_cast<long>(sample.size()));
                 CaptureFrame frame;
                 unsigned long long seq = 0;
                 if (!captureAcquire(frame, seq, 0)) return 6;
-                if (frame.width != crop || frame.height != crop || frame.size != 54 + frame.stride*crop) return 10;
+                if (frame.width != width || frame.height != crop || frame.size != 54 + frame.stride*crop) return 10;
                 int headerWidth = 0, headerHeight = 0;
                 std::memcpy(&headerWidth, frame.bmp+18, 4); std::memcpy(&headerHeight, frame.bmp+22, 4);
-                if (headerWidth != crop || headerHeight != -crop) return 11;
+                if (headerWidth != width || headerHeight != -crop) return 11;
                 if (held.owner && std::memcmp(held.bmp,heldBytes.data(),heldBytes.size())) return 12;
                 for (int y = 0; y < crop; ++y) {
                     const BYTE* row = frame.bmp + 54 + y * frame.stride;
-                    for (int x = 0; x < crop; ++x) {
-                        const int sx = (1920 - crop) / 2 + x, sy = (1080 - crop) / 2 + y;
+                    for (int x = 0; x < width; ++x) {
+                        const int sx = (1920 - width) / 2 + x, sy = (1080 - crop) / 2 + y;
                         if (row[x * 3] != static_cast<BYTE>(sx * 3 + sy) ||
                             row[x * 3 + 1] != static_cast<BYTE>(sy * 5 + sx) ||
                             row[x * 3 + 2] != static_cast<BYTE>(sx ^ sy)) {
@@ -135,6 +137,43 @@ int validate() {
     }
     info.bmiHeader.biCompression = BI_RLE8;
     if (receiver.configure(type, 1920, 1080, 320)) return 8;
+    // Exercise every production converter at the wider stride, and clipping
+    // for sources narrower than 1920. Compare all pixels with scalar math.
+    for(int sourceWidth:{1280,1920,2560}) for(DWORD format:{
+        MAKEFOURCC('N','V','1','2'),MAKEFOURCC('N','V','2','1'),
+        MAKEFOURCC('P','0','1','0'),MAKEFOURCC('Y','U','Y','2')}) {
+        const bool ten=format==MAKEFOURCC('P','0','1','0');
+        const bool packed=format==MAKEFOURCC('Y','U','Y','2');
+        const bool swap=format==MAKEFOURCC('N','V','2','1');
+        const int sourceHeight=1082; // Odd top row tests the 4:2:0 peel path.
+        const int pitch=sourceWidth*(ten||packed?2:1);
+        info.bmiHeader.biWidth=sourceWidth;info.bmiHeader.biHeight=sourceHeight;
+        info.bmiHeader.biCompression=format;info.bmiHeader.biBitCount=ten||packed?16:12;
+        info.bmiHeader.biSizeImage=pitch*(packed?sourceHeight:sourceHeight*3/2);
+        type.subtype=MEDIATYPE_Video;type.subtype.Data1=format;
+        sample.resize(info.bmiHeader.biSizeImage);
+        for(auto& byte:sample) byte=static_cast<BYTE>(random());
+        if(!receiver.configure(type,sourceWidth,sourceHeight,320)) return 20;
+        const int width=(std::min)(sourceWidth,1920);
+        if(receiver.setRegion(1920,640)!=width) return 21;
+        receiver.BufferCB(0,sample.data(),static_cast<long>(sample.size()));
+        CaptureFrame frame;unsigned long long seq=0;
+        if(!captureAcquire(frame,seq,0) || frame.width!=width || frame.height!=640) return 22;
+        capture_pixels::Coefficients c;
+        if(ten) { c.yOffset=64;c.uvOffset=512;c.y=19077;c.redV=26149;c.greenU=-6419;c.greenV=-13320;c.blueU=33050; }
+        for(int y=0;y<640;++y) for(int x=0;x<width;++x) {
+            const int sx=(sourceWidth-width)/2+x,sy=(sourceHeight-640)/2+y;
+            const BYTE* row=sample.data()+size_t(sy)*pitch;
+            const BYTE* uv=packed?row+(sx&~1)*2:sample.data()+size_t(sourceHeight+sy/2)*pitch+(sx&~1)*(ten?2:1);
+            const int yy=ten?capture_pixels::detail::p010(row+sx*2):row[sx*(packed?2:1)];
+            const int u=ten?capture_pixels::detail::p010(uv):uv[packed?1:swap?1:0];
+            const int v=ten?capture_pixels::detail::p010(uv+2):uv[packed?3:swap?0:1];
+            BYTE expected[3];capture_pixels::detail::pixel(yy,u,v,expected,c);
+            if(std::memcmp(frame.bmp+54+size_t(y)*frame.stride+x*3,expected,3)) return 23;
+        }
+        if(!receiver.setCrop(160)) return 24;
+        receiver.clear();
+    }
     std::printf("PASS %u full-frame RGB24 cases (standard/driver headers, both orientations, every 32-pixel crop from 160 to 640)\n", rgbCases);
     std::printf("PASS %u scalar-exact planar cases, output sentinels and malformed frame publication checks\n", cases);
     return 0;

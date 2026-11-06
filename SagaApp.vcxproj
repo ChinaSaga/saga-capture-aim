@@ -171,6 +171,9 @@
     <ClInclude Include="src\FrameWait.h" />
     <ClInclude Include="src\App.h" />
     <ClInclude Include="src\AimProfiles.h" />
+    <ClInclude Include="src\CoefficientMove.h" />
+    <ClInclude Include="src\SpeedCompensation.h" />
+    <ClInclude Include="src\TrajectorySteps.h" />
     <ClInclude Include="src\HumanTrajectory.h" />
     <ClInclude Include="src\HumanTrajectoryModel.h" />
     <ClInclude Include="src\Inference.h" />
@@ -203,6 +206,8 @@
     <ClInclude Include="src\RuntimeLog.h" />
     <ClInclude Include="src\ModelFiles.h" />
     <ClInclude Include="src\AdaptiveCapture.h" />
+    <ClInclude Include="src\WideSearch.h" />
+    <ClInclude Include="src\ModelStatus.h" />
     <ClInclude Include="src\ModelPaths.h" />
     <ClInclude Include="src\FilePaths.h" />
     <ClInclude Include="src\FileIO.h" />

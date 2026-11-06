@@ -300,11 +300,19 @@ void boxMove(int x, int y) {
     lastMoveNeedsDelay = false;
     const auto generation = routeGeneration.load();
     std::lock_guard<std::mutex> route(routeMutex);
-    if (generation != routeGeneration.load()) return;
+    if (generation != routeGeneration.load()) {
+        return;
+    }
     auto session = activeCat.load();
-    if (!session) { saga::makcuMove(x, y); lastMoveNeedsDelay = true; return; }
-    if (!session->online || x < -32768 || x > 32767 || y < -32768 || y > 32767) return;
-    if (session->device.mouseMove(static_cast<int16_t>(x), static_cast<int16_t>(y)) != cat::ErrorCode::SUCCESS) session->online = false;
+    if (!session) {
+        const bool accepted=saga::makcuMove(x,y)!=0;lastMoveNeedsDelay=true;
+        return;
+    }
+    if (!session->online || x < -32768 || x > 32767 || y < -32768 || y > 32767) {
+        return;
+    }
+    const bool accepted=session->device.mouseMove(static_cast<int16_t>(x),static_cast<int16_t>(y))==cat::ErrorCode::SUCCESS;
+    if(!accepted) session->online=false;
 }
 bool boxLastMoveNeedsDelay() { return lastMoveNeedsDelay; }
 void boxDown(int key) {

@@ -30,7 +30,8 @@ int makcuMouseButtonState(int key) {
 int makcuIsConnected() { return makcuOnline; }
 }
 const char* makcuStartupStatus() { return "MAKCU"; }
-void sleepMs(int) { g.running = false; } // Run exactly one production input scan.
+static std::function<void()> nextInputStep;
+void sleepMs(int) { if(nextInputStep) nextInputStep();else g.running=false; }
 void makcuState(int key, bool& state) { state = boxButtonState(key); }
 void RunTimer::start() {}
 double RunTimer::ms() const { return 0; }

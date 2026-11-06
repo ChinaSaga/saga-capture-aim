@@ -5,7 +5,7 @@ const path = require('node:path');
 const page = fs.readFileSync(path.join(__dirname, '../web/圣人视觉识别系统.html'), 'utf8');
 for (const match of page.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) new vm.Script(match[1]);
 const elements = new Map();
-for (const name of ['模型名称', '模型列表状态', '配置读写状态', 'NCNN', 'ONNX', 'TensorRT']) {
+for (const name of ['模型名称', '模型列表状态', '配置读写状态', '模型实时范围', '模型加载状态', 'NCNN', 'ONNX', 'TensorRT']) {
     elements.set(name, { value: '', textContent: '', disabled: false,
         replaceChildren(...children) { this.children = children; this.value = children[0]?.value || ''; },
         parentElement: { classList: { toggle() {} } } });
@@ -20,6 +20,17 @@ const start = page.indexOf('let 模型列表请求序号 =');
 const end = page.indexOf('window.onload =', start);
 assert.ok(start > 0 && end > start);
 vm.runInContext(page.slice(start, end), context);
+for (const [data,expected] of [
+    [{'截图范围':640,'截图宽度':1920,'自适应截图':true},'当前自适应截图：1920 × 640'],
+    [{'截图范围':160,'截图宽度':160,'自适应截图':true},'当前自适应截图：160 × 160'],
+    [{'截图范围':640},'当前截图：640 × 640']
+]) {
+    context.rangeData=data;vm.runInContext('更新实时截图(rangeData)',context);
+    assert.equal(elements.get('模型实时范围').textContent,expected);
+}
+context.rangeData={'模型加载状态':'模型不可用，推理已停止'};
+vm.runInContext('更新实时截图(rangeData)',context);
+assert.equal(elements.get('模型加载状态').textContent,'模型不可用，推理已停止');
 const refresh = () => vm.runInContext('刷新模型列表()', context);
 (async () => {
     response = { ok: false, status: 500, json: async () => ({ error: '拒绝访问 (5)', directory: 'C:\\Users\\用户😀\\Desktop\\模型数据' }) };

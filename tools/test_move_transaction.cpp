@@ -4,6 +4,7 @@
 #include <iostream>
 #pragma comment(lib, "user32.lib")
 AppState g;
+bool uiModelError(const std::wstring&) { std::abort(); }
 CRITICAL_SECTION g_moveLock, g_drawLock;
 CRITICAL_SECTION g_frameLock;
 CONDITION_VARIABLE g_publishedFrameReady = CONDITION_VARIABLE_INIT;
@@ -15,7 +16,6 @@ void optThread() {}
 int truncToInt(double) { std::abort(); }
 int roundToInt(double) { std::abort(); }
 int randInt(int, int) { return 0; }
-double pidPosition(PidCtx&, double, double, double) { std::abort(); }
 bool fileExists(const std::filesystem::path&) { std::abort(); }
 std::string utf8ToAnsi(const std::string&) { std::abort(); }
 int presses = 0, releases = 0;
@@ -23,6 +23,7 @@ void makcuDown(int) { ++presses; }
 void makcuUp(int) { ++releases; }
 bool captureAcquire(CaptureFrame&, unsigned long long&, unsigned) { std::abort(); }
 bool captureSetCrop(int) { std::abort(); }
+int captureSetRegion(int, int) { std::abort(); }
 int ncnnDetectBgr(const unsigned char*, int, int, size_t, float, float, DetectObject*) { std::abort(); }
 int onnxDetectBgr(const unsigned char*, int, int, size_t, float, float, DetectObject*) { std::abort(); }
 int trtDetectBgr(const unsigned char*, int, int, size_t, float, float, DetectObject*) { std::abort(); }
@@ -72,6 +73,8 @@ int main() {
     g.settings.replace(settings); g.aimKeyDown = true;
     publish(); publishDuringMove = true; aimMoveOnce();
     assert(sent == 1 && g.moveDx == 30 && g.moveDy == 40);
+    assert(g.moveDispatchSequence==1);
+    assert(g.moveDispatchedX==10 && g.moveDispatchedY==20);
     publishDuringMove = false; publish(); g_lastFrameTime = 0; aimMoveOnce();
     assert(sent == 1 && g.moveDx == 0);
     g_lastFrameTime = 1000; publish(); ++g.inferenceEpoch; aimMoveOnce(); assert(sent == 1);
@@ -79,6 +82,8 @@ int main() {
     publish(); inferPause(true); inferPause(false); aimMoveOnce(); assert(sent == 1);
     publish(); g.moveProfileToken = 0; aimMoveOnce(); assert(sent == 1);
     publish(); aimMoveOnce(); aimMoveOnce(); assert(sent == 2);
+    assert(g.moveDispatchSequence==2); // Invalid/stale/concurrent consumers never count as tracking.
+    assert(g.moveDispatchedX==20 && g.moveDispatchedY==40);
     g.triggerEpoch = g.inferenceEpoch.load(); g.triggerFire = g.triggerDown = true;
     g.resultFrameTime = 0; g.running = true; triggerThread();
     assert(presses == 0 && releases == 0);

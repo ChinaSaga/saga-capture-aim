@@ -10,8 +10,8 @@ const fixture = {
     优先锁定: 1, 其次锁定: 2, 再次锁定: 3, 优先锁定位置: 50, 其次锁定位置: 50, 再次锁定位置: 50,
     准星类别: 0, 移动系数: .618, 开镜时间: 350, 准星扳机: false, 中心扳机: false, 扳机范围: .66,
     开枪间隔: 80, 框内移动: false, 线程移动: false, 自动截图: false, 吸附常驻: false,
-    自瞄连续按下: true, 移动方式: 1, Kp: .1, Ki: .01, 模型名称: '测试模型', 推理引擎: 1
 };
+fixture.自瞄连续按下=true; fixture.模型名称='测试模型'; fixture.推理引擎=1;
 for (let i = 1; i <= 4; ++i) { fixture['准星绑定' + i] = 0; fixture['扳机热键' + i] = 0; }
 for (let i = 0; i < 10; ++i) for (const prefix of ['type', 'team1type', 'team2type']) fixture[prefix + i] = false;
 async function open(config) {
@@ -24,7 +24,7 @@ async function open(config) {
             window.fetch = async (url, options) => {
                 if (options?.method === 'POST' && !options.body.startsWith('获取所有配置名|')) posts.push(options.body);
                 return {ok: true, json: async () => String(url).includes('model-catalog')
-                    ? {models: [{name: '测试模型', engines: [1]}]} : {}};
+                    ? {models: [{name: '测试模型', engines: [1]}]} : {采集状态:'正在采集',采集帧数:27,采集已保存:2,采集丢弃数:0,采集文件:'sample.jsonl',预测模型状态:'自动视角补偿 · X 已校准，Y 使用系数'}};
             };
         }});
     await new Promise(resolve => dom.window.addEventListener('load', resolve));
@@ -42,6 +42,18 @@ async function open(config) {
     let page = await open(fixture);
     const {dom, posts, get, switchTo, edit} = page;
     assert.equal(posts.length, 0, 'Opening the editor must not write settings');
+    assert.equal(get('tabPID移动'), null);
+    assert.equal(get('Kp'), null);
+    assert.equal(get('Ki'), null);
+    assert.equal(get('预测连续次数'), null);
+    assert.equal(get('panel-prediction'), null);
+    assert.equal(get('X轴预测提前量'), null);
+    assert.equal(get('Y轴预测提前量'), null);
+    assert.equal(get('卡尔曼预测面板'), null, 'Kalman controls removed');
+    assert.equal(get('移动速度补偿精调').value, '0', 'Legacy config defaults compensation off');
+    assert.equal(get('速度补偿面板').querySelectorAll('input[type="range"]').length, 1);
+    assert.equal(get('速度补偿面板').nextElementSibling, get('移动系数面板'), 'Single compensation directly above coefficient');
+    await dom.window.fetchData();
     const rangeOptions = [...get('测距按下').options];
     assert.equal(get('测距按下').value, '0', 'Old config defaults to blank');
     assert.equal(rangeOptions.length, 105, 'Blank plus 104 CAT keyboard keys');
@@ -60,6 +72,10 @@ async function open(config) {
         assert.equal(get('always-on-row').hidden, group !== 1);
         assert.equal(get('hotkey-profile-content').querySelectorAll('select').length, 4);
         const prefix = group === 1 ? '' : '热键' + group + '_';
+        edit('移动速度补偿精调', group*10+1);
+        assert.equal(posts.at(-1), prefix + '移动速度补偿|' + (group*10+1));
+        edit('移动系数', group / 10, 'input');
+        assert.equal(posts.at(-1), prefix + '移动系数|' + group / 10);
         keys.forEach((key, slot) => { edit(key, [1, 2, 5, 6][slot]); assert.equal(posts.at(-1), prefix + key + '|' + [1, 2, 5, 6][slot]); });
         edit('优先锁定', group + 3);
         assert.equal(posts.at(-1), prefix + '优先锁定|' + (group + 3));
@@ -74,6 +90,10 @@ async function open(config) {
     const expectedPosts = posts.length;
     for (let group = 1; group <= 3; ++group) {
         switchTo(group);
+        assert.equal(get('移动系数').value, String(group / 10));
+        assert.equal(get('移动速度补偿精调').value, String(group*10+1));
+        assert.equal(get('补偿配置组显示').textContent, '热键配置 ' + group);
+        assert.equal(get('移动系数组标题').textContent, '移动系数');
         assert.equal(get('优先锁定').value, String(group + 4));
         assert.equal(get('优先锁定位置精调').value, String(group * 20));
         assert.equal(get('优先锁定位置显示').textContent, String(group * 20));
@@ -95,6 +115,8 @@ async function open(config) {
     assert.equal(page.get('测距按下').value, '1057', 'Saved CAT keyboard selection restored');
     for (let group = 1; group <= 3; ++group) {
         page.switchTo(group);
+        assert.equal(page.get('移动系数').value, String(group / 10));
+        assert.equal(page.get('移动速度补偿精调').value, String(group*10+1));
         assert.equal(page.get('优先锁定').value, String(group + 4));
         assert.equal(page.get('优先锁定位置精调').value, String(group * 20));
     }

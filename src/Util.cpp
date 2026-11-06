@@ -3,6 +3,7 @@
 #include "BoxController.h"
 #include "Inference.h"
 #include "RuntimeLog.h"
+#include "TrajectorySteps.h"
 
 #include <algorithm>
 #include <cmath>
@@ -99,27 +100,6 @@ int randInt(int lo, int hi)
 {
     if (hi <= lo) return lo;
     return lo + (int)((double)rand() / ((double)RAND_MAX + 1.0) * (double)(hi - lo + 1));
-}
-
-double pidPosition(PidCtx& ctx, double err, double kp, double ki)
-{
-    // 对齐凌哥 L_运算_PID控制_位置（Kd=0，dt 默认 1，无输出限幅）：
-    //   结构.输出 ＝ 0（含被 L_运算_PID控制_清空 后）→ 视为首次：
-    //     积分累积 = 当前误差，但本次【积分项 = 0】，输出 = Kp·e
-    //   否则：积分累积 += 当前误差 × dt，输出 = Kp·e + Ki·积分累积
-    double out;
-    if (ctx.prevOut == 0.0)
-    {
-        ctx.integral = err;
-        out = kp * err;
-    }
-    else
-    {
-        ctx.integral += err;
-        out = kp * err + ki * ctx.integral;
-    }
-    ctx.prevOut = out;
-    return out;
 }
 
 // ============================================================================
@@ -292,86 +272,15 @@ bool trajReloadIfChanged()
     return loaded;
 }
 
-// out[20] = x1,y1,x2,y2,...,x10,y10 （0 基）
-// mx[0..8] = x(i+2)-x(i+1) ; mx[9] = endX - x10
-static void trajDelta(float endX, float endY, float* arr, float* mx, float* my)
-{
-    for (int j = 0; j < 9; ++j)
-    {
-        mx[j] = arr[2 * (j + 1)] - arr[2 * j];
-        my[j] = arr[2 * (j + 1) + 1] - arr[2 * j + 1];
-    }
-    mx[9] = endX - arr[18];
-    my[9] = endY - arr[19];
+// The learned curve supplies cumulative positions. Preserve every integer
+// count through grouped dispatch instead of rounding and discarding each group.
+static void trajMove(float endX,float endY,int groups) {
+    if(!g_trajReady) return;
+    float curve[20]={};saga::mc_calc(endX,endY,curve);
+    trajectory_steps::emit(endX,endY,curve,groups,
+        [](int x,int y){boxMove(x,y);},
+        []{if(boxLastMoveNeedsDelay())hiSleep(0.885);});
 }
-
-static bool needMove(float ax, float ay)
-{
-    return (ax * ax >= 1.0f) || (ay * ay >= 1.0f);
-}
-
-void trajMove10(float endX, float endY)
-{
-    if (!g_trajReady) return;
-    float arr[20] = {}, mx[10] = {}, my[10] = {};
-    saga::mc_calc(endX, endY, arr);
-    trajDelta(endX, endY, arr, mx, my);
-
-    float ax = mx[0], ay = my[0];
-    if (needMove(ax, ay)) { makcuMove(ax, ay); if (boxLastMoveNeedsDelay()) hiSleep(0.885); ax = 0; ay = 0; }
-    for (int j = 1; j < 10; ++j)
-    {
-        ax += mx[j]; ay += my[j];
-        if (needMove(ax, ay))
-        {
-            makcuMove(ax, ay);
-            if (j != 9 && boxLastMoveNeedsDelay()) hiSleep(0.885);
-            ax = 0; ay = 0;
-        }
-    }
-}
-
-void trajMove5(float endX, float endY)
-{
-    if (!g_trajReady) return;
-    float arr[20] = {}, mx[10] = {}, my[10] = {};
-    saga::mc_calc(endX, endY, arr);
-    trajDelta(endX, endY, arr, mx, my);
-
-    static const int grp[5][2] = { { 0, 1 },{ 2, 3 },{ 4, 5 },{ 6, 7 },{ 8, 9 } };
-    float ax = 0, ay = 0;
-    for (int k = 0; k < 5; ++k)
-    {
-        ax += mx[grp[k][0]] + mx[grp[k][1]];
-        ay += my[grp[k][0]] + my[grp[k][1]];
-        if (needMove(ax, ay))
-        {
-            makcuMove(ax, ay);
-            if (k != 4 && boxLastMoveNeedsDelay()) hiSleep(0.885);
-            ax = 0; ay = 0;
-        }
-    }
-}
-
-void trajMove3(float endX, float endY)
-{
-    if (!g_trajReady) return;
-    float arr[20] = {}, mx[10] = {}, my[10] = {};
-    saga::mc_calc(endX, endY, arr);
-    trajDelta(endX, endY, arr, mx, my);
-
-    // 原版 局_累加像素 跨组保留残差，只有移动后才清零（与 10次/5次 一致）
-    float ax = 0, ay = 0;
-    for (int k = 0; k < 3; ++k)
-    {
-        if (k == 0)      { for (int j = 0; j <= 3; ++j) { ax += mx[j]; ay += my[j]; } }
-        else if (k == 1) { for (int j = 4; j <= 6; ++j) { ax += mx[j]; ay += my[j]; } }
-        else             { for (int j = 7; j <= 9; ++j) { ax += mx[j]; ay += my[j]; } }
-        if (needMove(ax, ay))
-        {
-            makcuMove(ax, ay);
-            if (k != 2 && boxLastMoveNeedsDelay()) hiSleep(0.885);
-            ax = 0; ay = 0;
-        }
-    }
-}
+void trajMove10(float x,float y){trajMove(x,y,10);}
+void trajMove5(float x,float y){trajMove(x,y,5);}
+void trajMove3(float x,float y){trajMove(x,y,3);}

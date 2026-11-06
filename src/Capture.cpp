@@ -135,7 +135,7 @@ void frameThreadUdp()
             LeaveCriticalSection(&g_frameLock);
             WakeAllConditionVariable(&g_publishedFrameReady);
             if (++count >= 100) {
-                if (width > 0 && !g.adaptiveCapture) g.imgSize = width;
+                if (width > 0 && !g.adaptiveCapture && !g.fullScreenSearch) { g.imgSize = width; g.imgWidth = width; }
                 const double ms = t.ms();
                 if (ms > 0) g.frameFps = (int)std::round(100000.0 / ms);
                 t.start(); count = 0;
@@ -171,7 +171,8 @@ bool startCapture(const char* dev, int w, int h, const char* codec, int fps)
         if (largest) {
             g.imgSize = largest;
         }
-    } else g.imgSize = g.manualCropSize.load();
+    } else g.imgSize = g.fullScreenSearch ? 640 : g.manualCropSize.load();
+    g.imgWidth = g.imgSize.load();
     // 引擎（原 Saga.dll）以 UTF-8 匹配设备名，所以设备名回传前要 ansiToUtf8。
     // setcjk_ex 现在自行配平 COM 初始化，并会对设备枚举失败返回错误文本。
     std::string nameUtf8 = ansiToUtf8(name);
@@ -226,7 +227,7 @@ static bool waitFrameAfter(long long sequenceBefore, int timeoutMs)
 
 bool applyCropSize(int size)
 {
-    if (g.adaptiveCapture) return false;
+    if (g.adaptiveCapture || g.fullScreenSearch) return false;
     if (size < 160 || size > 640) return false;
     if (size == g.imgSize) { g.manualCropSize = size; return true; }
 
@@ -234,6 +235,7 @@ bool applyCropSize(int size)
     if (!g.captureRunning.load() || g_lastDev.empty())
     {
         g.imgSize = size;
+        g.imgWidth = size;
         g.manualCropSize = size;
         return true;
     }

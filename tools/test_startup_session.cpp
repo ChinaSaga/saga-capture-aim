@@ -6,6 +6,11 @@ int main() {
     const auto ini=std::filesystem::temp_directory_path()/(L"saga-startup-test-"+std::to_wstring(GetCurrentProcessId())+L".ini");
     assert(!std::filesystem::exists(ini));
     assert(!startup_session::load(ini).valid());
+    assert(!startup_session::loadFullScreenSearch(ini));
+    assert(startup_session::saveFullScreenSearch(ini,true));
+    assert(startup_session::loadFullScreenSearch(ini));
+    assert(startup_session::saveFullScreenSearch(ini,false));
+    assert(!startup_session::loadFullScreenSearch(ini));
     const startup_session::Capture capture{"中文采集卡","NV12",1920,1080,240};
     assert(startup_session::save(ini,capture,416));
     assert(startup_session::savePreview(ini,false));

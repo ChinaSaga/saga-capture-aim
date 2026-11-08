@@ -820,9 +820,15 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
                         <div class="move-mode-panel" id="移动系数面板">
                             <div class="mode-header"><span class="mode-label" id="移动系数组标题">移动系数</span><span class="profile-note" id="补偿配置组显示">热键配置 1</span></div>
                             <div class="mode-body">
-                                <div class="control-row" id="速度补偿面板" title="1–100 连续增强预测追赶；匀速时提前距离稳定，加减速时自动调整。建立预测后允许通过中心停移范围。">
-                                    <div class="control-label multi-label"><div class="main-title">补偿幅度</div><div class="sub-text">0 关 · 100 最强</div></div>
-                                    <div class="slider-container"><input type="range" id="移动速度补偿" min="0" max="100" value="0" step="1"><span class="value-display" id="移动速度补偿显示">0</span></div>
+                                <div id="速度补偿面板" title="X/Y 轴独立调节预测追赶，0 关闭该轴补偿；匀速时提前距离稳定，加减速时自动调整。建立预测后允许通过中心停移范围。">
+                                    <div class="control-row">
+                                        <div class="control-label multi-label"><div class="main-title">X轴补偿幅度</div><div class="sub-text">水平 · 0 关 · 100 最强</div></div>
+                                        <div class="slider-container"><input type="range" id="X轴补偿幅度" min="0" max="100" value="0" step="1"><span class="value-display" id="X轴补偿幅度显示">0</span></div>
+                                    </div>
+                                    <div class="control-row">
+                                        <div class="control-label multi-label"><div class="main-title">Y轴补偿幅度</div><div class="sub-text">垂直 · 0 关 · 100 最强</div></div>
+                                        <div class="slider-container"><input type="range" id="Y轴补偿幅度" min="0" max="100" value="0" step="1"><span class="value-display" id="Y轴补偿幅度显示">0</span></div>
+                                    </div>
                                 </div>
                                 <div class="param-row">
                                     <span class="param-label">系数:</span>
@@ -832,7 +838,7 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
                                         <button type="button" onclick="减少移动系数()">-</button>
                                     </div>
                                 </div>
-                                <p class="profile-note">补偿与系数随热键分别保存，可按倍镜调整。</p>
+                                <p class="profile-note">X/Y 补偿与系数随热键分别保存，可按倍镜调整。</p>
                             </div>
                         </div>
                     </div>
@@ -3025,7 +3031,7 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
         // The editor selection is local UI state; all three groups remain live.
         const 热键配置字段 = ['自瞄主键', '自瞄副键', '自瞄副键2', '自瞄副键3'];
         const 目标配置字段 = ['锁定范围', '中心点范围', '框内移动', '优先锁定', '其次锁定', '再次锁定',
-            '优先锁定位置', '其次锁定位置', '再次锁定位置', '移动系数', '移动速度补偿'];
+            '优先锁定位置', '其次锁定位置', '再次锁定位置', '移动系数', 'X轴补偿幅度', 'Y轴补偿幅度'];
         const 分组配置字段 = new Set([...热键配置字段, ...目标配置字段]);
         let 当前热键配置 = 0;
         let 热键配置组 = [];
@@ -3066,8 +3072,11 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
             const 配置值 = name => ['number', 'boolean', 'string'].includes(typeof window[name]) ? window[name] : undefined;
             热键配置组 = [0, 1, 2].map(group => Object.fromEntries([...分组配置字段].map(name => {
                 const key = 分组参数名(name, group);
+                const axis = name === 'X轴补偿幅度' || name === 'Y轴补偿幅度';
                 const fallback = 热键配置字段.includes(name) && group !== 0 ? 0 : 配置值(name);
-                const value = 配置值(key) ?? fallback ?? ({移动系数: .618, 移动速度补偿: 0}[name] ?? 0);
+                const legacy = axis ? 配置值(分组参数名('移动速度补偿', group)) : undefined;
+                const value = 配置值(key) ?? legacy ?? fallback ?? (axis ? 配置值('移动速度补偿') : undefined)
+                    ?? ({移动系数: .618}[name] ?? 0);
                 return [name, name === '框内移动' ? (value === true || value === 'true') : Number(value)];
             })));
             document.querySelectorAll('[data-hotkey-profile]').forEach(tab => {
@@ -3517,10 +3526,12 @@ select:has(option[value="0"]) option:disabled { color: var(--disabled-text); }
         }
 
         function initSpeedCompensation() {
-            document.getElementById('移动速度补偿').addEventListener('input', function() {
-                const value = Math.min(Number(this.max), Math.max(Number(this.min), Math.round(Number(this.value))));
-                document.getElementById('移动速度补偿显示').textContent = String(value);
-                发送消息给服务器('移动速度补偿', value);
+            ['X轴补偿幅度', 'Y轴补偿幅度'].forEach(name => {
+                document.getElementById(name).addEventListener('input', function() {
+                    const value = Math.min(Number(this.max), Math.max(Number(this.min), Math.round(Number(this.value))));
+                    document.getElementById(name + '显示').textContent = String(value);
+                    发送消息给服务器(name, value);
+                });
             });
         }
 

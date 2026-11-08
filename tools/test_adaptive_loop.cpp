@@ -355,7 +355,7 @@ int main() {
     g.modelName="fixed";g.manualCropSize=320;g.classEnabled[1]=true;
     config.profiles[0].prioLockPos=50;config.profiles[0].secondLockPos=15;
     for(int amplitude:{0,1,15,49,50,51,100}) for(int engine:{1,2,3}) {
-        config.profiles[0].speedCompensation=amplitude;
+        config.profiles[0].speedCompensationX=config.profiles[0].speedCompensationY=amplitude;
         config.profiles[0].centerRange=50;
         g.aimProfiles.replace(config);
         scenario=std::vector<FrameSpec>(90,FrameSpec{0});

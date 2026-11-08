@@ -236,10 +236,18 @@ void configSyncAll(bool save)
         const float factor = std::clamp(config_value::number(hashGet(coefficient)), 0.f, 10.f);
         hashSet(coefficient, std::to_string(factor));
         bufFlt(coefficient.c_str(), profile.moveFactor);
-        const auto compensation = prefix + "移动速度补偿";
-        if (!g_hash.contains(compensation)) hashSet(compensation, std::to_string(profile.speedCompensation));
-        hashSet(compensation, std::to_string(std::clamp(config_value::integer(hashGet(compensation)), 0, 100)));
-        bufInt(compensation.c_str(), profile.speedCompensation);
+        const auto legacyCompensation = prefix + "移动速度补偿";
+        const auto axisCompensation = [&](const char* name, int& value) {
+            const auto key = prefix + name;
+            // Existing per-axis values win; old presets populate only missing axes.
+            if (!g_hash.contains(key)) hashSet(key, g_hash.contains(legacyCompensation)
+                ? hashGet(legacyCompensation) : std::to_string(value));
+            hashSet(key, std::to_string(std::clamp(config_value::integer(hashGet(key)), 0, 100)));
+            bufInt(key.c_str(), value);
+        };
+        axisCompensation("X轴补偿幅度", profile.speedCompensationX);
+        axisCompensation("Y轴补偿幅度", profile.speedCompensationY);
+        g_hash.erase(legacyCompensation);
         // Retired settings are removed on import/save and cannot be posted by an old page.
         for(const auto* name:{"预测连续次数","预测提前量","X轴预测提前量","Y轴预测提前量",
             "卡尔曼预测","卡尔曼预测时间","卡尔曼响应强度","卡尔曼平滑强度","卡尔曼最大提前量"})

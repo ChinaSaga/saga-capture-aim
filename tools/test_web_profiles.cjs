@@ -50,8 +50,10 @@ async function open(config) {
     assert.equal(get('X轴预测提前量'), null);
     assert.equal(get('Y轴预测提前量'), null);
     assert.equal(get('卡尔曼预测面板'), null, 'Kalman controls removed');
-    assert.equal(get('移动速度补偿精调').value, '0', 'Legacy config defaults compensation off');
-    assert.equal(get('速度补偿面板').querySelectorAll('input[type="range"]').length, 1);
+    assert.equal(get('X轴补偿幅度精调').value, '0', 'Missing X compensation defaults off');
+    assert.equal(get('Y轴补偿幅度精调').value, '0', 'Missing Y compensation defaults off');
+    assert.equal(get('移动速度补偿'), null, 'Shared slider replaced');
+    assert.equal(get('速度补偿面板').querySelectorAll('input[type="range"]').length, 2);
     assert.equal(get('速度补偿面板').closest('#移动系数面板'), get('移动系数面板'), 'Compensation inside coefficient panel');
     assert.equal(get('速度补偿面板').nextElementSibling.querySelector('#移动系数'), get('移动系数'), 'Compensation directly above coefficient input');
     await dom.window.fetchData();
@@ -73,8 +75,11 @@ async function open(config) {
         assert.equal(get('always-on-row').hidden, group !== 1);
         assert.equal(get('hotkey-profile-content').querySelectorAll('select').length, 4);
         const prefix = group === 1 ? '' : '热键' + group + '_';
-        edit('移动速度补偿精调', group*10+1);
-        assert.equal(posts.at(-1), prefix + '移动速度补偿|' + (group*10+1));
+        edit('X轴补偿幅度精调', group*10+1);
+        assert.equal(posts.at(-1), prefix + 'X轴补偿幅度|' + (group*10+1));
+        edit('Y轴补偿幅度', group*20+2, 'input');
+        assert.equal(posts.at(-1), prefix + 'Y轴补偿幅度|' + (group*20+2));
+        assert.equal(get('X轴补偿幅度').value, String(group*10+1), 'Y edit must not change X');
         edit('移动系数', group / 10, 'input');
         assert.equal(posts.at(-1), prefix + '移动系数|' + group / 10);
         keys.forEach((key, slot) => { edit(key, [1, 2, 5, 6][slot]); assert.equal(posts.at(-1), prefix + key + '|' + [1, 2, 5, 6][slot]); });
@@ -92,7 +97,8 @@ async function open(config) {
     for (let group = 1; group <= 3; ++group) {
         switchTo(group);
         assert.equal(get('移动系数').value, String(group / 10));
-        assert.equal(get('移动速度补偿精调').value, String(group*10+1));
+        assert.equal(get('X轴补偿幅度精调').value, String(group*10+1));
+        assert.equal(get('Y轴补偿幅度精调').value, String(group*20+2));
         assert.equal(get('补偿配置组显示').textContent, '热键配置 ' + group);
         assert.equal(get('移动系数组标题').textContent, '移动系数');
         assert.equal(get('优先锁定').value, String(group + 4));
@@ -117,11 +123,21 @@ async function open(config) {
     for (let group = 1; group <= 3; ++group) {
         page.switchTo(group);
         assert.equal(page.get('移动系数').value, String(group / 10));
-        assert.equal(page.get('移动速度补偿精调').value, String(group*10+1));
+        assert.equal(page.get('X轴补偿幅度精调').value, String(group*10+1));
+        assert.equal(page.get('Y轴补偿幅度精调').value, String(group*20+2));
         assert.equal(page.get('优先锁定').value, String(group + 4));
         assert.equal(page.get('优先锁定位置精调').value, String(group * 20));
     }
     assert.equal(page.posts.length, 0, 'Reloading persisted profiles must be read-only');
+    page.dom.window.close();
+    page = await open({...fixture, 移动速度补偿:35, X轴补偿幅度:0,
+        热键2_移动速度补偿:65, 热键2_Y轴补偿幅度:80, 热键3_移动速度补偿:20});
+    for (const [index, values] of [[0,[0,35]], [1,[65,80]], [2,[20,20]]]) {
+        page.switchTo(index+1);
+        assert.equal(page.get('X轴补偿幅度精调').value, String(values[0]));
+        assert.equal(page.get('Y轴补偿幅度精调').value, String(values[1]));
+    }
+    assert.equal(page.posts.length, 0, 'Legacy axis migration must not write on navigation');
     page.dom.window.close();
     console.log('PASS full-page initialization, 3 linked pages, independent keys/targets, fine controls, persistence, keyboard tabs and no writes on navigation');
 })().catch(error => {console.error(error); process.exit(1);});

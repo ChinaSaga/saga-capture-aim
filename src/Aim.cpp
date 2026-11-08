@@ -757,7 +757,7 @@ void aimThread(int engineWanted)
             const auto dispatched=g.moveDispatchSequence.load();
             const coefficient_move::Point totals{double(g.moveDispatchedX),double(g.moveDispatchedY)};
             LeaveCriticalSection(&g_moveLock);
-            compensation = motion.update(profile.speedCompensation,
+            compensation = motion.update(profile.speedCompensationX, profile.speedCompensationY,
                 {cand[picked.index].dx,cand[picked.index].dy},lockMem,picked.sameTarget,
                 observationTimeMs,measuredInferCost,dispatched,totals);
         }

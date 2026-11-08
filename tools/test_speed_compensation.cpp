@@ -74,8 +74,47 @@ static LeadMetrics simulateLead(int amplitude,double hz,double delay,double gain
     }
     m.fast/=counts[0];m.slow/=counts[1];m.reversed/=counts[2];m.stopped/=counts[3];return m;
 }
+static void independentAxes() {
+    const auto bounded=[](Point p,int x,int y) {
+        if(!x) assert(p.x==0);
+        if(!y) assert(p.y==0);
+        assert(std::abs(p.x)<=x+1e-8 && std::abs(p.y)<=y+1e-8);
+        if(x && y) assert(std::hypot(p.x/x,p.y/y)<=1.00000001);
+    };
+    for(int x:{0,1,25,50,100}) for(int y:{0,1,25,50,100}) {
+        Controller a,b;
+        for(int i=0;i<400;++i) {
+            const auto extra=a.update(x,y,{20,40},person(20,40),i!=0,1000+i*10.,3,i,{i*60.,i*90.});
+            const auto swapped=b.update(y,x,{40,20},person(40,20),i!=0,1000+i*10.,3,i,{i*90.,i*60.});
+            bounded(extra,x,y);bounded(a.leadOffset(),x,y);bounded(a.feedForward(),x,y);
+            assert(std::abs(extra.x-swapped.y)<1e-8 && std::abs(extra.y-swapped.x)<1e-8);
+            assert(std::abs(a.leadOffset().x-b.leadOffset().y)<1e-8 &&
+                std::abs(a.leadOffset().y-b.leadOffset().x)<1e-8);
+        }
+        if(x)assert(a.leadOffset().x>0);
+        if(y)assert(a.leadOffset().y>0);
+        zero(a.update(0,0,{20,40},person(20,40),true,5010,3,401));
+        zero(a.leadOffset());zero(a.feedForward());assert(!a.leading());
+        zero(a.update(x,y,{20,40},person(20,40),true,5020,3,402)); // No stale burst on re-enable.
+    }
+    Controller lowX,highX;
+    for(int i=0;i<400;++i) {
+        const auto low=lowX.update(25,50,{20,20},person(20,20),i!=0,1000+i*10.,3,i,{i*3.,i*3.});
+        const auto high=highX.update(75,50,{20,20},person(20,20),i!=0,1000+i*10.,3,i,{i*3.,i*3.});
+        assert(low.y==high.y && lowX.leadOffset().y==highX.leadOffset().y && lowX.feedForward().y==highX.feedForward().y);
+    }
+    assert(std::abs(highX.leadOffset().x-3*lowX.leadOffset().x)<1e-8);
+    Controller clamped,reference;
+    for(int i=0;i<100;++i) {
+        const auto a=clamped.update(-20,999,{20,40},person(20,40),i!=0,1000+i*10.,3,i,{i*3.,i*3.});
+        const auto b=reference.update(0,100,{20,40},person(20,40),i!=0,1000+i*10.,3,i,{i*3.,i*3.});
+        assert(a.x==b.x && a.y==b.y && clamped.leadOffset().y==reference.leadOffset().y);
+    }
+    std::cout<<"PASS independent X/Y strengths, zero-axis disable, symmetry, bounds, reset and legacy defaults\n";
+}
 int main() {
     std::cout<<std::unitbuf;
+    independentAxes();
     Controller c;Point extra;
     zero(c.update(20,{30,0},person(30),false,1000,3,0));
     zero(c.update(20,{30,0},person(30),true,1010,3,1));

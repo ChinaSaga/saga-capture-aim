@@ -5,7 +5,7 @@
 namespace speed_compensation {
 using Point = coefficient_move::Point;
 
-// One continuous 1..100 strength for catch-up, command-rate feed-forward and
+// Independent continuous X/Y strengths for catch-up, command-rate feed-forward and
 // bounded nominal image lead. Steady tracking speed gives a steady offset;
 // neither elapsed tracking time nor accumulated error extends that distance.
 // Command rate is not calibrated world velocity.
@@ -23,10 +23,17 @@ public:
     Point update(int amplitude, Point error, const aimlock::Memory& person,
                  bool sameTarget, double timestampMs, double inferenceMs,
                  std::uint64_t dispatched, Point commandTotals={}) {
+        return update(amplitude, amplitude, error, person, sameTarget,
+            timestampMs, inferenceMs, dispatched, commandTotals);
+    }
+    Point update(int amplitudeX, int amplitudeY, Point error, const aimlock::Memory& person,
+                 bool sameTarget, double timestampMs, double inferenceMs,
+                 std::uint64_t dispatched, Point commandTotals={}) {
         const Point previousLead=lead_;
         lead_={};feed_={};
-        amplitude = std::clamp(amplitude, 0, 100);
-        if (!amplitude || person.count <= 0 || person.count > 4 ||
+        amplitudeX = std::clamp(amplitudeX, 0, 100);
+        amplitudeY = std::clamp(amplitudeY, 0, 100);
+        if ((!amplitudeX && !amplitudeY) || person.count <= 0 || person.count > 4 ||
             !coefficient_move::finite(error.x) || !coefficient_move::finite(error.y) ||
             !coefficient_move::finite(timestampMs) || !coefficient_move::finite(inferenceMs) || inferenceMs < 0 ||
             !coefficient_move::finite(commandTotals.x) || !coefficient_move::finite(commandTotals.y)) {
@@ -39,10 +46,11 @@ public:
                 reset(); return {};
             }
         }
-        if (!ready_ || !sameTarget || amplitude != amplitude_ ||
+        if (!ready_ || !sameTarget || amplitudeX != amplitudeX_ || amplitudeY != amplitudeY_ ||
             timestampMs < lastTime_ || timestampMs-lastTime_ > 125) {
             reset(); ready_=true; previous_=person; lastTime_=timestampMs;
-            amplitude_=amplitude; lastDispatch_=dispatched; lastTotals_=commandTotals; return {};
+            amplitudeX_=amplitudeX; amplitudeY_=amplitudeY;
+            lastDispatch_=dispatched; lastTotals_=commandTotals; return {};
         }
         const double dt=(timestampMs-lastTime_)*.001;
         if (dt < .0001) return {}; // No duplicate-frame integration.
@@ -82,39 +90,47 @@ public:
         }
         const double horizon=std::clamp(2*period,.008,.08);
         const double commandInterval=std::clamp((std::max)(dt,dispatchPeriod_),.0001,.08);
-        const double strength=amplitude/100.;
+        const double strengthX=amplitudeX/100., strengthY=amplitudeY/100.;
         // A confirmed person's head-only/body-only handover has no shared
         // displacement sample. Keep an existing command-based lead, but do
         // not bootstrap one by subtracting different parts' lock points.
-        if (current>=0 || leaders_[0].active)
+        if (amplitudeX && (current>=0 || leaders_[0].active))
             advance(leaders_[0],error.x,delta.x,commandRate.x,dt,horizon,sawDispatch_);
-        if (current>=0 || leaders_[1].active)
+        if (amplitudeY && (current>=0 || leaders_[1].active))
             advance(leaders_[1],error.y,delta.y,commandRate.y,dt,horizon,sawDispatch_);
         // A fixed time horizon maps a steady tracking rate to a steady image
         // offset. No error-sign reset: the observed point may stay behind us.
-        lead_={leaders_[0].active?leaders_[0].rate*.04*strength:0,
-               leaders_[1].active?leaders_[1].rate*.04*strength:0};
-        feed_={leaders_[0].active?leaders_[0].rate*commandInterval*strength:0,
-               leaders_[1].active?leaders_[1].rate*commandInterval*strength:0};
-        limit(lead_,amplitude);limit(feed_,amplitude);
+        lead_={leaders_[0].active?leaders_[0].rate*.04*strengthX:0,
+               leaders_[1].active?leaders_[1].rate*.04*strengthY:0};
+        feed_={leaders_[0].active?leaders_[0].rate*commandInterval*strengthX:0,
+               leaders_[1].active?leaders_[1].rate*commandInterval*strengthY:0};
+        limit(lead_,amplitudeX,amplitudeY);limit(feed_,amplitudeX,amplitudeY);
         if (current<0 || !sawDispatch_) {axes_[0]={};axes_[1]={};return {};}
         // Catch up to the same predicted point used by the base movement.
         // Crossing the observed point must not reverse the boost while the
         // predicted point is still ahead. Reserve the feed-forward share of
         // tracking speed to avoid counting the same velocity twice.
-        Point result{step(axes_[0],error.x+lead_.x,delta.x+lead_.x-previousLead.x,dt,horizon,commandInterval,amplitude)*(1-strength),
-                     step(axes_[1],error.y+lead_.y,delta.y+lead_.y-previousLead.y,dt,horizon,commandInterval,amplitude)*(1-strength)};
+        Point result{amplitudeX ? step(axes_[0],error.x+lead_.x,delta.x+lead_.x-previousLead.x,dt,horizon,commandInterval,amplitudeX)*(1-strengthX) : 0,
+                     amplitudeY ? step(axes_[1],error.y+lead_.y,delta.y+lead_.y-previousLead.y,dt,horizon,commandInterval,amplitudeY)*(1-strengthY) : 0};
         if (!coefficient_move::finite(result.x) || !coefficient_move::finite(result.y)) {reset();return {};}
-        const double length=std::hypot(result.x,result.y);
-        if (length>amplitude) {result.x*=amplitude/length;result.y*=amplitude/length;}
+        limit(result,amplitudeX,amplitudeY);
         return result;
     }
 
 private:
     struct Leader {double rate=0,trend=0,duration=0,travel=0;int direction=0,samples=0;bool active=false;};
-    static void limit(Point& p,double maximum) {
-        const double length=std::hypot(p.x,p.y);
-        if (length>maximum) {p.x*=maximum/length;p.y*=maximum/length;}
+    static void limit(Point& p,int amplitudeX,int amplitudeY) {
+        if (amplitudeX == amplitudeY) {
+            // Preserve the old circular bound and arithmetic for equal strengths.
+            const double length=std::hypot(p.x,p.y);
+            if (length>amplitudeX) {p.x*=amplitudeX/length;p.y*=amplitudeY/length;}
+            return;
+        }
+        if (!amplitudeX) {p.x=0;p.y=std::clamp(p.y,-double(amplitudeY),double(amplitudeY));return;}
+        if (!amplitudeY) {p.y=0;p.x=std::clamp(p.x,-double(amplitudeX),double(amplitudeX));return;}
+        // Stretch the same radial safety bound to each axis's selected strength.
+        const double length=std::hypot(p.x/amplitudeX,p.y/amplitudeY);
+        if (length>1) {p.x/=length;p.y/=length;}
     }
     static void advance(Leader& state,double error,double delta,double commandRate,
                         double dt,double horizon,bool consumed) {
@@ -182,7 +198,7 @@ private:
         return direction*(std::min)(double(amplitude),state.velocity*commandInterval);
     }
     bool ready_=false;
-    int amplitude_=0;
+    int amplitudeX_=0, amplitudeY_=0;
     double lastTime_=0;
     std::uint64_t lastDispatch_=0;
     bool sawDispatch_=false;

@@ -156,7 +156,8 @@ int main() {
         const int values[]={1,2,5,6,3,2,1,70,40,20,240,30};
         for(int group=1;group<=3;++group) {
             const auto prefix=group==1?std::string():std::string("热键")+std::to_string(group)+"_";
-            require(request("/api",ansiToUtf8(prefix+"移动速度补偿|"+std::to_string(group*10))).starts_with("HTTP/1.1 201 "), "Speed compensation POST failed");
+            require(request("/api",ansiToUtf8(prefix+"X轴补偿幅度|"+std::to_string(group*10))).starts_with("HTTP/1.1 201 "), "X compensation POST failed");
+            require(request("/api",ansiToUtf8(prefix+"Y轴补偿幅度|"+std::to_string(group*20))).starts_with("HTTP/1.1 201 "), "Y compensation POST failed");
             require(request("/api",ansiToUtf8(prefix+"移动系数|0."+std::to_string(group))).starts_with("HTTP/1.1 201 "), "Coefficient POST failed");
             for(int field=0;field<12;++field)
                 require(request("/api",ansiToUtf8(prefix+names[field]+"|"+std::to_string(values[field]+group))).find("HTTP/1.1 201 ")==0,
@@ -166,7 +167,7 @@ int main() {
         profiles=g.aimProfiles.config().config;
         for(int group=0;group<3;++group) {
             const auto& p=profiles.profiles[group];const int offset=group+1;
-            require(p.speedCompensation==offset*10, "Compensation leaked between groups");
+            require(p.speedCompensationX==offset*10 && p.speedCompensationY==offset*20, "Compensation leaked between axes/groups");
             require(std::abs(p.moveFactor-offset*.1f)<.0001f,
                 "Movement and prediction settings leaked between profiles");
             require(p.keys==std::array<int,4>{1+offset,2+offset,5+offset,6+offset}, "Four key bindings leaked between groups");
@@ -216,12 +217,15 @@ int main() {
         require(request("/api",ansiToUtf8("移动方式|2")).starts_with("HTTP/1.1 400 "), "Old browser re-enabled a removed mode");
         request("/api",ansiToUtf8("热键2_移动系数|-1"));
         require(g.aimProfiles.config().config.profiles[1].moveFactor==0,"Movement bounds failed");
-        require(g.aimProfiles.config().config.profiles[0].speedCompensation==0,"Legacy compensation must default off");
-        request("/api",ansiToUtf8("移动速度补偿|9999"));
-        require(g.aimProfiles.config().config.profiles[0].speedCompensation==100,"Compensation upper bound failed");
-        for(const auto value:{"-1","nan","inf","2.5"}) {
-            request("/api",ansiToUtf8(std::string("移动速度补偿|")+value));
-            require(g.aimProfiles.config().config.profiles[0].speedCompensation==0,"Invalid compensation accepted");
+        require(g.aimProfiles.config().config.profiles[0].speedCompensationX==0 &&
+            g.aimProfiles.config().config.profiles[0].speedCompensationY==0,"Legacy compensation must default off");
+        for(const auto axis:{"X轴补偿幅度","Y轴补偿幅度"}) {
+            request("/api",ansiToUtf8(std::string(axis)+"|9999"));
+            require(hashGet(axis)=="100","Compensation upper bound failed");
+            for(const auto value:{"-1","nan","inf","2.5"}) {
+                request("/api",ansiToUtf8(std::string(axis)+"|"+value));
+                require(hashGet(axis)=="0","Invalid compensation accepted");
+            }
         }
         writeFileAll(g.cfgPath,ansiToUtf8("移动系数=0.42\n预测连续次数=99\n预测提前量=45\nX轴预测提前量=50\nY轴预测提前量=60\n热键2_X轴预测提前量=30\n热键3_Y轴预测提前量=80\n卡尔曼预测=true\n卡尔曼预测时间=50\n热键2_卡尔曼响应强度=80\n热键3_卡尔曼最大提前量=100\n"));
         configInit();configSyncAll(true);
@@ -235,6 +239,22 @@ int main() {
         require(readFileAll(g.cfgPath).find(ansiToUtf8("卡尔曼"))==std::string::npos &&
             readFileAll(g.cfgPath).find(ansiToUtf8("X轴预测提前量="))==std::string::npos &&
             readFileAll(g.cfgPath).find(ansiToUtf8("预测连续次数="))==std::string::npos,"Retired prediction persisted");
+        // Named legacy presets migrate each group separately. Explicit axis
+        // values (including zero) take precedence over the old shared value.
+        const auto legacyPreset = g.runDir/L"配置保存"/L"旧幅度.js";
+        writeFileAll(legacyPreset,ansiToUtf8("移动速度补偿=35\nX轴补偿幅度=0\n热键2_移动速度补偿=65\n热键2_Y轴补偿幅度=80\n热键3_移动速度补偿=20\n"));
+        require(request("/api",ansiToUtf8("导入配置|旧幅度")).starts_with("HTTP/1.1 201 "),"Legacy preset import failed");
+        const auto migratedAxes=g.aimProfiles.config().config;
+        require(migratedAxes.profiles[0].speedCompensationX==0 && migratedAxes.profiles[0].speedCompensationY==35 &&
+            migratedAxes.profiles[1].speedCompensationX==65 && migratedAxes.profiles[1].speedCompensationY==80 &&
+            migratedAxes.profiles[2].speedCompensationX==20 && migratedAxes.profiles[2].speedCompensationY==20,
+            "Per-group migration overwrote explicit axes or mixed groups");
+        require(readFileAll(g.cfgPath).find(ansiToUtf8("移动速度补偿="))==std::string::npos,"Shared field persisted after migration");
+        for(const auto prefix:{"","热键2_","热键3_"})
+            require(request("/api",ansiToUtf8(std::string(prefix)+"移动速度补偿|99")).starts_with("HTTP/1.1 400 "),
+                "Stale page must not overwrite both axes");
+        configInit();configSyncAll(false);
+        require(g.aimProfiles.config().config==migratedAxes,"Axis migration did not survive reload");
         const std::string gbkTrailBackslash("\x81\x5c",2);
         require(jsonEscape(gbkTrailBackslash)==gbkTrailBackslash,"GBK trail byte was mistaken for a JSON escape");
         require(request("/api",ansiToUtf8("不存在的参数|1")).starts_with("HTTP/1.1 400 "),"Unknown keys were accepted");

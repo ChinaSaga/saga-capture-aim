@@ -12,7 +12,7 @@ struct Profile {
     int lockRange = 256, centerRange = 50;
     bool moveInBox = false;
     float moveFactor = .618f;
-    int speedCompensation = 0; // 0..100, zero preserves coefficient-only movement.
+    int speedCompensationX = 0, speedCompensationY = 0; // Independent 0..100 strengths.
     bool operator==(const Profile&) const = default;
 };
 struct Config {
